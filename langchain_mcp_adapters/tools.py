@@ -16,10 +16,15 @@ from pydantic import BaseModel, create_model
 NonTextContent = ImageContent | EmbeddedResource
 
 
-def _create_pydantic_model(name: str, json_schema_dict: dict[str, Any]) -> BaseModel:
+def _create_pydantic_model(
+    name: str, json_schema_dict: dict[str, Any], refs: dict[str, dict] | None = None
+) -> BaseModel:
     fields = {}
+    # Store schema definitions for reference resolution
+    refs = refs or json_schema_dict.get("definitions", {})
+
     for prop_name, prop_schema in json_schema_dict["properties"].items():
-        field_type = _get_field_type(prop_name, prop_schema)
+        field_type = _get_field_type(prop_name, prop_schema, refs)
         required = prop_name in json_schema_dict.get("required", [])
         default = ... if required else None
         fields[prop_name] = (field_type, default)
@@ -27,19 +32,30 @@ def _create_pydantic_model(name: str, json_schema_dict: dict[str, Any]) -> BaseM
     return create_model(name, **fields)
 
 
-def _get_field_type(prop_name: str, prop_schema: dict[str, Any]) -> Any:
+def _get_field_type(
+    prop_name: str, prop_schema: dict[str, Any], refs: dict[str, dict]
+) -> Any:
+    # Handle $ref references
+    if "$ref" in prop_schema:
+        ref_path = prop_schema["$ref"]
+        if ref_path.startswith("#/definitions/"):
+            ref_name = ref_path.split("/")[-1]
+            if ref_name in refs:
+                return _create_pydantic_model(ref_name, refs[ref_name], refs)
+        return Any  # Fallback if ref not found
+
     if "type" not in prop_schema:
         return Any
 
     if prop_schema["type"] == "array":
         if "items" in prop_schema:
-            item_type = _get_field_type(prop_name, prop_schema["items"])
+            item_type = _get_field_type(prop_name, prop_schema["items"], refs)
             return list[item_type]
         return list
 
     if prop_schema["type"] == "object":
         if "properties" in prop_schema:
-            return _create_pydantic_model(prop_name, prop_schema)
+            return _create_pydantic_model(prop_name, prop_schema, refs)
         return dict
 
     if prop_schema["type"] == "string" and "enum" in prop_schema:

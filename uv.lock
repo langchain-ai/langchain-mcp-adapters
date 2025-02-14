@@ -246,7 +246,7 @@ wheels = [
 ]
 
 [[package]]
-name = "langgraph-mcp"
+name = "langchain-mcp-adapters"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

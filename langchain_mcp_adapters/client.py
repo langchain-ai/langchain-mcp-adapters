@@ -4,7 +4,7 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_core.tools import StructuredTool
-from langgraph_mcp.tools import load_mcp_tools
+from langchain_mcp_adapters.tools import load_mcp_tools
 
 
 class MultiServerMCPClient:

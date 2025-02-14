@@ -10,7 +10,7 @@ This library provides a lightweight wrapper that makes [Anthropic Model Context 
 ## Installation
 
 ```bash
-pip install langchain-mcp-tools
+pip install langchain-mcp-adapters
 ```
 
 ## Quickstart
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from langgraph_mcp.tools import load_mcp_tools
+from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
 
 from langchain_openai import ChatOpenAI
@@ -100,7 +100,7 @@ if __name__ == "__main__":
 ### Client
 
 ```python
-from langgraph_mcp.client import MultiServerMCPClient
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
 
 from langchain_openai import ChatOpenAI
