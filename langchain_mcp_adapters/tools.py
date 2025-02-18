@@ -1,6 +1,3 @@
-from enum import Enum
-from typing import Any
-
 from mcp.types import (
     Tool as MCPTool,
     CallToolResult,
@@ -10,47 +7,9 @@ from mcp.types import (
 )
 from mcp import ClientSession
 from langchain_core.tools import StructuredTool, ToolException
-from pydantic import BaseModel, create_model
 
 
 NonTextContent = ImageContent | EmbeddedResource
-
-
-def _create_pydantic_model(name: str, json_schema_dict: dict[str, Any]) -> BaseModel:
-    fields = {}
-    for prop_name, prop_schema in json_schema_dict["properties"].items():
-        field_type = _get_field_type(prop_name, prop_schema)
-        required = prop_name in json_schema_dict.get("required", [])
-        default = ... if required else None
-        fields[prop_name] = (field_type, default)
-
-    return create_model(name, **fields)
-
-
-def _get_field_type(prop_name: str, prop_schema: dict[str, Any]) -> Any:
-    if "type" not in prop_schema:
-        return Any
-
-    if prop_schema["type"] == "array":
-        if "items" in prop_schema:
-            item_type = _get_field_type(prop_name, prop_schema["items"])
-            return list[item_type]
-        return list
-
-    if prop_schema["type"] == "object":
-        if "properties" in prop_schema:
-            return _create_pydantic_model(prop_name, prop_schema)
-        return dict
-
-    if prop_schema["type"] == "string" and "enum" in prop_schema:
-        return Enum(prop_name, {str(v): v for v in prop_schema["enum"]})
-
-    return {
-        "string": str,
-        "integer": int,
-        "number": float,
-        "boolean": bool,
-    }.get(prop_schema["type"], str)
 
 
 def _convert_call_tool_result(
@@ -97,7 +56,7 @@ def convert_mcp_tool_to_structured_tool(
     return StructuredTool(
         name=tool.name,
         description=tool.description,
-        args_schema=_create_pydantic_model(tool.name, tool.inputSchema),
+        args_schema=tool.inputSchema,
         coroutine=call_tool,
         response_format="content_and_artifact",
     )
