@@ -1,6 +1,6 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import cast, Literal
+from typing import cast, Literal, Optional, List
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -53,12 +53,34 @@ class MultiServerMCPClient:
         server_tools = await load_mcp_tools(session)
         self.server_name_to_tools[server_name] = server_tools
 
-    def get_tools(self) -> list[BaseTool]:
-        """Get a list of all tools from all connected servers."""
+    def get_tools(
+        self,
+        include_tools: Optional[List[str]] = None,
+        exclude_tools: Optional[List[str]] = None
+    ) -> list[BaseTool]:
+        """
+        Get a filtered list of tools from all connected servers.
+        
+        Args:
+            include_tools: Optional list of tool names to include. If None, all tools are included.
+            exclude_tools: Optional list of tool names to exclude. If None, no tools are excluded.
+        
+        Returns:
+            List of filtered tools
+        """
+                
         all_tools: list[BaseTool] = []
         for server_tools in self.server_name_to_tools.values():
             all_tools.extend(server_tools)
-        return all_tools
+            
+        exclude_set = set(exclude_tools or [])
+        filtered_tools = [
+            tool for tool in all_tools
+            if tool.name not in exclude_set
+            and (include_tools is None or tool.name in include_tools)
+        ]
+        
+        return filtered_tools
 
     async def __aenter__(self) -> "MultiServerMCPClient":
         return self
