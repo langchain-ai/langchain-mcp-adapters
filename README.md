@@ -132,3 +132,29 @@ async with MultiServerMCPClient() as client:
     math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
     weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
+
+### Tool Filtering
+
+When working with multiple MCP servers, you can filter which tools are available to the agent using the `include_tools` and `exclude_tools` parameters:
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from typing import List, Optional
+
+async with MultiServerMCPClient() as client:
+    # Connect to your servers
+    await client.connect_to_server("math", ...)
+    await client.connect_to_server("weather", ...)
+    
+    # Get only specific tools
+    math_tools = client.get_tools(include_tools=["add", "multiply"])
+    
+    # Get all tools except specific ones
+    non_weather_tools = client.get_tools(exclude_tools=["get_weather"])
+    
+    # Create agents with filtered tools
+    math_agent = create_react_agent(model, math_tools)
+    non_weather_agent = create_react_agent(model, non_weather_tools)
+```
+
+Note: If a tool is present in both `include_tools` and `exclude_tools`, it will be excluded as exclusion takes precedence.
