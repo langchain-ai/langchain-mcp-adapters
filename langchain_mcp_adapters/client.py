@@ -1,10 +1,11 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import cast, Literal
+from typing import Literal, cast
 
+from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from langchain_core.tools import BaseTool
+
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 
@@ -36,9 +37,7 @@ class MultiServerMCPClient:
         )
 
         # Create and store the connection
-        stdio_transport = await self.exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
+        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
         session = cast(
             ClientSession,
