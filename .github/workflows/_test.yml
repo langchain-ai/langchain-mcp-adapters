@@ -1,0 +1,42 @@
+name: test
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+        description: "From which folder this pipeline executes"
+      python-version:
+        required: true
+        type: string
+        description: "Python version to use"
+
+env:
+  UV_FROZEN: "true"
+  UV_NO_SYNC: "true"
+
+jobs:
+  build:
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: "make test #${{ inputs.python-version }}"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ inputs.python-version }} + uv
+        uses: "./.github/actions/uv_setup"
+        id: setup-python
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install dependencies
+        shell: bash
+        run: uv sync --group test
+
+      - name: Run core tests
+        shell: bash
+        run: |
+          make test
