@@ -1,0 +1,58 @@
+---
+name: Run CI Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:  # Allows to trigger the workflow manually in GitHub UI
+
+# If another push to the same PR or branch happens while this workflow is still running,
+# cancel the earlier run in favor of the next run.
+#
+# There's no point in testing an outdated version of the code. GitHub only allows
+# a limited number of job runners to be active at the same time, so it's better to cancel
+# pointless jobs early so that more useful jobs can run sooner.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    strategy:
+      matrix:
+        # Only lint on the min and max supported Python versions.
+        # It's extremely unlikely that there's a lint issue on any version in between
+        # that doesn't show up on the min or max versions.
+        #
+        # GitHub rate-limits how many jobs can be running at any one time.
+        # Starting new jobs is also relatively slow,
+        # so linting on fewer versions makes CI faster.
+        python-version:
+          - "3.12"
+    uses:
+      ./.github/workflows/_lint.yml
+    with:
+      working-directory: .
+      python-version: ${{ matrix.python-version }}
+    secrets: inherit
+  test:
+    strategy:
+      matrix:
+        # Only lint on the min and max supported Python versions.
+        # It's extremely unlikely that there's a lint issue on any version in between
+        # that doesn't show up on the min or max versions.
+        #
+        # GitHub rate-limits how many jobs can be running at any one time.
+        # Starting new jobs is also relatively slow,
+        # so linting on fewer versions makes CI faster.
+        python-version:
+          - "3.10"
+          - "3.12"
+    uses:
+      ./.github/workflows/_test.yml
+    with:
+      working-directory: .
+      python-version: ${{ matrix.python-version }}
+    secrets: inherit
+

@@ -1,0 +1,44 @@
+name: lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        required: true
+        type: string
+        description: "From which folder this pipeline executes"
+      python-version:
+        required: true
+        type: string
+        description: "Python version to use"
+
+env:
+  WORKDIR: ${{ inputs.working-directory == '' && '.' || inputs.working-directory }}
+
+  # This env var allows us to get inline annotations when ruff has complaints.
+  RUFF_OUTPUT_FORMAT: github
+
+  UV_FROZEN: "true"
+
+jobs:
+  build:
+    name: "make lint #${{ inputs.python-version }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ inputs.python-version }} + uv
+        uses: "./.github/actions/uv_setup"
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          uv sync --group test
+
+      - name: Analysing the code with our lint
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          make lint
