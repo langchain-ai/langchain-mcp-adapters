@@ -31,6 +31,35 @@ class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
 
     def __init__(self, connections: dict[str, StdioConnection | SSEConnection] = None) -> None:
+        """Initialize a MultiServerMCPClient with MCP servers connections.
+
+        Args:
+            connections: A dictionary mapping server names to connection configurations.
+                Each configuration can be either a StdioConnection or SSEConnection.
+                If None, no initial connections are established.
+
+        Example:
+
+            ```python
+            async with MultiServerMCPClient(
+                {
+                    "math": {
+                        "command": "python",
+                        # Make sure to update to the full absolute path to your math_server.py file
+                        "args": ["/path/to/math_server.py"],
+                        "transport": "stdio",
+                    },
+                    "weather": {
+                        # make sure you start your weather server on port 8000
+                        "url": "http://localhost:8000/sse",
+                        "transport": "sse",
+                    }
+                }
+            ) as client:
+                all_tools = client.get_tools()
+                ...
+            ```
+        """
         self.connections = connections
         self.exit_stack = AsyncExitStack()
         self.sessions: dict[str, ClientSession] = {}
