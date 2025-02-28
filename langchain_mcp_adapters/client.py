@@ -9,6 +9,9 @@ from mcp.client.stdio import stdio_client
 
 from langchain_mcp_adapters.tools import load_mcp_tools
 
+DEFAULT_ENCODING = "utf-8"
+DEFAULT_ENCODING_ERROR_HANDLER = "strict"
+
 
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
@@ -39,37 +42,44 @@ class MultiServerMCPClient:
         self,
         server_name: str,
         *,
-        client_type: Literal["stdio", "sse"] = "stdio",
+        transport: Literal["stdio", "sse"] = "stdio",
         **kwargs,
     ) -> None:
         """Connect to an MCP server using either stdio or SSE.
 
-        This is a generic method that calls either connect_to_stdio_server or connect_to_sse_server
-        based on the provided client_type parameter.
+        This is a generic method that calls either connect_to_server_via_stdio or connect_to_server_via_sse
+        based on the provided transport parameter.
 
         Args:
             server_name: Name to identify this server connection
-            client_type: Type of client to use ("stdio" or "sse"), defaults to "stdio" for backward compatibility
+            transport: Type of transport to use ("stdio" or "sse"), defaults to "stdio"
             **kwargs: Additional arguments to pass to the specific connection method
-                For stdio: command, args, env, encoding, encoding_error_handler
-                For sse: url
 
         Raises:
-            ValueError: If client_type is not recognized
-            ValueError: If required parameters for the specified client_type are missing
+            ValueError: If transport is not recognized
+            ValueError: If required parameters for the specified transport are missing
         """
-        if client_type == "sse":
+        if transport == "sse":
             if "url" not in kwargs:
                 raise ValueError("'url' parameter is required for SSE connection")
-            await self.connect_to_server_via_sse(server_name=server_name, **kwargs)
-        elif client_type == "stdio":
+            await self.connect_to_server_via_sse(server_name, url=kwargs["url"])
+        elif transport == "stdio":
             if "command" not in kwargs:
                 raise ValueError("'command' parameter is required for stdio connection")
             if "args" not in kwargs:
                 raise ValueError("'args' parameter is required for stdio connection")
-            await self.connect_to_server_via_stdio(server_name=server_name, **kwargs)
+            await self.connect_to_server_via_stdio(
+                server_name,
+                command=kwargs["command"],
+                args=kwargs["args"],
+                env=kwargs.get("env"),
+                encoding=kwargs.get("encoding", DEFAULT_ENCODING),
+                encoding_error_handler=kwargs.get(
+                    "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
+                ),
+            )
         else:
-            raise ValueError(f"Unsupported client_type: {client_type}. Must be 'stdio' or 'sse'")
+            raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'")
 
     async def connect_to_server_via_stdio(
         self,
@@ -78,8 +88,10 @@ class MultiServerMCPClient:
         command: str,
         args: list[str],
         env: dict[str, str] | None = None,
-        encoding: str = "utf-8",
-        encoding_error_handler: Literal["strict", "ignore", "replace"] = "strict",
+        encoding: str = DEFAULT_ENCODING,
+        encoding_error_handler: Literal[
+            "strict", "ignore", "replace"
+        ] = DEFAULT_ENCODING_ERROR_HANDLER,
     ) -> None:
         """Connect to a specific MCP server using stdio
 
