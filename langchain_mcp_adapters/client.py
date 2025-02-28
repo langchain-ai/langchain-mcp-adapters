@@ -166,15 +166,23 @@ class MultiServerMCPClient:
         return all_tools
 
     async def __aenter__(self) -> "MultiServerMCPClient":
-        connections = self.connections or {}
-        for server_name, connection in connections.items():
-            connection_dict = connection.copy()
-            transport = connection_dict.pop("transport")
-            if transport == "stdio":
-                await self.connect_to_server_via_stdio(server_name, **connection_dict)
-            elif transport == "sse":
-                await self.connect_to_server_via_sse(server_name, **connection_dict)
-        return self
+        try:
+            connections = self.connections or {}
+            for server_name, connection in connections.items():
+                connection_dict = connection.copy()
+                transport = connection_dict.pop("transport")
+                if transport == "stdio":
+                    await self.connect_to_server_via_stdio(server_name, **connection_dict)
+                elif transport == "sse":
+                    await self.connect_to_server_via_sse(server_name, **connection_dict)
+                else:
+                    raise ValueError(
+                        f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'"
+                    )
+            return self
+        except Exception:
+            await self.exit_stack.aclose()
+            raise
 
     async def __aexit__(
         self,
