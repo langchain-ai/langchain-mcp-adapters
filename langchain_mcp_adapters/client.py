@@ -1,6 +1,6 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import Literal, cast
+from typing import Literal, TypedDict, cast
 
 from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
@@ -13,10 +13,25 @@ DEFAULT_ENCODING = "utf-8"
 DEFAULT_ENCODING_ERROR_HANDLER = "strict"
 
 
+class StdioConnection(TypedDict):
+    transport: Literal["stdio"]
+    command: str
+    args: list[str]
+    env: dict[str, str] | None
+    encoding: str
+    encoding_error_handler: Literal["strict", "ignore", "replace"]
+
+
+class SSEConnection(TypedDict):
+    transport: Literal["sse"]
+    url: str
+
+
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
 
-    def __init__(self) -> None:
+    def __init__(self, connections: dict[str, StdioConnection | SSEConnection] = None) -> None:
+        self.connections = connections
         self.exit_stack = AsyncExitStack()
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
@@ -151,6 +166,14 @@ class MultiServerMCPClient:
         return all_tools
 
     async def __aenter__(self) -> "MultiServerMCPClient":
+        connections = self.connections or {}
+        for server_name, connection in connections.items():
+            connection_dict = connection.copy()
+            transport = connection_dict.pop("transport")
+            if transport == "stdio":
+                await self.connect_to_server_via_stdio(server_name, **connection_dict)
+            elif transport == "sse":
+                await self.connect_to_server_via_sse(server_name, **connection_dict)
         return self
 
     async def __aexit__(
