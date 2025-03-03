@@ -77,7 +77,7 @@ async def test_load_mcp_prompt():
             ]
         )
     )
-    result = await load_mcp_prompt(session, "test_prompt", None)
+    result = await load_mcp_prompt(session, "test_prompt")
     assert len(result) == 2
     assert isinstance(result[0], HumanMessage)
     assert result[0].content == "Hello"
