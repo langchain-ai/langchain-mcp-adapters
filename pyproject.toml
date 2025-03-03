@@ -7,14 +7,9 @@ name = "langchain-mcp-adapters"
 version = "0.0.3"
 description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
 authors = [
-    {name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com "}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "langchain-core>=0.3.36",
-    "mcp>=1.2.1",
-]
 
 [dependency-groups]
 test = [
@@ -22,15 +17,13 @@ test = [
     "ruff>=0.9.4",
     "mypy>=1.8.0",
     "pytest-socket>=0.7.0",
+    "pytest-asyncio>=0.25.0",
     "types-setuptools>=69.0.0",
 ]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q -v"
-testpaths = [
-    "tests",
-]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 
@@ -40,11 +33,6 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
 ]
 ignore = [
   "E501" # line-length
