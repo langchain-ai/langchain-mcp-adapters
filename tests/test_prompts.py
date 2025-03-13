@@ -22,11 +22,12 @@ from langchain_mcp_adapters.prompts import (
     [
         ("assistant", "Hello", AIMessage),
         ("user", "Hello", HumanMessage),
-    ]
+    ],
 )
-def test_convert_mcp_prompt_message_to_langchain_message_with_text_content(role: str, text: str, expected_cls: type):
-    message = PromptMessage(
-        role=role, content=TextContent(type="text", text=text))
+def test_convert_mcp_prompt_message_to_langchain_message_with_text_content(
+    role: str, text: str, expected_cls: type
+):
+    message = PromptMessage(role=role, content=TextContent(type="text", text=text))
     result = convert_mcp_prompt_message_to_langchain_message(message)
     assert isinstance(result, expected_cls)
     assert result.content == text
@@ -50,8 +51,7 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_resource_content(r
 @pytest.mark.parametrize("role", ["assistant", "user"])
 def test_convert_mcp_prompt_message_to_langchain_message_with_image_content(role: str):
     message = PromptMessage(
-        role=role, content=ImageContent(
-            type="image", mimeType="image/png", data="base64data")
+        role=role, content=ImageContent(type="image", mimeType="image/png", data="base64data")
     )
     with pytest.raises(UnsupportedContentError):
         convert_mcp_prompt_message_to_langchain_message(message)
@@ -63,10 +63,8 @@ async def test_load_mcp_prompt():
     session.get_prompt = AsyncMock(
         return_value=AsyncMock(
             messages=[
-                PromptMessage(role="user", content=TextContent(
-                    type="text", text="Hello")),
-                PromptMessage(role="assistant", content=TextContent(
-                    type="text", text="Hi")),
+                PromptMessage(role="user", content=TextContent(type="text", text="Hello")),
+                PromptMessage(role="assistant", content=TextContent(type="text", text="Hi")),
             ]
         )
     )
