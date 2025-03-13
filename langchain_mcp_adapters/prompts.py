@@ -5,18 +5,6 @@ from mcp import ClientSession
 from mcp.types import PromptMessage
 
 
-class UnsupportedContentError(Exception):
-    """Raised when a prompt message contains unsupported content."""
-
-    pass
-
-
-class UnsupportedRoleError(Exception):
-    """Raised when a prompt message contains an unsupported role."""
-
-    pass
-
-
 def convert_mcp_prompt_message_to_langchain_message(
     message: PromptMessage,
 ) -> Union[HumanMessage, AIMessage]:
@@ -34,11 +22,9 @@ def convert_mcp_prompt_message_to_langchain_message(
         elif message.role == "assistant":
             return AIMessage(content=message.content.text)
         else:
-            raise UnsupportedRoleError(f"Unsupported prompt message role: {message.role}")
+            raise ValueError(f"Unsupported prompt message role: {message.role}")
 
-    raise UnsupportedContentError(
-        f"Unsupported prompt message content type: {message.content.type}"
-    )
+    raise ValueError(f"Unsupported prompt message content type: {message.content.type}")
 
 
 async def load_mcp_prompt(

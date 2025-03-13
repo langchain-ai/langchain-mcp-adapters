@@ -11,7 +11,6 @@ from mcp.types import (
 )
 
 from langchain_mcp_adapters.prompts import (
-    UnsupportedContentError,
     convert_mcp_prompt_message_to_langchain_message,
     load_mcp_prompt,
 )
@@ -44,7 +43,7 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_resource_content(r
             ),
         ),
     )
-    with pytest.raises(UnsupportedContentError):
+    with pytest.raises(ValueError):
         convert_mcp_prompt_message_to_langchain_message(message)
 
 
@@ -53,7 +52,7 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_image_content(role
     message = PromptMessage(
         role=role, content=ImageContent(type="image", mimeType="image/png", data="base64data")
     )
-    with pytest.raises(UnsupportedContentError):
+    with pytest.raises(ValueError):
         convert_mcp_prompt_message_to_langchain_message(message)
 
 
