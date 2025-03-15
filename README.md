@@ -98,7 +98,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("Weather")
 
 @mcp.tool()
-async def get_weather(location: str) -> int:
+async def get_weather(location: str) -> str:
     """Get weather for location."""
     return "It's always sunny in New York"
 
@@ -137,4 +137,52 @@ async with MultiServerMCPClient(
     agent = create_react_agent(model, client.get_tools())
     math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
     weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
+```
+
+## Using with LangGraph API Server
+
+> [!TIP]
+> Check out [this guide](https://langchain-ai.github.io/langgraph/tutorials/langgraph-platform/local-server/) on getting started with LangGraph API server.
+
+If you want to run a LangGraph agent that uses MCP tools in a LangGraph API server, you can use the following setup:
+
+```python
+# graph.py
+from contextlib import asynccontextmanager
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-3-5-sonnet-latest")
+
+@asynccontextmanager
+async def make_graph():
+    async with MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python",
+                # Make sure to update to the full absolute path to your math_server.py file
+                "args": ["/path/to/math_server.py"],
+                "transport": "stdio",
+            },
+            "weather": {
+                # make sure you start your weather server on port 8000
+                "url": "http://localhost:8000/sse",
+                "transport": "sse",
+            }
+        }
+    ) as client:
+        agent = create_react_agent(model, client.get_tools())
+        yield agent
+```
+
+In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/reference/cli/#configuration-file) make sure to specify `make_graph` as your graph entrypoint:
+
+```json
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./graph.py:make_graph"
+  }
+}
 ```

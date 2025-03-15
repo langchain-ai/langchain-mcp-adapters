@@ -1,12 +1,14 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, Optional, TypedDict, cast
 
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 
+from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 DEFAULT_ENCODING = "utf-8"
@@ -214,6 +216,13 @@ class MultiServerMCPClient:
         for server_tools in self.server_name_to_tools.values():
             all_tools.extend(server_tools)
         return all_tools
+
+    async def get_prompt(
+        self, server_name: str, prompt_name: str, arguments: Optional[dict[str, Any]]
+    ) -> list[HumanMessage | AIMessage]:
+        """Get a prompt from a given MCP server."""
+        session = self.sessions[server_name]
+        return await load_mcp_prompt(session, prompt_name, arguments)
 
     async def __aenter__(self) -> "MultiServerMCPClient":
         try:
