@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage
 from mcp import ClientSession
@@ -7,7 +7,7 @@ from mcp.types import PromptMessage
 
 def convert_mcp_prompt_message_to_langchain_message(
     message: PromptMessage,
-) -> Union[HumanMessage, AIMessage]:
+) -> HumanMessage | AIMessage:
     """Convert an MCP prompt message to a LangChain message.
 
     Args:
@@ -29,7 +29,7 @@ def convert_mcp_prompt_message_to_langchain_message(
 
 async def load_mcp_prompt(
     session: ClientSession, name: str, arguments: Optional[dict[str, Any]] = None
-) -> list[Union[HumanMessage, AIMessage]]:
+) -> list[HumanMessage | AIMessage]:
     """Load MCP prompt and convert to LangChain messages."""
     response = await session.get_prompt(name, arguments)
     return [

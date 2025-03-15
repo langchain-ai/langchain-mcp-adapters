@@ -216,6 +216,7 @@ class MultiServerMCPClient:
     async def get_prompt(
         self, server_name: str, prompt_name: str, arguments: Optional[dict[str, Any]]
     ) -> list[HumanMessage | AIMessage]:
+        """Get a prompt from a given MCP server."""
         session = self.sessions[server_name]
         return await load_mcp_prompt(session, prompt_name, arguments)
 
