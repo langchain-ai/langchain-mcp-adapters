@@ -216,7 +216,9 @@ class MultiServerMCPClient:
         Args:
             server_name: Name to identify this server connection
             url: URL of the SSE server
-            headers: a dict of headers to send to server
+            headers: HTTP headers to send to the SSE endpoint
+            timeout: HTTP timeout
+            sse_read_timeout: SSE read timeout
         """
         # Create and store the connection
         sse_transport = await self.exit_stack.enter_async_context(
