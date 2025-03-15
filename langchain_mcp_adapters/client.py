@@ -1,6 +1,6 @@
 from contextlib import AsyncExitStack
 from types import TracebackType
-from typing import Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict, cast
 
 from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
@@ -42,6 +42,8 @@ class SSEConnection(TypedDict):
 
     url: str
     """The URL of the SSE endpoint to connect to."""
+    headers: dict[str,Any] | None = None
+    """HTTP headers to send to the sse Endpoint"""
 
 
 class MultiServerMCPClient:
@@ -123,7 +125,7 @@ class MultiServerMCPClient:
         if transport == "sse":
             if "url" not in kwargs:
                 raise ValueError("'url' parameter is required for SSE connection")
-            await self.connect_to_server_via_sse(server_name, url=kwargs["url"])
+            await self.connect_to_server_via_sse(server_name, **kwargs)
         elif transport == "stdio":
             if "command" not in kwargs:
                 raise ValueError("'command' parameter is required for stdio connection")
@@ -187,15 +189,17 @@ class MultiServerMCPClient:
         server_name: str,
         *,
         url: str,
+        headers: dict[str,Any] | None = None
     ) -> None:
         """Connect to a specific MCP server using SSE
 
         Args:
             server_name: Name to identify this server connection
             url: URL of the SSE server
+            headers: a dict of headers to send to server
         """
         # Create and store the connection
-        sse_transport = await self.exit_stack.enter_async_context(sse_client(url))
+        sse_transport = await self.exit_stack.enter_async_context(sse_client(url=url,headers=headers))
         read, write = sse_transport
         session = cast(
             ClientSession,
