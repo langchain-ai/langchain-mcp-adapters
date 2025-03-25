@@ -2,6 +2,7 @@ from contextlib import AsyncExitStack
 from types import TracebackType
 from typing import Any, Literal, Optional, TypedDict, cast
 
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
@@ -9,6 +10,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
+from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 DEFAULT_ENCODING = "utf-8"
@@ -245,6 +247,23 @@ class MultiServerMCPClient:
         """Get a prompt from a given MCP server."""
         session = self.sessions[server_name]
         return await load_mcp_prompt(session, prompt_name, arguments)
+
+    async def get_resources(
+        self,
+        server_name: str,
+        uris: str | list[str] | None = None
+    ) -> list[Document]:
+        """Get resources from a given MCP server.
+
+        Args:
+            server_name: Name of the server to get resources from
+            uris: Optional resource URI or list of URIs to load. If not provided, all resources will be loaded.
+
+        Returns:
+            A list of LangChain Documents
+        """
+        session = self.sessions[server_name]
+        return await load_mcp_resources(session, uris)
 
     async def __aenter__(self) -> "MultiServerMCPClient":
         try:
