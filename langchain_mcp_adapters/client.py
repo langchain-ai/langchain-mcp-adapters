@@ -1,3 +1,4 @@
+import os
 from contextlib import AsyncExitStack
 from types import TracebackType
 from typing import Any, Literal, Optional, TypedDict, cast
@@ -184,6 +185,13 @@ class MultiServerMCPClient:
             encoding: Character encoding
             encoding_error_handler: How to handle encoding errors
         """
+        # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH to be set.
+        # To address this, we automatically inject existing PATH into the `env` value,
+        # if it's not already set.
+        env = env or {}
+        if "PATH" not in env:
+            env["PATH"] = os.environ.get("PATH", "")
+
         server_params = StdioServerParameters(
             command=command,
             args=args,
