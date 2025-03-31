@@ -275,5 +275,4 @@ class MultiServerMCPClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        _, _, _ = exc_type, exc_val, exc_tb
         await self.exit_stack.aclose()
