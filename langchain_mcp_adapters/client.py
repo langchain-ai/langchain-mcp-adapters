@@ -176,6 +176,7 @@ class MultiServerMCPClient:
         encoding_error_handler: Literal[
             "strict", "ignore", "replace"
         ] = DEFAULT_ENCODING_ERROR_HANDLER,
+        session_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Connect to a specific MCP server using stdio
 
@@ -186,6 +187,7 @@ class MultiServerMCPClient:
             env: Environment variables for the command
             encoding: Character encoding
             encoding_error_handler: How to handle encoding errors
+            session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
         # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
         # To address this, we automatically inject existing PATH envvar into the `env` value,
@@ -205,9 +207,10 @@ class MultiServerMCPClient:
         # Create and store the connection
         stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
+        session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write)),
+            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
@@ -220,6 +223,7 @@ class MultiServerMCPClient:
         headers: dict[str, Any] | None = None,
         timeout: float = DEFAULT_HTTP_TIMEOUT,
         sse_read_timeout: float = DEFAULT_SSE_READ_TIMEOUT,
+        session_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Connect to a specific MCP server using SSE
 
@@ -229,15 +233,17 @@ class MultiServerMCPClient:
             headers: HTTP headers to send to the SSE endpoint
             timeout: HTTP timeout
             sse_read_timeout: SSE read timeout
+            session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
         # Create and store the connection
         sse_transport = await self.exit_stack.enter_async_context(
             sse_client(url, headers, timeout, sse_read_timeout)
         )
         read, write = sse_transport
+        session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write)),
+            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
