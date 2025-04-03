@@ -1,5 +1,6 @@
 import os
 from contextlib import AsyncExitStack
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, Optional, TypedDict, cast
 
@@ -12,8 +13,10 @@ from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.tools import load_mcp_tools
 
+EncodingErrorHandler = Literal["strict", "ignore", "replace"]
+
 DEFAULT_ENCODING = "utf-8"
-DEFAULT_ENCODING_ERROR_HANDLER = "strict"
+DEFAULT_ENCODING_ERROR_HANDLER: EncodingErrorHandler = "strict"
 
 DEFAULT_HTTP_TIMEOUT = 5
 DEFAULT_SSE_READ_TIMEOUT = 60 * 5
@@ -31,16 +34,22 @@ class StdioConnection(TypedDict):
     env: dict[str, str] | None
     """The environment to use when spawning the process."""
 
+    cwd: str | Path | None
+    """The working directory to use when spawning the process."""
+
     encoding: str
     """The text encoding used when sending/receiving messages to the server."""
 
-    encoding_error_handler: Literal["strict", "ignore", "replace"]
+    encoding_error_handler: EncodingErrorHandler
     """
     The text encoding error handler.
 
     See https://docs.python.org/3/library/codecs.html#codec-base-classes for
     explanations of possible values
     """
+
+    session_kwargs: dict[str, Any] | None
+    """Additional keyword arguments to pass to the ClientSession"""
 
 
 class SSEConnection(TypedDict):
@@ -57,6 +66,9 @@ class SSEConnection(TypedDict):
 
     sse_read_timeout: float
     """SSE read timeout"""
+
+    session_kwargs: dict[str, Any] | None
+    """Additional keyword arguments to pass to the ClientSession"""
 
 
 class MultiServerMCPClient:
@@ -146,6 +158,7 @@ class MultiServerMCPClient:
                 headers=kwargs.get("headers"),
                 timeout=kwargs.get("timeout", DEFAULT_HTTP_TIMEOUT),
                 sse_read_timeout=kwargs.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
+                session_kwargs=kwargs.get("session_kwargs"),
             )
         elif transport == "stdio":
             if "command" not in kwargs:
@@ -161,6 +174,7 @@ class MultiServerMCPClient:
                 encoding_error_handler=kwargs.get(
                     "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
                 ),
+                session_kwargs=kwargs.get("session_kwargs"),
             )
         else:
             raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'")
@@ -266,18 +280,8 @@ class MultiServerMCPClient:
         try:
             connections = self.connections or {}
             for server_name, connection in connections.items():
-                connection_dict = connection.copy()
-                transport = connection_dict.pop("transport")
-                if transport == "stdio":
-                    # connection_dict is a StdioConnection (with "transport" popped)
-                    await self.connect_to_server_via_stdio(server_name, **connection_dict)  # type: ignore
-                elif transport == "sse":
-                    # connection_dict is a SSEConnection (with "transport" popped)
-                    await self.connect_to_server_via_sse(server_name, **connection_dict)  # type: ignore
-                else:
-                    raise ValueError(
-                        f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'"
-                    )
+                await self.connect_to_server(server_name, **connection)
+
             return self
         except Exception:
             await self.exit_stack.aclose()
