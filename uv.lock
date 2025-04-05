@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.12.4'",
@@ -291,7 +292,7 @@ wheels = [
 
 [[package]]
 name = "langchain-mcp-adapters"
-version = "0.0.5"
+version = "0.0.7"
 source = { editable = "." }
 dependencies = [
     { name = "langchain-core" },
@@ -311,7 +312,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "langchain-core", specifier = ">=0.3.36,<0.4" },
-    { name = "mcp", specifier = ">=1.4.1,<1.5" },
+    { name = "mcp", specifier = ">=1.4.1,<1.7" },
 ]
 
 [package.metadata.requires-dev]

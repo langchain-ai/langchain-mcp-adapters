@@ -1,4 +1,6 @@
+import os
 from contextlib import AsyncExitStack
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, Optional, TypedDict, cast
 
@@ -13,8 +15,10 @@ from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.tools import load_mcp_tools
 
+EncodingErrorHandler = Literal["strict", "ignore", "replace"]
+
 DEFAULT_ENCODING = "utf-8"
-DEFAULT_ENCODING_ERROR_HANDLER = "strict"
+DEFAULT_ENCODING_ERROR_HANDLER: EncodingErrorHandler = "strict"
 
 DEFAULT_HTTP_TIMEOUT = 5
 DEFAULT_SSE_READ_TIMEOUT = 60 * 5
@@ -32,16 +36,22 @@ class StdioConnection(TypedDict):
     env: dict[str, str] | None
     """The environment to use when spawning the process."""
 
+    cwd: str | Path | None
+    """The working directory to use when spawning the process."""
+
     encoding: str
     """The text encoding used when sending/receiving messages to the server."""
 
-    encoding_error_handler: Literal["strict", "ignore", "replace"]
+    encoding_error_handler: EncodingErrorHandler
     """
     The text encoding error handler.
 
     See https://docs.python.org/3/library/codecs.html#codec-base-classes for
     explanations of possible values
     """
+
+    session_kwargs: dict[str, Any] | None
+    """Additional keyword arguments to pass to the ClientSession"""
 
 
 class SSEConnection(TypedDict):
@@ -50,7 +60,7 @@ class SSEConnection(TypedDict):
     url: str
     """The URL of the SSE endpoint to connect to."""
 
-    headers: dict[str, Any] | None = None
+    headers: dict[str, Any] | None
     """HTTP headers to send to the SSE endpoint"""
 
     timeout: float
@@ -59,11 +69,16 @@ class SSEConnection(TypedDict):
     sse_read_timeout: float
     """SSE read timeout"""
 
+    session_kwargs: dict[str, Any] | None
+    """Additional keyword arguments to pass to the ClientSession"""
+
 
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
 
-    def __init__(self, connections: dict[str, StdioConnection | SSEConnection] = None) -> None:
+    def __init__(
+        self, connections: dict[str, StdioConnection | SSEConnection] | None = None
+    ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
         Args:
@@ -93,7 +108,7 @@ class MultiServerMCPClient:
                 ...
             ```
         """
-        self.connections = connections
+        self.connections: dict[str, StdioConnection | SSEConnection] = connections or {}
         self.exit_stack = AsyncExitStack()
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
@@ -145,6 +160,7 @@ class MultiServerMCPClient:
                 headers=kwargs.get("headers"),
                 timeout=kwargs.get("timeout", DEFAULT_HTTP_TIMEOUT),
                 sse_read_timeout=kwargs.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
+                session_kwargs=kwargs.get("session_kwargs"),
             )
         elif transport == "stdio":
             if "command" not in kwargs:
@@ -160,6 +176,7 @@ class MultiServerMCPClient:
                 encoding_error_handler=kwargs.get(
                     "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
                 ),
+                session_kwargs=kwargs.get("session_kwargs"),
             )
         else:
             raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'")
@@ -175,6 +192,7 @@ class MultiServerMCPClient:
         encoding_error_handler: Literal[
             "strict", "ignore", "replace"
         ] = DEFAULT_ENCODING_ERROR_HANDLER,
+        session_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Connect to a specific MCP server using stdio
 
@@ -185,7 +203,15 @@ class MultiServerMCPClient:
             env: Environment variables for the command
             encoding: Character encoding
             encoding_error_handler: How to handle encoding errors
+            session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
+        # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
+        # To address this, we automatically inject existing PATH envvar into the `env` value,
+        # if it's not already set.
+        env = env or {}
+        if "PATH" not in env:
+            env["PATH"] = os.environ.get("PATH", "")
+
         server_params = StdioServerParameters(
             command=command,
             args=args,
@@ -197,9 +223,10 @@ class MultiServerMCPClient:
         # Create and store the connection
         stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
+        session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write)),
+            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
@@ -212,6 +239,7 @@ class MultiServerMCPClient:
         headers: dict[str, Any] | None = None,
         timeout: float = DEFAULT_HTTP_TIMEOUT,
         sse_read_timeout: float = DEFAULT_SSE_READ_TIMEOUT,
+        session_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Connect to a specific MCP server using SSE
 
@@ -221,15 +249,17 @@ class MultiServerMCPClient:
             headers: HTTP headers to send to the SSE endpoint
             timeout: HTTP timeout
             sse_read_timeout: SSE read timeout
+            session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
         # Create and store the connection
         sse_transport = await self.exit_stack.enter_async_context(
             sse_client(url, headers, timeout, sse_read_timeout)
         )
         read, write = sse_transport
+        session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write)),
+            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
@@ -269,16 +299,8 @@ class MultiServerMCPClient:
         try:
             connections = self.connections or {}
             for server_name, connection in connections.items():
-                connection_dict = connection.copy()
-                transport = connection_dict.pop("transport")
-                if transport == "stdio":
-                    await self.connect_to_server_via_stdio(server_name, **connection_dict)
-                elif transport == "sse":
-                    await self.connect_to_server_via_sse(server_name, **connection_dict)
-                else:
-                    raise ValueError(
-                        f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'"
-                    )
+                await self.connect_to_server(server_name, **connection)
+
             return self
         except Exception:
             await self.exit_stack.aclose()
