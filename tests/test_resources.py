@@ -1,7 +1,9 @@
+import base64
 from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.documents import Document
+from langchain_core.documents.base import Blob as LCBlob
 from mcp.types import (
     BlobResourceContents,
     ListResourcesResult,
@@ -35,19 +37,21 @@ def test_convert_mcp_resource_to_langchain_document_with_text():
 
 def test_convert_mcp_resource_to_langchain_document_with_blob():
     uri = "file:///test.png"
+    original_data = b"binary-image-data"
+    base64_blob = base64.b64encode(original_data).decode()
+
     contents = BlobResourceContents(
         uri=uri,
         mimeType="image/png",
-        blob="base64data"
+        blob=base64_blob
     )
 
-    doc = convert_mcp_resource_to_langchain_document(uri, contents)
+    blob = convert_mcp_resource_to_langchain_document(uri, contents)
 
-    assert isinstance(doc, Document)
-    assert doc.page_content == "Binary data of type: image/png"
-    assert doc.metadata["uri"] == uri
-    assert doc.metadata["mime_type"] == "image/png"
-    assert doc.metadata["blob_data"] == "base64data"
+    assert isinstance(blob, LCBlob)
+    assert blob.data == original_data
+    assert blob.mimetype == "image/png"
+    assert blob.metadata["uri"] == uri
 
 
 @pytest.mark.asyncio
@@ -81,6 +85,39 @@ async def test_get_mcp_resource_with_contents():
     assert docs[1].metadata["uri"] == uri
     session.read_resource.assert_called_once_with(uri)
 
+@pytest.mark.asyncio
+async def test_get_mcp_resource_with_text_and_blob():
+    session = AsyncMock()
+    uri = "file:///mixed"
+
+    original_data = b"some-binary-content"
+    base64_blob = base64.b64encode(original_data).decode()
+
+    session.read_resource = AsyncMock(
+        return_value=ReadResourceResult(
+            contents=[
+                TextResourceContents(
+                    uri=uri,
+                    mimeType="text/plain",
+                    text="Hello Text"
+                ),
+                BlobResourceContents(
+                    uri=uri,
+                    mimeType="application/octet-stream",
+                    blob=base64_blob
+                )
+            ]
+        )
+    )
+
+    results = await get_mcp_resource(session, uri)
+
+    assert len(results) == 2
+    assert isinstance(results[0], Document)
+    assert results[0].page_content == "Hello Text"
+    assert isinstance(results[1], LCBlob)
+    assert results[1].data == original_data
+    assert results[1].mimetype == "application/octet-stream"
 
 @pytest.mark.asyncio
 async def test_get_mcp_resource_with_empty_contents():
@@ -238,3 +275,30 @@ async def test_load_mcp_resources_with_error_handling():
     assert docs[0].page_content == "Valid content"
     assert docs[0].metadata["uri"] == uri1
     assert session.read_resource.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_resources_with_blob_content():
+    session = AsyncMock()
+    uri = "file:///with_blob"
+    original_data = b"binary data"
+    base64_blob = base64.b64encode(original_data).decode()
+
+    session.read_resource = AsyncMock(
+        return_value=ReadResourceResult(
+            contents=[
+                BlobResourceContents(
+                    uri=uri,
+                    mimeType="application/octet-stream",
+                    blob=base64_blob
+                )
+            ]
+        )
+    )
+
+    docs = await load_mcp_resources(session, uri)
+
+    assert len(docs) == 1
+    assert isinstance(docs[0], LCBlob)
+    assert docs[0].data == original_data
+    assert docs[0].mimetype == "application/octet-stream"
