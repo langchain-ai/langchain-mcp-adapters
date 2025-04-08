@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
+from mcp.client.websocket import websocket_client
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -71,11 +72,21 @@ class SSEConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
+class WSConnection(TypedDict):
+    transport: Literal["ws"]
+
+    url: str
+    """The URL of the WS endpoint to connect to."""
+
+    session_kwargs: dict[str, Any] | None
+    """Additional keyword arguments to pass to the ClientSession"""
+
+
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
 
     def __init__(
-        self, connections: dict[str, StdioConnection | SSEConnection] | None = None
+        self, connections: dict[str, StdioConnection | SSEConnection | WSConnection] | None = None
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -106,7 +117,9 @@ class MultiServerMCPClient:
                 ...
             ```
         """
-        self.connections: dict[str, StdioConnection | SSEConnection] = connections or {}
+        self.connections: dict[str, StdioConnection | SSEConnection | WSConnection] = (
+            connections or {}
+        )
         self.exit_stack = AsyncExitStack()
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
@@ -132,7 +145,7 @@ class MultiServerMCPClient:
         self,
         server_name: str,
         *,
-        transport: Literal["stdio", "sse"] = "stdio",
+        transport: Literal["stdio", "sse", "ws"] = "stdio",
         **kwargs,
     ) -> None:
         """Connect to an MCP server using either stdio or SSE.
@@ -174,6 +187,14 @@ class MultiServerMCPClient:
                 encoding_error_handler=kwargs.get(
                     "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
                 ),
+                session_kwargs=kwargs.get("session_kwargs"),
+            )
+        elif transport == "ws":
+            if "url" not in kwargs:
+                raise ValueError("'url' parameter is required for WS connection")
+            await self.connect_to_server_via_ws(
+                server_name,
+                url=kwargs["url"],
                 session_kwargs=kwargs.get("session_kwargs"),
             )
         else:
@@ -254,6 +275,24 @@ class MultiServerMCPClient:
             sse_client(url, headers, timeout, sse_read_timeout)
         )
         read, write = sse_transport
+        session_kwargs = session_kwargs or {}
+        session = cast(
+            ClientSession,
+            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+        )
+
+        await self._initialize_session_and_load_tools(server_name, session)
+
+    async def connect_to_server_via_ws(
+        self,
+        server_name: str,
+        *,
+        url: str,
+        session_kwargs: dict[str, Any] | None = None,
+    ):
+        print("connecting to server via websocket")
+        ws_transport = await self.exit_stack.enter_async_context(websocket_client(url))
+        read, write = ws_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
