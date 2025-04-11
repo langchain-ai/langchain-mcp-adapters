@@ -189,7 +189,7 @@ class MultiServerMCPClient:
                 ),
                 session_kwargs=kwargs.get("session_kwargs"),
             )
-        elif transport == "ws":
+        elif transport == "websocket":
             if "url" not in kwargs:
                 raise ValueError("'url' parameter is required for WS connection")
             await self.connect_to_server_via_websocket(
