@@ -75,7 +75,7 @@ class WebsocketConnection(TypedDict):
     transport: Literal["websocket"]
 
     url: str
-    """The URL of the WS endpoint to connect to."""
+    """The URL of the Websocket endpoint to connect to."""
 
     session_kwargs: dict[str, Any] | None
     """Additional keyword arguments to pass to the ClientSession"""
@@ -191,7 +191,7 @@ class MultiServerMCPClient:
             )
         elif transport == "websocket":
             if "url" not in kwargs:
-                raise ValueError("'url' parameter is required for WS connection")
+                raise ValueError("'url' parameter is required for Websocket connection")
             await self.connect_to_server_via_websocket(
                 server_name,
                 url=kwargs["url"],
@@ -290,11 +290,11 @@ class MultiServerMCPClient:
         url: str,
         session_kwargs: dict[str, Any] | None = None,
     ):
-        """Connect to a specific MCP server using WebSockets
+        """Connect to a specific MCP server using Websockets
 
         Args:
             server_name: Name to identify this server connection
-            url: URL of the WebSocket endpoint
+            url: URL of the Websocket endpoint
             session_kwargs: Additional keyword arguments to pass to the ClientSession
 
         Raises:
@@ -305,7 +305,7 @@ class MultiServerMCPClient:
         except ImportError:
             raise ImportError(
                 "Could not import websocket_client. ",
-                "To use WebSocket connections, please install the required dependency with: ",
+                "To use Websocket connections, please install the required dependency with: ",
                 "'pip install mcp[ws]' or 'pip install websockets'",
             ) from None
 

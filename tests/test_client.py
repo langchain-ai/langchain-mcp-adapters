@@ -98,7 +98,10 @@ async def test_multi_server_mcp_client(server, server_port: int):
                 "args": [weather_server_path],
                 "transport": "stdio",
             },
-            "time": {"transport": "websocket", "url": f"ws://127.0.0.1:{server_port}/ws"},
+            "time": {
+                "url": f"ws://127.0.0.1:{server_port}/ws",
+                "transport": "websocket",
+            },
         }
     ) as client:
         # Check that we have tools from both servers
