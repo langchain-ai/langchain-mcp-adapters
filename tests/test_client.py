@@ -1,84 +1,15 @@
-import datetime
-import multiprocessing
 import os
-import socket
-import time
-from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-import uvicorn
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
-from mcp.server.websocket import websocket_server
-from starlette.applications import Starlette
-from starlette.routing import WebSocketRoute
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from tests.servers.time_server import mcp as time_mcp
-
-
-def make_server_app() -> Starlette:
-    server = time_mcp._mcp_server
-
-    async def handle_ws(websocket):
-        async with websocket_server(websocket.scope, websocket.receive, websocket.send) as streams:
-            await server.run(streams[0], streams[1], server.create_initialization_options())
-
-    app = Starlette(
-        routes=[
-            WebSocketRoute("/ws", endpoint=handle_ws),
-        ]
-    )
-
-    return app
-
-
-def run_server(server_port: int) -> None:
-    app = make_server_app()
-    server = uvicorn.Server(
-        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error")
-    )
-    server.run()
-
-    # Give server time to start
-    while not server.started:
-        time.sleep(0.5)
-
-
-@pytest.fixture()
-def server(server_port: int) -> Generator[None, None, None]:
-    proc = multiprocessing.Process(
-        target=run_server, kwargs={"server_port": server_port}, daemon=True
-    )
-    proc.start()
-
-    # Wait for server to be running
-    max_attempts = 20
-    attempt = 0
-
-    while attempt < max_attempts:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect(("127.0.0.1", server_port))
-                break
-        except ConnectionRefusedError:
-            time.sleep(0.1)
-            attempt += 1
-    else:
-        raise RuntimeError(f"Server failed to start after {max_attempts} attempts")
-
-    yield
-
-    # Signal the server to stop
-    proc.kill()
-    proc.join(timeout=2)
-    if proc.is_alive():
-        raise RuntimeError("Server process is still alive after attempting to terminate it")
 
 
 @pytest.mark.asyncio
-async def test_multi_server_mcp_client(server, server_port: int):
+async def test_multi_server_mcp_client(websocket_server, websocket_server_port: int):
     """Test that the MultiServerMCPClient can connect to multiple servers and load tools."""
 
     # Get the absolute path to the server scripts
@@ -99,7 +30,7 @@ async def test_multi_server_mcp_client(server, server_port: int):
                 "transport": "stdio",
             },
             "time": {
-                "url": f"ws://127.0.0.1:{server_port}/ws",
+                "url": f"ws://127.0.0.1:{websocket_server_port}/ws",
                 "transport": "websocket",
             },
         }
@@ -152,17 +83,11 @@ async def test_multi_server_mcp_client(server, server_port: int):
         # Test that we can call a time tool
         time_tool = next(tool for tool in all_tools if tool.name == "get_time")
         result = await time_tool.ainvoke({"args": ""})
-        parsed_time = datetime.datetime.strptime(result, "%H:%M:%S.%f").time()
-        current_time = datetime.datetime.now().time()
-        time_diff = abs(
-            (current_time.hour * 3600 + current_time.minute * 60 + current_time.second)
-            - (parsed_time.hour * 3600 + parsed_time.minute * 60 + parsed_time.second)
-        )
-        assert time_diff < 5
+        assert result == "5:20:00 PM EST"
 
 
 @pytest.mark.asyncio
-async def test_multi_server_connect_methods(server, server_port: int):
+async def test_multi_server_connect_methods(websocket_server, websocket_server_port: int):
     """Test the different connect methods for MultiServerMCPClient."""
 
     # Get the absolute path to the server scripts
@@ -183,7 +108,9 @@ async def test_multi_server_connect_methods(server, server_port: int):
             "weather", command="python", args=[weather_server_path]
         )
 
-        await client.connect_to_server_via_websocket("time", url=f"ws://127.0.0.1:{server_port}/ws")
+        await client.connect_to_server_via_websocket(
+            "time", url=f"ws://127.0.0.1:{websocket_server_port}/ws"
+        )
 
         # Check that we have tools from both servers
         all_tools = client.get_tools()
