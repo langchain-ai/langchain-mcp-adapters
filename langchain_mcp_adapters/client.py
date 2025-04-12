@@ -4,8 +4,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, Optional, TypedDict, cast
 
-from langchain_core.documents import Document
-from langchain_core.documents.base import Blob as LCBlob
+from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
@@ -283,7 +282,7 @@ class MultiServerMCPClient:
         self,
         server_name: str,
         uris: str | list[str] | None = None
-    ) -> list[Document | LCBlob]:
+    ) -> list[Blob]:
         """Get resources from a given MCP server.
 
         Args:
@@ -291,7 +290,7 @@ class MultiServerMCPClient:
             uris: Optional resource URI or list of URIs to load. If not provided, all resources will be loaded.
 
         Returns:
-            A list of LangChain Documents or Blobs
+            A list of LangChain Blobs
         """
         session = self.sessions[server_name]
         return await load_mcp_resources(session, uris)

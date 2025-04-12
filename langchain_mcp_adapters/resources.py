@@ -1,16 +1,15 @@
 import base64
 
-from langchain_core.documents import Document
-from langchain_core.documents.base import Blob as LCBlob
+from langchain_core.documents.base import Blob
 from mcp import ClientSession
 from mcp.types import BlobResourceContents, ResourceContents, TextResourceContents
 
 
-def convert_mcp_resource_to_langchain_document(
+def convert_mcp_resource_to_langchain_blob(
     resource_uri: str,
     contents: ResourceContents,
-) -> Document | LCBlob:
-    """Convert an MCP resource content to a LangChain Document or Blob.
+) -> Blob:
+    """Convert an MCP resource content to a LangChain Blob.
 
     Args:
         resource_uri: URI of the resource
@@ -20,39 +19,32 @@ def convert_mcp_resource_to_langchain_document(
         A LangChain Document for text content, or a Blob for binary content
     """
     if isinstance(contents, TextResourceContents):
-        return Document(
-            page_content=contents.text,
-            metadata={
-                "uri": resource_uri,
-                "mime_type": contents.mimeType,
-            }
-        )
-
+        data = contents.text
     elif isinstance(contents, BlobResourceContents):
-        raw_bytes = base64.b64decode(contents.blob)
+        data = base64.b64decode(contents.blob)
+    else:
+        raise ValueError(f"Unsupported content type for URI {resource_uri}")
 
-        return LCBlob.from_data(
-            data=raw_bytes,
-            mime_type=contents.mimeType,
-            metadata={
-                "uri": resource_uri,
-            }
-        )
-
-    raise ValueError(f"Unsupported content type for URI {resource_uri}")
+    return Blob.from_data(
+        data=data,
+        mime_type=contents.mimeType,
+        metadata={
+            "uri": resource_uri
+        },
+    )
 
 async def get_mcp_resource(
     session: ClientSession,
     uri: str
-) -> list[Document | LCBlob]:
-    """Fetch a single MCP resource and convert it to LangChain Documents or Blobs.
+) -> list[Blob]:
+    """Fetch a single MCP resource and convert it to LangChain Blobs.
 
     Args:
         session: MCP client session
         uri: URI of the resource to fetch
 
     Returns:
-        A list of LangChain Documents or Blobs
+        A list of LangChain Blobs
     """
     contents_result = await session.read_resource(uri)
 
@@ -62,7 +54,7 @@ async def get_mcp_resource(
         return documents
 
     for content in contents_result.contents:
-        doc = convert_mcp_resource_to_langchain_document(uri, content)
+        doc = convert_mcp_resource_to_langchain_blob(uri, content)
         documents.append(doc)
 
     return documents
@@ -71,8 +63,8 @@ async def get_mcp_resource(
 async def load_mcp_resources(
     session: ClientSession,
     uris: str | list[str] | None = None,
-) -> list[Document | LCBlob]:
-    """Load MCP resources and convert them to LangChain Documents or Blobs"""
+) -> list[Blob]:
+    """Load MCP resources and convert them to LangChain Blobs"""
     documents = []
 
     if uris is None:
@@ -88,6 +80,6 @@ async def load_mcp_resources(
             resource_docs = await get_mcp_resource(session, uri)
             documents.extend(resource_docs)
         except Exception as e:
-            print(f"Error fetching resource {uri}: {e}")
+            raise RuntimeError(f"Error fetching resource {uri}") from e
 
     return documents

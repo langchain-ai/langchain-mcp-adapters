@@ -2,24 +2,24 @@ import base64
 from unittest.mock import AsyncMock
 
 import pytest
-from langchain_core.documents import Document
-from langchain_core.documents.base import Blob as LCBlob
+from langchain_core.documents.base import Blob
 from mcp.types import (
     BlobResourceContents,
     ListResourcesResult,
     ReadResourceResult,
     Resource,
+    ResourceContents,
     TextResourceContents,
 )
 
 from langchain_mcp_adapters.resources import (
-    convert_mcp_resource_to_langchain_document,
+    convert_mcp_resource_to_langchain_blob,
     get_mcp_resource,
     load_mcp_resources,
 )
 
 
-def test_convert_mcp_resource_to_langchain_document_with_text():
+def test_convert_mcp_resource_to_langchain_blob_with_text():
     uri = "file:///test.txt"
     contents = TextResourceContents(
         uri=uri,
@@ -27,15 +27,15 @@ def test_convert_mcp_resource_to_langchain_document_with_text():
         text="Hello, world!"
     )
 
-    doc = convert_mcp_resource_to_langchain_document(uri, contents)
+    blob = convert_mcp_resource_to_langchain_blob(uri, contents)
 
-    assert isinstance(doc, Document)
-    assert doc.page_content == "Hello, world!"
-    assert doc.metadata["uri"] == uri
-    assert doc.metadata["mime_type"] == "text/plain"
+    assert isinstance(blob, Blob)
+    assert blob.data == "Hello, world!"
+    assert blob.mimetype == "text/plain"
+    assert blob.metadata["uri"] == uri
 
 
-def test_convert_mcp_resource_to_langchain_document_with_blob():
+def test_convert_mcp_resource_to_langchain_blob():
     uri = "file:///test.png"
     original_data = b"binary-image-data"
     base64_blob = base64.b64encode(original_data).decode()
@@ -46,12 +46,23 @@ def test_convert_mcp_resource_to_langchain_document_with_blob():
         blob=base64_blob
     )
 
-    blob = convert_mcp_resource_to_langchain_document(uri, contents)
+    blob = convert_mcp_resource_to_langchain_blob(uri, contents)
 
-    assert isinstance(blob, LCBlob)
+    assert isinstance(blob, Blob)
     assert blob.data == original_data
     assert blob.mimetype == "image/png"
     assert blob.metadata["uri"] == uri
+
+
+def test_convert_mcp_resource_to_langchain_blob_with_invalid_type():
+    class DummyContent(ResourceContents):
+        pass
+
+    with pytest.raises(ValueError):
+        convert_mcp_resource_to_langchain_blob(
+            "file:///dummy",
+            DummyContent()
+        )
 
 
 @pytest.mark.asyncio
@@ -79,11 +90,10 @@ async def test_get_mcp_resource_with_contents():
     docs = await get_mcp_resource(session, uri)
 
     assert len(docs) == 2
-    assert docs[0].page_content == "Content 1"
-    assert docs[1].page_content == "Content 2"
-    assert docs[0].metadata["uri"] == uri
-    assert docs[1].metadata["uri"] == uri
-    session.read_resource.assert_called_once_with(uri)
+    assert all(isinstance(d, Blob) for d in docs)
+    assert docs[0].data == "Content 1"
+    assert docs[1].data == "Content 2"
+
 
 @pytest.mark.asyncio
 async def test_get_mcp_resource_with_text_and_blob():
@@ -113,11 +123,15 @@ async def test_get_mcp_resource_with_text_and_blob():
     results = await get_mcp_resource(session, uri)
 
     assert len(results) == 2
-    assert isinstance(results[0], Document)
-    assert results[0].page_content == "Hello Text"
-    assert isinstance(results[1], LCBlob)
+
+    assert isinstance(results[0], Blob)
+    assert results[0].data == "Hello Text"
+    assert results[0].mimetype == "text/plain"
+
+    assert isinstance(results[1], Blob)
     assert results[1].data == original_data
     assert results[1].mimetype == "application/octet-stream"
+
 
 @pytest.mark.asyncio
 async def test_get_mcp_resource_with_empty_contents():
@@ -165,12 +179,12 @@ async def test_load_mcp_resources_with_list_of_uris():
     docs = await load_mcp_resources(session, [uri1, uri2])
 
     assert len(docs) == 2
-    assert docs[0].page_content == "Content from test1"
-    assert docs[1].page_content == "Content from test2"
+    assert all(isinstance(d, Blob) for d in docs)
+    assert docs[0].data == "Content from test1"
+    assert docs[1].data == "Content from test2"
     assert docs[0].metadata["uri"] == uri1
     assert docs[1].metadata["uri"] == uri2
     assert session.read_resource.call_count == 2
-
 
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_single_uri_string():
@@ -192,10 +206,10 @@ async def test_load_mcp_resources_with_single_uri_string():
     docs = await load_mcp_resources(session, uri)
 
     assert len(docs) == 1
-    assert docs[0].page_content == "Content from test"
+    assert isinstance(docs[0], Blob)
+    assert docs[0].data == "Content from test"
     assert docs[0].metadata["uri"] == uri
     session.read_resource.assert_called_once_with(uri)
-
 
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_all_resources():
@@ -243,11 +257,10 @@ async def test_load_mcp_resources_with_all_resources():
     docs = await load_mcp_resources(session)
 
     assert len(docs) == 2
-    assert docs[0].page_content == "Content from test1"
-    assert docs[1].page_content == "Content from test2"
+    assert docs[0].data == "Content from test1"
+    assert docs[1].data == "Content from test2"
     assert session.list_resources.called
     assert session.read_resource.call_count == 2
-
 
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_error_handling():
@@ -269,13 +282,10 @@ async def test_load_mcp_resources_with_error_handling():
         Exception("Resource not found")
     ]
 
-    docs = await load_mcp_resources(session, [uri1, uri2])
+    with pytest.raises(RuntimeError) as exc_info:
+        await load_mcp_resources(session, [uri1, uri2])
 
-    assert len(docs) == 1
-    assert docs[0].page_content == "Valid content"
-    assert docs[0].metadata["uri"] == uri1
-    assert session.read_resource.call_count == 2
-
+    assert "Error fetching resource" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_blob_content():
@@ -299,6 +309,6 @@ async def test_load_mcp_resources_with_blob_content():
     docs = await load_mcp_resources(session, uri)
 
     assert len(docs) == 1
-    assert isinstance(docs[0], LCBlob)
+    assert isinstance(docs[0], Blob)
     assert docs[0].data == original_data
     assert docs[0].mimetype == "application/octet-stream"
