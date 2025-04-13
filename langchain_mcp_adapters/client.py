@@ -107,7 +107,7 @@ class MultiServerMCPClient:
             ```
         """
         self.connections: dict[str, StdioConnection | SSEConnection] = connections or {}
-        self.exit_stack = AsyncExitStack()
+        self.exit_stacks =  dict[str, AsyncExitStack] = {}
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
 
@@ -218,14 +218,17 @@ class MultiServerMCPClient:
             encoding_error_handler=encoding_error_handler,
         )
 
+        exit_stack = AsyncExitStack()
         # Create and store the connection
-        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+        stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+            await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
+
+        self.exit_stacks[server_name] = exit_stack
 
         await self._initialize_session_and_load_tools(server_name, session)
 
@@ -249,18 +252,44 @@ class MultiServerMCPClient:
             sse_read_timeout: SSE read timeout
             session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
+        exit_stack = AsyncExitStack()
+
         # Create and store the connection
-        sse_transport = await self.exit_stack.enter_async_context(
+        sse_transport = await exit_stack.enter_async_context(
             sse_client(url, headers, timeout, sse_read_timeout)
         )
         read, write = sse_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+            await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
+        self.exit_stacks[server_name] = exit_stack
+
         await self._initialize_session_and_load_tools(server_name, session)
+
+    async def disconnect_server(
+        self,
+        server_name: str
+    ) -> None:
+        """Disconnect an MCP server using either stdio or SSE.
+
+        Disconnect and release any resource related to the specified server
+
+        Args:
+            server_name: Name to identify this server connection
+
+        """
+        
+        self.sessions.pop(server_name, None)
+        self.server_name_to_tools.pop(server_name, None)
+
+        exit_stack = self.exit_stacks.pop(server_name, None)
+        if exit_stack:
+            await exit_stack.aclose()
+
+        self.connections.pop(server_name, None)
 
     def get_tools(self) -> list[BaseTool]:
         """Get a list of all tools from all connected servers."""
@@ -284,8 +313,9 @@ class MultiServerMCPClient:
 
             return self
         except Exception:
-            await self.exit_stack.aclose()
-            raise
+            for exit_stack in self.exit_stacks.values():
+                await exit_stack.aclose()
+                raise
 
     async def __aexit__(
         self,
@@ -293,4 +323,6 @@ class MultiServerMCPClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        await self.exit_stack.aclose()
+        for exit_stack in self.exit_stacks.values():
+                await exit_stack.aclose()
+                raise
