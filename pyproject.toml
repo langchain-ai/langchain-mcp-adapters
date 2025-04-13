@@ -22,7 +22,7 @@ test = [
     "ruff>=0.9.4",
     "mypy>=1.8.0",
     "pytest-socket>=0.7.0",
-    "pytest-asyncio>=0.25.0",
+    "pytest-asyncio>=0.26.0",
     "types-setuptools>=69.0.0",
 ]
 
@@ -32,6 +32,7 @@ addopts = "-ra -q -v"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100

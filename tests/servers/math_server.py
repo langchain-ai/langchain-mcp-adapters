@@ -16,13 +16,13 @@ def multiply(a: int, b: int) -> int:
 
 
 @mcp.prompt()
-def configure_assistant(skills: str) -> str:
+def configure_assistant(skills: str) -> list[dict]:
     return [
         {
             "role": "assistant",
             "content": f"You are a helpful assistant. You have the following skills: {skills}. Always use only one tool at a time.",
         }
-    ]
+    ] 
 
 
 if __name__ == "__main__":
