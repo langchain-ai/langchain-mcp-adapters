@@ -73,7 +73,7 @@ async def test_multi_server_mcp_client():
 
 
 @pytest.mark.asyncio
-async def test_multi_server_connect_methods():
+async def test_multi_server_connect_and_disconnect_methods():
     """Test the different connect methods for MultiServerMCPClient."""
 
     # Get the absolute path to the server scripts
@@ -101,6 +101,19 @@ async def test_multi_server_connect_methods():
         # Verify tool names
         tool_names = {tool.name for tool in all_tools}
         assert tool_names == {"add", "multiply", "get_weather"}
+
+        await client.disconnect_server("math")
+
+        # Check that we have only tools from weather server
+        all_tools = client.get_tools()
+        assert len(all_tools) == 1
+
+        await client.disconnect_server("weather")
+
+        # Check that we have no tool now
+        all_tools = client.get_tools()
+        assert len(all_tools) == 0
+
 
 
 @pytest.mark.asyncio
