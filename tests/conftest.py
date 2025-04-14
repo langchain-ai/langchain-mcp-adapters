@@ -45,3 +45,20 @@ def websocket_server(websocket_server_port: int) -> Generator[None, None, None]:
     proc.join(timeout=2)
     if proc.is_alive():
         raise RuntimeError("Server process is still alive after attempting to terminate it")
+
+
+@pytest.fixture
+def websocket_enabled():
+    """Temporarily enable socket connections for websocket tests."""
+    try:
+        import pytest_socket
+
+        previous_state = pytest_socket.socket_allow_hosts()
+        # Only allow connections to localhost
+        pytest_socket.socket_allow_hosts(["127.0.0.1", "localhost"])
+        yield
+        # Restore previous state
+        pytest_socket.socket_allow_hosts(previous_state)
+    except ImportError:
+        # pytest_socket is not installed
+        yield

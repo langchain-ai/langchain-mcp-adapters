@@ -9,7 +9,11 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 
 @pytest.mark.asyncio
-async def test_multi_server_mcp_client(websocket_server, websocket_server_port: int):
+async def test_multi_server_mcp_client(
+    websocket_server,
+    websocket_server_port: int,
+    websocket_enabled,
+):
     """Test that the MultiServerMCPClient can connect to multiple servers and load tools."""
 
     # Get the absolute path to the server scripts
@@ -87,7 +91,11 @@ async def test_multi_server_mcp_client(websocket_server, websocket_server_port: 
 
 
 @pytest.mark.asyncio
-async def test_multi_server_connect_methods(websocket_server, websocket_server_port: int):
+async def test_multi_server_connect_methods(
+    websocket_server,
+    websocket_server_port: int,
+    websocket_enabled,
+):
     """Test the different connect methods for MultiServerMCPClient."""
 
     # Get the absolute path to the server scripts
