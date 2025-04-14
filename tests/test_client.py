@@ -10,9 +10,9 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 @pytest.mark.asyncio
 async def test_multi_server_mcp_client(
+    socket_enabled,
     websocket_server,
     websocket_server_port: int,
-    websocket_enabled,
 ):
     """Test that the MultiServerMCPClient can connect to multiple servers and load tools."""
 
@@ -92,9 +92,9 @@ async def test_multi_server_mcp_client(
 
 @pytest.mark.asyncio
 async def test_multi_server_connect_methods(
+    socket_enabled,
     websocket_server,
     websocket_server_port: int,
-    websocket_enabled,
 ):
     """Test the different connect methods for MultiServerMCPClient."""
 

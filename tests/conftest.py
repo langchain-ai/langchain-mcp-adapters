@@ -48,17 +48,16 @@ def websocket_server(websocket_server_port: int) -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def websocket_enabled():
+def socket_enabled():
     """Temporarily enable socket connections for websocket tests."""
     try:
         import pytest_socket
 
+        pytest_socket.enable_socket()
         previous_state = pytest_socket.socket_allow_hosts()
         # Only allow connections to localhost
-        pytest_socket.socket_allow_hosts(["127.0.0.1", "localhost"])
+        pytest_socket.socket_allow_hosts(["127.0.0.1", "localhost"], allow_unix_socket=True)
         yield
+    finally:
         # Restore previous state
         pytest_socket.socket_allow_hosts(previous_state)
-    except ImportError:
-        # pytest_socket is not installed
-        yield
