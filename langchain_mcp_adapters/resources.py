@@ -16,7 +16,7 @@ def convert_mcp_resource_to_langchain_blob(
         contents: The resource contents
 
     Returns:
-        A LangChain Document for text content, or a Blob for binary content
+        A LangChain Blob
     """
     if isinstance(contents, TextResourceContents):
         data = contents.text
@@ -28,15 +28,11 @@ def convert_mcp_resource_to_langchain_blob(
     return Blob.from_data(
         data=data,
         mime_type=contents.mimeType,
-        metadata={
-            "uri": resource_uri
-        },
+        metadata={"uri": resource_uri},
     )
 
-async def get_mcp_resource(
-    session: ClientSession,
-    uri: str
-) -> list[Blob]:
+
+async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
     """Fetch a single MCP resource and convert it to LangChain Blobs.
 
     Args:

@@ -22,7 +22,7 @@ test_watch:
 ######################
 
 # Define a variable for Python and notebook files.
-lint format: PYTHON_FILES=.
+lint format: PYTHON_FILES=langchain_mcp_adapters/ tests/
 lint_diff format_diff: PYTHON_FILES=$(shell git diff --relative=. --name-only --diff-filter=d master | grep -E '\.py$$|\.ipynb$$')
 
 lint lint_diff:

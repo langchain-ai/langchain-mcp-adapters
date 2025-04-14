@@ -279,9 +279,7 @@ class MultiServerMCPClient:
         return await load_mcp_prompt(session, prompt_name, arguments)
 
     async def get_resources(
-        self,
-        server_name: str,
-        uris: str | list[str] | None = None
+        self, server_name: str, uris: str | list[str] | None = None
     ) -> list[Blob]:
         """Get resources from a given MCP server.
 

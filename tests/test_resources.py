@@ -21,11 +21,7 @@ from langchain_mcp_adapters.resources import (
 
 def test_convert_mcp_resource_to_langchain_blob_with_text():
     uri = "file:///test.txt"
-    contents = TextResourceContents(
-        uri=uri,
-        mimeType="text/plain",
-        text="Hello, world!"
-    )
+    contents = TextResourceContents(uri=uri, mimeType="text/plain", text="Hello, world!")
 
     blob = convert_mcp_resource_to_langchain_blob(uri, contents)
 
@@ -40,11 +36,7 @@ def test_convert_mcp_resource_to_langchain_blob():
     original_data = b"binary-image-data"
     base64_blob = base64.b64encode(original_data).decode()
 
-    contents = BlobResourceContents(
-        uri=uri,
-        mimeType="image/png",
-        blob=base64_blob
-    )
+    contents = BlobResourceContents(uri=uri, mimeType="image/png", blob=base64_blob)
 
     blob = convert_mcp_resource_to_langchain_blob(uri, contents)
 
@@ -59,10 +51,7 @@ def test_convert_mcp_resource_to_langchain_blob_with_invalid_type():
         pass
 
     with pytest.raises(ValueError):
-        convert_mcp_resource_to_langchain_blob(
-            "file:///dummy",
-            DummyContent()
-        )
+        convert_mcp_resource_to_langchain_blob("file:///dummy", DummyContent())
 
 
 @pytest.mark.asyncio
@@ -73,16 +62,8 @@ async def test_get_mcp_resource_with_contents():
     session.read_resource = AsyncMock(
         return_value=ReadResourceResult(
             contents=[
-                TextResourceContents(
-                    uri=uri,
-                    mimeType="text/plain",
-                    text="Content 1"
-                ),
-                TextResourceContents(
-                    uri=uri,
-                    mimeType="text/plain",
-                    text="Content 2"
-                )
+                TextResourceContents(uri=uri, mimeType="text/plain", text="Content 1"),
+                TextResourceContents(uri=uri, mimeType="text/plain", text="Content 2"),
             ]
         )
     )
@@ -106,16 +87,10 @@ async def test_get_mcp_resource_with_text_and_blob():
     session.read_resource = AsyncMock(
         return_value=ReadResourceResult(
             contents=[
-                TextResourceContents(
-                    uri=uri,
-                    mimeType="text/plain",
-                    text="Hello Text"
-                ),
+                TextResourceContents(uri=uri, mimeType="text/plain", text="Hello Text"),
                 BlobResourceContents(
-                    uri=uri,
-                    mimeType="application/octet-stream",
-                    blob=base64_blob
-                )
+                    uri=uri, mimeType="application/octet-stream", blob=base64_blob
+                ),
             ]
         )
     )
@@ -138,9 +113,7 @@ async def test_get_mcp_resource_with_empty_contents():
     session = AsyncMock()
     uri = "file:///empty.txt"
 
-    session.read_resource = AsyncMock(
-        return_value=ReadResourceResult(contents=[])
-    )
+    session.read_resource = AsyncMock(return_value=ReadResourceResult(contents=[]))
 
     docs = await get_mcp_resource(session, uri)
 
@@ -158,22 +131,14 @@ async def test_load_mcp_resources_with_list_of_uris():
     session.read_resource.side_effect = [
         ReadResourceResult(
             contents=[
-                TextResourceContents(
-                    uri=uri1,
-                    mimeType="text/plain",
-                    text="Content from test1"
-                )
+                TextResourceContents(uri=uri1, mimeType="text/plain", text="Content from test1")
             ]
         ),
         ReadResourceResult(
             contents=[
-                TextResourceContents(
-                    uri=uri2,
-                    mimeType="text/plain",
-                    text="Content from test2"
-                )
+                TextResourceContents(uri=uri2, mimeType="text/plain", text="Content from test2")
             ]
-        )
+        ),
     ]
 
     docs = await load_mcp_resources(session, [uri1, uri2])
@@ -186,6 +151,7 @@ async def test_load_mcp_resources_with_list_of_uris():
     assert docs[1].metadata["uri"] == uri2
     assert session.read_resource.call_count == 2
 
+
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_single_uri_string():
     session = AsyncMock()
@@ -194,11 +160,7 @@ async def test_load_mcp_resources_with_single_uri_string():
     session.read_resource = AsyncMock(
         return_value=ReadResourceResult(
             contents=[
-                TextResourceContents(
-                    uri=uri,
-                    mimeType="text/plain",
-                    text="Content from test"
-                )
+                TextResourceContents(uri=uri, mimeType="text/plain", text="Content from test")
             ]
         )
     )
@@ -211,6 +173,7 @@ async def test_load_mcp_resources_with_single_uri_string():
     assert docs[0].metadata["uri"] == uri
     session.read_resource.assert_called_once_with(uri)
 
+
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_all_resources():
     session = AsyncMock()
@@ -218,16 +181,8 @@ async def test_load_mcp_resources_with_all_resources():
     session.list_resources = AsyncMock(
         return_value=ListResourcesResult(
             resources=[
-                Resource(
-                    uri="file:///test1.txt",
-                    name="test1.txt",
-                    mimeType="text/plain"
-                ),
-                Resource(
-                    uri="file:///test2.txt",
-                    name="test2.txt",
-                    mimeType="text/plain"
-                )
+                Resource(uri="file:///test1.txt", name="test1.txt", mimeType="text/plain"),
+                Resource(uri="file:///test2.txt", name="test2.txt", mimeType="text/plain"),
             ]
         )
     )
@@ -237,21 +192,17 @@ async def test_load_mcp_resources_with_all_resources():
         ReadResourceResult(
             contents=[
                 TextResourceContents(
-                    uri="file:///test1.txt",
-                    mimeType="text/plain",
-                    text="Content from test1"
+                    uri="file:///test1.txt", mimeType="text/plain", text="Content from test1"
                 )
             ]
         ),
         ReadResourceResult(
             contents=[
                 TextResourceContents(
-                    uri="file:///test2.txt",
-                    mimeType="text/plain",
-                    text="Content from test2"
+                    uri="file:///test2.txt", mimeType="text/plain", text="Content from test2"
                 )
             ]
-        )
+        ),
     ]
 
     docs = await load_mcp_resources(session)
@@ -262,6 +213,7 @@ async def test_load_mcp_resources_with_all_resources():
     assert session.list_resources.called
     assert session.read_resource.call_count == 2
 
+
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_error_handling():
     session = AsyncMock()
@@ -271,21 +223,16 @@ async def test_load_mcp_resources_with_error_handling():
     session.read_resource = AsyncMock()
     session.read_resource.side_effect = [
         ReadResourceResult(
-            contents=[
-                TextResourceContents(
-                    uri=uri1,
-                    mimeType="text/plain",
-                    text="Valid content"
-                )
-            ]
+            contents=[TextResourceContents(uri=uri1, mimeType="text/plain", text="Valid content")]
         ),
-        Exception("Resource not found")
+        Exception("Resource not found"),
     ]
 
     with pytest.raises(RuntimeError) as exc_info:
         await load_mcp_resources(session, [uri1, uri2])
 
     assert "Error fetching resource" in str(exc_info.value)
+
 
 @pytest.mark.asyncio
 async def test_load_mcp_resources_with_blob_content():
@@ -297,11 +244,7 @@ async def test_load_mcp_resources_with_blob_content():
     session.read_resource = AsyncMock(
         return_value=ReadResourceResult(
             contents=[
-                BlobResourceContents(
-                    uri=uri,
-                    mimeType="application/octet-stream",
-                    blob=base64_blob
-                )
+                BlobResourceContents(uri=uri, mimeType="application/octet-stream", blob=base64_blob)
             ]
         )
     )
