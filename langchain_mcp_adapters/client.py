@@ -107,7 +107,7 @@ class MultiServerMCPClient:
             ```
         """
         self.connections: dict[str, StdioConnection | SSEConnection] = connections or {}
-        self.exit_stacks =  dict[str, AsyncExitStack] = {}
+        self.exit_stacks:  dict[str, AsyncExitStack] = {}
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
 
