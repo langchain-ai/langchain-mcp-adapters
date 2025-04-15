@@ -139,7 +139,7 @@ async def test_multi_server_connect_and_disconnect_methods(
         # Check that we have one tool now
         all_tools = client.get_tools()
         assert len(all_tools) == 1
-        
+
         await client.disconnect_server("time")
 
         # Check that we have no tool now

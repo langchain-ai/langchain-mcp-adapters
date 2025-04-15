@@ -292,7 +292,7 @@ class MultiServerMCPClient:
         self.exit_stacks[server_name] = exit_stack
 
         await self._initialize_session_and_load_tools(server_name, session)
-   
+
     async def connect_to_server_via_websocket(
         self,
         server_name: str,
@@ -320,7 +320,7 @@ class MultiServerMCPClient:
             ) from None
 
         exit_stack = AsyncExitStack()
-        
+
         ws_transport = await exit_stack.enter_async_context(websocket_client(url))
         read, write = ws_transport
         session_kwargs = session_kwargs or {}
@@ -330,7 +330,7 @@ class MultiServerMCPClient:
         )
 
         self.exit_stacks[server_name] = exit_stack
-        
+
         await self._initialize_session_and_load_tools(server_name, session)
 
     async def disconnect_server(
@@ -345,7 +345,7 @@ class MultiServerMCPClient:
             server_name: Name to identify this server connection
 
         """
-        
+
         self.sessions.pop(server_name, None)
         self.server_name_to_tools.pop(server_name, None)
 
