@@ -16,7 +16,7 @@ def multiply(a: int, b: int) -> int:
 
 
 @mcp.prompt()
-def configure_assistant(skills: str) -> str:
+def configure_assistant(skills: str) -> list[dict]:
     return [
         {
             "role": "assistant",

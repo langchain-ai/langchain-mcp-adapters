@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "langchain-mcp-adapters"
-version = "0.0.7"
+version = "0.0.8"
 description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
 authors = [
     { name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com" },
@@ -22,8 +22,9 @@ test = [
     "ruff>=0.9.4",
     "mypy>=1.8.0",
     "pytest-socket>=0.7.0",
-    "pytest-asyncio>=0.25.0",
+    "pytest-asyncio>=0.26.0",
     "types-setuptools>=69.0.0",
+    "websockets>=15.0.1"
 ]
 
 [tool.pytest.ini_options]
@@ -32,6 +33,7 @@ addopts = "-ra -q -v"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 line-length = 100

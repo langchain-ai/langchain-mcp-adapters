@@ -9,7 +9,11 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 
 @pytest.mark.asyncio
-async def test_multi_server_mcp_client():
+async def test_multi_server_mcp_client(
+    socket_enabled,
+    websocket_server,
+    websocket_server_port: int,
+):
     """Test that the MultiServerMCPClient can connect to multiple servers and load tools."""
 
     # Get the absolute path to the server scripts
@@ -29,13 +33,17 @@ async def test_multi_server_mcp_client():
                 "args": [weather_server_path],
                 "transport": "stdio",
             },
+            "time": {
+                "url": f"ws://127.0.0.1:{websocket_server_port}/ws",
+                "transport": "websocket",
+            },
         }
     ) as client:
         # Check that we have tools from both servers
         all_tools = client.get_tools()
 
         # Should have 3 tools (add, multiply, get_weather)
-        assert len(all_tools) == 3
+        assert len(all_tools) == 4
 
         # Check that tools are BaseTool instances
         for tool in all_tools:
@@ -43,7 +51,7 @@ async def test_multi_server_mcp_client():
 
         # Verify tool names
         tool_names = {tool.name for tool in all_tools}
-        assert tool_names == {"add", "multiply", "get_weather"}
+        assert tool_names == {"add", "multiply", "get_weather", "get_time"}
 
         # Check math server tools
         math_tools = client.server_name_to_tools["math"]
@@ -55,6 +63,11 @@ async def test_multi_server_mcp_client():
         weather_tools = client.server_name_to_tools["weather"]
         assert len(weather_tools) == 1
         assert weather_tools[0].name == "get_weather"
+
+        # Check time server tools
+        time_tools = client.server_name_to_tools["time"]
+        assert len(time_tools) == 1
+        assert time_tools[0].name == "get_time"
 
         # Test that we can call a math tool
         add_tool = next(tool for tool in all_tools if tool.name == "add")
@@ -71,9 +84,18 @@ async def test_multi_server_mcp_client():
         result = await multiply_tool.ainvoke({"a": 4, "b": 5})
         assert result == "20"
 
+        # Test that we can call a time tool
+        time_tool = next(tool for tool in all_tools if tool.name == "get_time")
+        result = await time_tool.ainvoke({"args": ""})
+        assert result == "5:20:00 PM EST"
+
 
 @pytest.mark.asyncio
-async def test_multi_server_connect_and_disconnect_methods():
+async def test_multi_server_connect_and_disconnect_methods(
+    socket_enabled,
+    websocket_server,
+    websocket_server_port: int,
+):
     """Test the different connect methods for MultiServerMCPClient."""
 
     # Get the absolute path to the server scripts
@@ -94,21 +116,31 @@ async def test_multi_server_connect_and_disconnect_methods():
             "weather", command="python", args=[weather_server_path]
         )
 
+        await client.connect_to_server_via_websocket(
+            "time", url=f"ws://127.0.0.1:{websocket_server_port}/ws"
+        )
+
         # Check that we have tools from both servers
         all_tools = client.get_tools()
-        assert len(all_tools) == 3
+        assert len(all_tools) == 4
 
         # Verify tool names
         tool_names = {tool.name for tool in all_tools}
-        assert tool_names == {"add", "multiply", "get_weather"}
+        assert tool_names == {"add", "multiply", "get_weather", "get_time"}
 
         await client.disconnect_server("math")
 
         # Check that we have only tools from weather server
         all_tools = client.get_tools()
-        assert len(all_tools) == 1
+        assert len(all_tools) == 2
 
         await client.disconnect_server("weather")
+
+        # Check that we have one tool now
+        all_tools = client.get_tools()
+        assert len(all_tools) == 1
+        
+        await client.disconnect_server("time")
 
         # Check that we have no tool now
         all_tools = client.get_tools()
