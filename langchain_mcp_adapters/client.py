@@ -404,4 +404,3 @@ class MultiServerMCPClient:
     ) -> None:
         for exit_stack in self.exit_stacks.values():
                 await exit_stack.aclose()
-                raise
