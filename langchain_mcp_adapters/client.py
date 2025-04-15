@@ -243,6 +243,8 @@ class MultiServerMCPClient:
         )
 
         exit_stack = AsyncExitStack()
+        self.exit_stacks[server_name] = exit_stack
+        
         # Create and store the connection
         stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
@@ -251,8 +253,6 @@ class MultiServerMCPClient:
             ClientSession,
             await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
-
-        self.exit_stacks[server_name] = exit_stack
 
         await self._initialize_session_and_load_tools(server_name, session)
 
@@ -277,6 +277,7 @@ class MultiServerMCPClient:
             session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
         exit_stack = AsyncExitStack()
+        self.exit_stacks[server_name] = exit_stack
 
         # Create and store the connection
         sse_transport = await exit_stack.enter_async_context(
@@ -288,8 +289,6 @@ class MultiServerMCPClient:
             ClientSession,
             await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
-
-        self.exit_stacks[server_name] = exit_stack
 
         await self._initialize_session_and_load_tools(server_name, session)
 
@@ -320,6 +319,7 @@ class MultiServerMCPClient:
             ) from None
 
         exit_stack = AsyncExitStack()
+        self.exit_stacks[server_name] = exit_stack
 
         ws_transport = await exit_stack.enter_async_context(websocket_client(url))
         read, write = ws_transport
@@ -328,8 +328,6 @@ class MultiServerMCPClient:
             ClientSession,
             await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
-
-        self.exit_stacks[server_name] = exit_stack
 
         await self._initialize_session_and_load_tools(server_name, session)
 
@@ -392,6 +390,10 @@ class MultiServerMCPClient:
 
             return self
         except Exception:
+            latest_exit_stack =  self.exit_stacks.pop(server_name, None)
+            if latest_exit_stack:
+                latest_exit_stack.aclose()
+                
             for exit_stack in self.exit_stacks.values():
                 await exit_stack.aclose()
                 raise
