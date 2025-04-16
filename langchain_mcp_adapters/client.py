@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -346,12 +347,23 @@ class MultiServerMCPClient:
 
         self.sessions.pop(server_name, None)
         self.server_name_to_tools.pop(server_name, None)
-
-        exit_stack = self.exit_stacks.pop(server_name, None)
-        if exit_stack:
-            await exit_stack.aclose()
-
         self.connections.pop(server_name, None)
+
+        # we don't pop the exit_stack so any remaining resource could be released when the client closes
+        exit_stack = self.exit_stacks.get(server_name, None)
+        if exit_stack:
+            try:
+                await exit_stack.aclose()
+            
+            # as we release a server in a different order than LIFO, asyncio is not happy hence the suppressed errors
+            # however resources are released (especially stdio process)
+            except RuntimeError as e:
+                if repr(e) == 'RuntimeError("Attempted to exit a cancel scope that isn\'t the current tasks\'s current cancel scope")' or repr(e) == 'RuntimeError("Attempted to exit cancel scope in a different task than it was entered in")':
+                    pass
+                else: 
+                    raise e
+            except asyncio.CancelledError:
+                pass
 
     def get_tools(self) -> list[BaseTool]:
         """Get a list of all tools from all connected servers."""
@@ -390,13 +402,9 @@ class MultiServerMCPClient:
 
             return self
         except Exception:
-            latest_exit_stack =  self.exit_stacks.pop(server_name, None)
-            if latest_exit_stack:
-                latest_exit_stack.aclose()
-                
-            for exit_stack in self.exit_stacks.values():
-                await exit_stack.aclose()
-                raise
+            for server_name in reversed(self.exit_stacks):
+                await self.exit_stacks[server_name].aclose()
+            raise
 
     async def __aexit__(
         self,
@@ -404,5 +412,5 @@ class MultiServerMCPClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        for exit_stack in self.exit_stacks.values():
-                await exit_stack.aclose()
+        for server_name in reversed(self.exit_stacks):
+                await self.exit_stacks[server_name].aclose()
