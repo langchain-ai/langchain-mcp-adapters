@@ -9,6 +9,8 @@ description = "Make Anthropic Model Context Protocol (MCP) tools compatible with
 authors = [
     { name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com" },
 ]
+license = "MIT"
+repository = "https://www.github.com/langchain-ai/langchain-mcp-adapters"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
