@@ -327,6 +327,10 @@ class MultiServerMCPClient:
         for server_tools in self.server_name_to_tools.values():
             all_tools.extend(server_tools)
         return all_tools
+    
+    def get_tools_by_server(self, server_name: str) -> list[BaseTool]:
+        """Get a list of all tools from a specific server."""
+        return self.server_name_to_tools.get(server_name, [])
 
     async def get_prompt(
         self, server_name: str, prompt_name: str, arguments: Optional[dict[str, Any]]
