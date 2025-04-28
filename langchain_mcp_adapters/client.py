@@ -94,30 +94,30 @@ class MultiServerMCPClient:
 
         Args:
             connections: A dictionary mapping server names to connection configurations.
-                Each configuration can be either a StdioConnection or SSEConnection.
+                Each configuration can be a StdioConnection, SSEConnection or a WebsocketConnection.
                 If None, no initial connections are established.
 
         Example:
 
-            ```python
-            async with MultiServerMCPClient(
-                {
-                    "math": {
-                        "command": "python",
-                        # Make sure to update to the full absolute path to your math_server.py file
-                        "args": ["/path/to/math_server.py"],
-                        "transport": "stdio",
-                    },
-                    "weather": {
-                        # make sure you start your weather server on port 8000
-                        "url": "http://localhost:8000/sse",
-                        "transport": "sse",
-                    }
+        ```python
+        async with MultiServerMCPClient(
+            {
+                "math": {
+                    "command": "python",
+                    # Make sure to update to the full absolute path to your math_server.py file
+                    "args": ["/path/to/math_server.py"],
+                    "transport": "stdio",
+                },
+                "weather": {
+                    # make sure you start your weather server on port 8000
+                    "url": "http://localhost:8000/sse",
+                    "transport": "sse",
                 }
-            ) as client:
-                all_tools = client.get_tools()
-                ...
-            ```
+            }
+        ) as client:
+            all_tools = client.get_tools()
+            ...
+        ```
         """
         self.connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection] = (
             connections or {}
@@ -150,14 +150,15 @@ class MultiServerMCPClient:
         transport: Literal["stdio", "sse", "websocket"] = "stdio",
         **kwargs,
     ) -> None:
-        """Connect to an MCP server using either stdio or SSE.
+        """Connect to an MCP server.
 
-        This is a generic method that calls either connect_to_server_via_stdio or connect_to_server_via_sse
+        This is a generic method that calls either of
+        `connect_to_server_via_stdio` / `connect_to_server_via_sse` / `connect_to_server_via_websocket`
         based on the provided transport parameter.
 
         Args:
             server_name: Name to identify this server connection
-            transport: Type of transport to use ("stdio" or "sse"), defaults to "stdio"
+            transport: Type of transport to use ("stdio" or "sse" or "websocket"), defaults to "stdio"
             **kwargs: Additional arguments to pass to the specific connection method
 
         Raises:
