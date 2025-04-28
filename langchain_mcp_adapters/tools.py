@@ -27,7 +27,9 @@ def _convert_call_tool_result(
             non_text_contents.append(content)
 
     tool_content: str | list[str] = [content.text for content in text_contents]
-    if len(text_contents) == 1:
+    if not text_contents:
+        tool_content = ""
+    elif len(text_contents) == 1:
         tool_content = tool_content[0]
 
     if call_tool_result.isError:

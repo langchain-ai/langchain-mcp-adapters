@@ -19,6 +19,19 @@ from langchain_mcp_adapters.tools import (
 )
 
 
+def test_convert_empty_text_content():
+    # Test with a single text content
+    result = CallToolResult(
+        content=[],
+        isError=False,
+    )
+
+    text_content, non_text_content = _convert_call_tool_result(result)
+
+    assert text_content == ""
+    assert non_text_content is None
+
+
 def test_convert_single_text_content():
     # Test with a single text content
     result = CallToolResult(
