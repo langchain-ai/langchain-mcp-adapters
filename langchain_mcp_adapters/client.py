@@ -321,16 +321,16 @@ class MultiServerMCPClient:
 
         await self._initialize_session_and_load_tools(server_name, session)
 
-    def get_tools(self) -> list[BaseTool]:
+    def get_tools(self, server_name: str | None = None) -> list[BaseTool]:
         """Get a list of all tools from all connected servers."""
         all_tools: list[BaseTool] = []
-        for server_tools in self.server_name_to_tools.values():
+        if server_name:
+            server_tools = self.server_name_to_tools.get(server_name, [])
             all_tools.extend(server_tools)
+        else:
+            for server_tools in self.server_name_to_tools.values():
+                all_tools.extend(server_tools)
         return all_tools
-    
-    def get_tools_by_server(self, server_name: str) -> list[BaseTool]:
-        """Get a list of all tools from a specific server."""
-        return self.server_name_to_tools.get(server_name, [])
 
     async def get_prompt(
         self, server_name: str, prompt_name: str, arguments: Optional[dict[str, Any]]
