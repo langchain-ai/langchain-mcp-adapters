@@ -148,7 +148,7 @@ class MultiServerMCPClient:
         server_name: str,
         *,
         transport: Literal["stdio", "sse", "websocket"] = "stdio",
-        **kwargs,
+        **kwargs: dict[str, Any],
     ) -> None:
         """Connect to an MCP server.
 
