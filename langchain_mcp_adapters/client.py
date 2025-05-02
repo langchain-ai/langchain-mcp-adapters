@@ -10,6 +10,7 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamablehttp_client
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
@@ -83,12 +84,34 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
+class StreamableHTTPConnection(TypedDict):
+    transport: Literal["streamable_http"]
+
+    url: str
+    """The URL of the Streamable HTTP Connection endpoint to connect to."""
+
+    headers: dict[str, Any] | None
+    """HTTP headers to send to the Streamable HTTP Connection endpoint"""
+
+    timeout: float
+    """HTTP timeout"""
+
+    sse_read_timeout: float
+    """SSE read timeout"""
+
+    terminate_on_close: bool
+    """Terminate on close"""
+
+    session_kwargs: dict[str, Any] | None
+    """Additional keyword arguments to pass to the ClientSession"""
+
+
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
 
     def __init__(
         self,
-        connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection] | None = None,
+        connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection | StreamableHTTPConnection] | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -119,7 +142,7 @@ class MultiServerMCPClient:
             ...
         ```
         """
-        self.connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection] = (
+        self.connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection | StreamableHTTPConnection] = (
             connections or {}
         )
         self.exit_stack = AsyncExitStack()
@@ -147,7 +170,7 @@ class MultiServerMCPClient:
         self,
         server_name: str,
         *,
-        transport: Literal["stdio", "sse", "websocket"] = "stdio",
+        transport: Literal["stdio", "sse", "websocket", "streamable_http"] = "stdio",
         **kwargs: dict[str, Any],
     ) -> None:
         """Connect to an MCP server.
@@ -200,8 +223,20 @@ class MultiServerMCPClient:
                 url=kwargs["url"],
                 session_kwargs=kwargs.get("session_kwargs"),
             )
+        elif transport == "streamable_http":
+            if "url" not in kwargs:
+                raise ValueError("'url' parameter is required for streamable_http connection")
+            await self.connect_to_server_via_streamable_http(
+                server_name,
+                url=kwargs["url"],
+                headers=kwargs.get("headers"),
+                timeout=kwargs.get("timeout", DEFAULT_HTTP_TIMEOUT),
+                sse_read_timeout=kwargs.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
+                terminate_on_close=kwargs.get("terminate_on_close", True),
+                session_kwargs=kwargs.get("session_kwargs"),
+            )
         else:
-            raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'")
+            raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse' or 'streamable_http'")
 
     async def connect_to_server_via_stdio(
         self,
@@ -314,6 +349,40 @@ class MultiServerMCPClient:
 
         ws_transport = await self.exit_stack.enter_async_context(websocket_client(url))
         read, write = ws_transport
+        session_kwargs = session_kwargs or {}
+        session = cast(
+            ClientSession,
+            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+        )
+
+        await self._initialize_session_and_load_tools(server_name, session)
+
+    async def connect_to_server_via_streamable_http(
+            self,
+            server_name: str,
+            *,
+            url: str,
+            headers: dict[str, Any] | None = None,
+            timeout: float = DEFAULT_HTTP_TIMEOUT,
+            sse_read_timeout: float = DEFAULT_SSE_READ_TIMEOUT,
+            terminate_on_close: bool = True,
+            session_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Connect to a specific MCP server using Streamable HTTP
+
+        Args:
+            server_name: Name to identify this server connection
+            url: URL of the Streamable HTTP server
+            headers: HTTP headers to send to the Streamable HTTP endpoint
+            timeout: HTTP timeout
+            sse_read_timeout: SSE read timeout
+            session_kwargs: Additional keyword arguments to pass to the ClientSession
+        """
+        # Create and store the connection
+        streamable_http_transport = await self.exit_stack.enter_async_context(
+            streamablehttp_client(url, headers, timeout, sse_read_timeout, terminate_on_close)
+        )
+        read, write = streamable_http_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
