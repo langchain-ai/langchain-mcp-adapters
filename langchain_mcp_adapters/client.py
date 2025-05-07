@@ -186,6 +186,7 @@ class MultiServerMCPClient:
                 command=kwargs["command"],
                 args=kwargs["args"],
                 env=kwargs.get("env"),
+                cwd=kwargs.get("cwd"),
                 encoding=kwargs.get("encoding", DEFAULT_ENCODING),
                 encoding_error_handler=kwargs.get(
                     "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
@@ -210,6 +211,7 @@ class MultiServerMCPClient:
         command: str,
         args: list[str],
         env: dict[str, str] | None = None,
+        cwd: str | Path | None = None,
         encoding: str = DEFAULT_ENCODING,
         encoding_error_handler: Literal[
             "strict", "ignore", "replace"
@@ -223,6 +225,7 @@ class MultiServerMCPClient:
             command: Command to execute
             args: Arguments for the command
             env: Environment variables for the command
+            cwd: Working directory for the command
             encoding: Character encoding
             encoding_error_handler: How to handle encoding errors
             session_kwargs: Additional keyword arguments to pass to the ClientSession
@@ -240,6 +243,7 @@ class MultiServerMCPClient:
             env=env,
             encoding=encoding,
             encoding_error_handler=encoding_error_handler,
+            cwd=cwd
         )
 
         # Create and store the connection
