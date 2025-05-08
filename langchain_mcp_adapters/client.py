@@ -241,9 +241,9 @@ class MultiServerMCPClient:
             command=command,
             args=args,
             env=env,
+            cwd=cwd,
             encoding=encoding,
             encoding_error_handler=encoding_error_handler,
-            cwd=cwd
         )
 
         # Create and store the connection
