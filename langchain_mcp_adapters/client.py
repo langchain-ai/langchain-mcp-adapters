@@ -10,6 +10,12 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
+# websockets is an optional dependency, so we import it conditionally
+try:
+    from mcp.client.websocket import websocket_client
+except ImportError:
+    websocket_client = None
+
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
@@ -96,35 +102,32 @@ class MultiServerMCPClient:
             connections: A dictionary mapping server names to connection configurations.
                 Each configuration can be a StdioConnection, SSEConnection or a WebsocketConnection.
                 If None, no initial connections are established.
+                To establish connections, either use the client as an async context manager
+                or call `await client.connect_all_sessions()`.
 
-        Example:
+        Example for long-lived sessions (e.g., in FastAPI lifespan):
 
         ```python
-        async with MultiServerMCPClient(
-            {
-                "math": {
-                    "command": "python",
-                    # Make sure to update to the full absolute path to your math_server.py file
-                    "args": ["/path/to/math_server.py"],
-                    "transport": "stdio",
-                },
-                "weather": {
-                    # make sure you start your weather server on port 8000
-                    "url": "http://localhost:8000/sse",
-                    "transport": "sse",
-                }
-            }
-        ) as client:
+        client = MultiServerMCPClient(...)
+        await client.connect_all_sessions()
+        # ... use client.get_tools() ...
+        await client.close_all_sessions()
+        ```
+
+        Example for short-lived sessions (using async context manager):
+        ```python
+        async with MultiServerMCPClient(...) as client:
             all_tools = client.get_tools()
-            ...
+            # ...
         ```
         """
         self.connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection] = (
             connections or {}
         )
-        self.exit_stack = AsyncExitStack()
+        self.exit_stack: AsyncExitStack | None = None
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
+        self._is_active_via_connect_all: bool = False
 
     async def _initialize_session_and_load_tools(
         self, server_name: str, session: ClientSession
@@ -201,7 +204,7 @@ class MultiServerMCPClient:
                 session_kwargs=kwargs.get("session_kwargs"),
             )
         else:
-            raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'")
+            raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio', 'sse' or 'websocket'")
 
     async def connect_to_server_via_stdio(
         self,
@@ -242,6 +245,8 @@ class MultiServerMCPClient:
             encoding_error_handler=encoding_error_handler,
         )
 
+        if self.exit_stack is None:
+            raise RuntimeError("Exit stack not initialized. Call connect_all_sessions or use as context manager.")
         # Create and store the connection
         stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
@@ -273,6 +278,8 @@ class MultiServerMCPClient:
             sse_read_timeout: SSE read timeout
             session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
+        if self.exit_stack is None:
+            raise RuntimeError("Exit stack not initialized. Call connect_all_sessions or use as context manager.")
         # Create and store the connection
         sse_transport = await self.exit_stack.enter_async_context(
             sse_client(url, headers, timeout, sse_read_timeout)
@@ -302,15 +309,17 @@ class MultiServerMCPClient:
 
         Raises:
             ImportError: If websockets package is not installed
+            RuntimeError: If exit_stack is not initialized
         """
-        try:
-            from mcp.client.websocket import websocket_client
-        except ImportError:
+        if websocket_client is None:
             raise ImportError(
                 "Could not import websocket_client. ",
                 "To use Websocket connections, please install the required dependency with: ",
-                "'pip install mcp[ws]' or 'pip install websockets'",
+                "'pip install langchain-mcp-adapters[ws]' or 'pip install websockets mcp[ws]'",
             ) from None
+
+        if self.exit_stack is None:
+            raise RuntimeError("Exit stack not initialized. Call connect_all_sessions or use as context manager.")
 
         ws_transport = await self.exit_stack.enter_async_context(websocket_client(url))
         read, write = ws_transport
@@ -351,15 +360,90 @@ class MultiServerMCPClient:
         session = self.sessions[server_name]
         return await load_mcp_resources(session, uris)
 
-    async def __aenter__(self) -> "MultiServerMCPClient":
+    async def connect_all_sessions(self) -> None:
+        """
+        Establishes and initializes connections to all configured MCP servers.
+        This method is intended for managing long-lived sessions, e.g., in a server application's lifecycle.
+        The sessions will remain active until `close_all_sessions()` is called.
+        """
+        if self._is_active_via_connect_all:
+            # Consider logging a warning instead of raising an error for idempotency
+            # For now, strict behavior to highlight potential misuse.
+            raise RuntimeError("Sessions are already active and managed by connect_all_sessions.")
+        if self.exit_stack is not None:
+            # This implies __aenter__ might be active or an improper state exists.
+            raise RuntimeError(
+                "An exit stack is already present. Ensure proper lifecycle management "
+                "(e.g., exit previous context or call close_all_sessions)."
+            )
+
+        self.exit_stack = AsyncExitStack()
         try:
             connections = self.connections or {}
-            for server_name, connection in connections.items():
-                await self.connect_to_server(server_name, **connection)
+            if not connections:
+                # print("Warning: No connections configured to connect.") # Optional warning
+                pass
 
+            for server_name, connection_params in connections.items():
+                # Type hint for connection_params to satisfy mypy when spread
+                typed_params: StdioConnection | SSEConnection | WebsocketConnection = connection_params
+                await self.connect_to_server(server_name, **typed_params)
+            
+            self._is_active_via_connect_all = True
+        except Exception:
+            # If any connection fails, close all resources acquired so far by this stack
+            if self.exit_stack:
+                await self.exit_stack.aclose()
+            self.exit_stack = None
+            self.sessions.clear() # Clear any partially loaded sessions
+            self.server_name_to_tools.clear() # Clear any partially loaded tools
+            self._is_active_via_connect_all = False # Ensure flag is reset
+            raise
+
+    async def close_all_sessions(self) -> None:
+        """
+        Closes all active MCP sessions that were established by `connect_all_sessions()`.
+        This method is intended for tearing down long-lived sessions, e.g., during server shutdown.
+        """
+        if not self._is_active_via_connect_all:
+            # Optionally log a warning if called when not actively managing sessions
+            # print("Warning: close_all_sessions called but sessions are not actively managed by connect_all_sessions.")
+            return
+
+        if self.exit_stack:
+            await self.exit_stack.aclose()
+            self.exit_stack = None
+        
+        self.sessions.clear()
+        self.server_name_to_tools.clear()
+        self._is_active_via_connect_all = False
+
+    async def __aenter__(self) -> "MultiServerMCPClient":
+        if self._is_active_via_connect_all:
+            # Sessions are managed by connect_all_sessions(), __aenter__ is a no-op for session setup.
+            return self
+
+        if self.exit_stack is not None:
+            # This implies a programming error, e.g., nested __aenter__ without __aexit__,
+            # or calling __aenter__ after connect_all_sessions without _is_active_via_connect_all being true.
+            raise RuntimeError("Client is already in an active context or improperly configured.")
+
+        # This __aenter__ call is responsible for its own exit_stack.
+        self.exit_stack = AsyncExitStack()
+        try:
+            connections = self.connections or {}
+            for server_name, connection_params in connections.items():
+                # Type hint for connection_params to satisfy mypy when spread
+                typed_params: StdioConnection | SSEConnection | WebsocketConnection = connection_params
+                await self.connect_to_server(server_name, **typed_params)
             return self
         except Exception:
-            await self.exit_stack.aclose()
+            # If any connection fails during __aenter__, clean up the stack created by this __aenter__.
+            if self.exit_stack:
+                await self.exit_stack.aclose()
+            self.exit_stack = None # Reset it
+            self.sessions.clear() # Clear any partially loaded sessions/tools
+            self.server_name_to_tools.clear()
             raise
 
     async def __aexit__(
@@ -368,4 +452,15 @@ class MultiServerMCPClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        await self.exit_stack.aclose()
+        if self._is_active_via_connect_all:
+            # Sessions are managed by connect_all_sessions(), __aexit__ is a no-op for session teardown.
+            return
+
+        # This __aexit__ corresponds to an __aenter__ that set up the stack.
+        if self.exit_stack:
+            await self.exit_stack.aclose()
+            self.exit_stack = None
+        
+        # Clear sessions and tools that were populated within the context of this __aenter__
+        self.sessions.clear()
+        self.server_name_to_tools.clear()
