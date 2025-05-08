@@ -59,9 +59,6 @@ from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.prebuilt import create_react_agent
 
-from langchain_openai import ChatOpenAI
-model = ChatOpenAI(model="gpt-4o")
-
 server_params = StdioServerParameters(
     command="python",
     # Make sure to update to the full absolute path to your math_server.py file
@@ -77,7 +74,7 @@ async with stdio_client(server_params) as (read, write):
         tools = await load_mcp_tools(session)
 
         # Create and run the agent
-        agent = create_react_agent(model, tools)
+        agent = create_react_agent("openai:gpt-4.1", tools)
         agent_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
@@ -116,9 +113,6 @@ python weather_server.py
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
 
-from langchain_openai import ChatOpenAI
-model = ChatOpenAI(model="gpt-4o")
-
 async with MultiServerMCPClient(
     {
         "math": {
@@ -134,9 +128,61 @@ async with MultiServerMCPClient(
         }
     }
 ) as client:
-    agent = create_react_agent(model, client.get_tools())
+    agent = create_react_agent("openai:gpt-4.1", client.get_tools())
     math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
     weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
+```
+
+## Streamable HTTP
+
+MCP now supports [streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) transport.
+
+To start an [example](examples/servers/streamable-http-stateless/) stremable HTTP server:
+
+```bash
+cd examples/servers/streamable-http-stateless/
+uv run mcp-simple-streamablehttp-stateless --port 3000
+```
+
+To use it with Python MCP SDK `streamablehttp_client`:
+
+```python
+# Use server from examples/servers/streamable-http-stateless/
+
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+from langgraph.prebuilt import create_react_agent
+from langchain_mcp_adapters.tools import load_mcp_tools
+
+async with streamablehttp_client("http://localhost:3000/mcp") as (read, write, _):
+    async with ClientSession(read, write) as session:
+        # Initialize the connection
+        await session.initialize()
+
+        # Get tools
+        tools = await load_mcp_tools(session)
+        agent = create_react_agent("openai:gpt-4.1", tools)
+        math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
+```
+
+Use it with `MultiServerMCPClient`:
+
+```python
+# Use server from examples/servers/streamable-http-stateless/
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+
+async with MultiServerMCPClient(
+    {
+        "math": {
+            "transport": "streamable_http",
+            "url": "http://localhost:3000/mcp"
+        },
+    }
+) as client:
+    agent = create_react_agent("openai:gpt-4.1", client.get_tools())
+    math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
 ## Using with LangGraph StateGraph
@@ -146,8 +192,8 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from langchain_openai import ChatOpenAI
-model = ChatOpenAI(model="gpt-4o")
+from langchain.chat_models import init_chat_model
+model = init_chat_model("openai:gpt-4.1")
 
 async with MultiServerMCPClient(
     {
