@@ -344,7 +344,7 @@ class MultiServerMCPClient:
         streamable_http_transport = await self.exit_stack.enter_async_context(
             streamablehttp_client(url, headers, timeout, sse_read_timeout)
         )
-        read, write = streamable_http_transport
+        read, write, _get_session_id_callback = streamable_http_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
