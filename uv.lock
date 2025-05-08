@@ -292,7 +292,7 @@ wheels = [
 
 [[package]]
 name = "langchain-mcp-adapters"
-version = "0.0.10"
+version = "0.0.11"
 source = { editable = "." }
 dependencies = [
     { name = "langchain-core" },
