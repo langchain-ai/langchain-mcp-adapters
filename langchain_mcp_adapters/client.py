@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import AsyncExitStack
 from datetime import timedelta
@@ -140,10 +141,11 @@ class MultiServerMCPClient:
             ...
         ```
         """
+
         self.connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection] = (
             connections or {}
         )
-        self.exit_stack = AsyncExitStack()
+        self.exit_stacks:  dict[str, AsyncExitStack] = {}
         self.sessions: dict[str, ClientSession] = {}
         self.server_name_to_tools: dict[str, list[BaseTool]] = {}
 
@@ -280,13 +282,16 @@ class MultiServerMCPClient:
             encoding_error_handler=encoding_error_handler,
         )
 
+        exit_stack = AsyncExitStack()
+        self.exit_stacks[server_name] = exit_stack
+        
         # Create and store the connection
-        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
+        stdio_transport = await exit_stack.enter_async_context(stdio_client(server_params))
         read, write = stdio_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+            await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
@@ -311,15 +316,18 @@ class MultiServerMCPClient:
             sse_read_timeout: SSE read timeout
             session_kwargs: Additional keyword arguments to pass to the ClientSession
         """
+        exit_stack = AsyncExitStack()
+        self.exit_stacks[server_name] = exit_stack
+
         # Create and store the connection
-        sse_transport = await self.exit_stack.enter_async_context(
+        sse_transport = await exit_stack.enter_async_context(
             sse_client(url, headers, timeout, sse_read_timeout)
         )
         read, write = sse_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+            await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
@@ -383,15 +391,51 @@ class MultiServerMCPClient:
                 "'pip install mcp[ws]' or 'pip install websockets'",
             ) from None
 
-        ws_transport = await self.exit_stack.enter_async_context(websocket_client(url))
+        exit_stack = AsyncExitStack()
+        self.exit_stacks[server_name] = exit_stack
+
+        ws_transport = await exit_stack.enter_async_context(websocket_client(url))
         read, write = ws_transport
         session_kwargs = session_kwargs or {}
         session = cast(
             ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
+            await exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
         )
 
         await self._initialize_session_and_load_tools(server_name, session)
+
+    async def disconnect_server(
+        self,
+        server_name: str
+    ) -> None:
+        """Disconnect an MCP server using either stdio or SSE.
+
+        Disconnect and release any resource related to the specified server
+
+        Args:
+            server_name: Name to identify this server connection
+
+        """
+
+        self.sessions.pop(server_name, None)
+        self.server_name_to_tools.pop(server_name, None)
+        self.connections.pop(server_name, None)
+
+        # we don't pop the exit_stack so any remaining resource could be released when the client closes
+        exit_stack = self.exit_stacks.get(server_name, None)
+        if exit_stack:
+            try:
+                await exit_stack.aclose()
+            
+            # as we release a server in a different order than LIFO, asyncio is not happy hence the suppressed errors
+            # however resources are released (especially stdio process)
+            except RuntimeError as e:
+                if repr(e) == 'RuntimeError("Attempted to exit a cancel scope that isn\'t the current tasks\'s current cancel scope")' or repr(e) == 'RuntimeError("Attempted to exit cancel scope in a different task than it was entered in")':
+                    pass
+                else: 
+                    raise e
+            except asyncio.CancelledError:
+                pass
 
     def get_tools(self) -> list[BaseTool]:
         """Get a list of all tools from all connected servers."""
@@ -430,7 +474,8 @@ class MultiServerMCPClient:
 
             return self
         except Exception:
-            await self.exit_stack.aclose()
+            for server_name in reversed(self.exit_stacks):
+                await self.exit_stacks[server_name].aclose()
             raise
 
     async def __aexit__(
@@ -439,4 +484,5 @@ class MultiServerMCPClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        await self.exit_stack.aclose()
+        for server_name in reversed(self.exit_stacks):
+                await self.exit_stacks[server_name].aclose()
