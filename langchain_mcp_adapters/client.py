@@ -236,7 +236,9 @@ class MultiServerMCPClient:
                 session_kwargs=kwargs.get("session_kwargs"),
             )
         else:
-            raise ValueError(f"Unsupported transport: {transport}. Must be 'stdio' or 'sse'")
+            raise ValueError(
+                f"Unsupported transport: {transport}. Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
+            )
 
     async def connect_to_server_via_stdio(
         self,
