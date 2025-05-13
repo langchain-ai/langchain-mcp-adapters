@@ -78,6 +78,22 @@ async with stdio_client(server_params) as (read, write):
         agent_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
+You can choose to automatically create a new client session on each tool execution by passing empty session to `load_mcp_tools`:
+
+```python
+from langchain_mcp_adapters.tools import load_mcp_tools
+
+connection = {
+    "command": "python",
+    # Make sure to update to the full absolute path to your math_server.py file
+    "args": ["/path/to/math_server.py"],
+    "transport": "stdio",
+}
+
+tools = await load_mcp_tools(None, connection=connection)
+agent = create_react_agent("openai:gpt-4.1", tools)
+```
+
 ## Multiple MCP Servers
 
 The library also allows you to connect to multiple MCP servers and load tools from them:
