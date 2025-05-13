@@ -21,12 +21,12 @@ DEFAULT_STREAMABLE_HTTP_TIMEOUT = timedelta(seconds=30)
 DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
 
 
-class BaseConnectionConfig(TypedDict):
+class BaseConnection(TypedDict):
     session_kwargs: dict[str, Any] | None
     """Additional keyword arguments to pass to the ClientSession"""
 
 
-class StdioConnectionConfig(BaseConnectionConfig):
+class StdioConnection(BaseConnection):
     transport: Literal["stdio"]
 
     command: str
@@ -53,7 +53,7 @@ class StdioConnectionConfig(BaseConnectionConfig):
     """
 
 
-class SSEConnectionConfig(BaseConnectionConfig):
+class SSEConnection(BaseConnection):
     transport: Literal["sse"]
 
     url: str
@@ -69,7 +69,7 @@ class SSEConnectionConfig(BaseConnectionConfig):
     """SSE read timeout"""
 
 
-class StreamableHttpConnectionConfig(BaseConnectionConfig):
+class StreamableHttpConnection(BaseConnection):
     transport: Literal["streamable_http"]
 
     url: str
@@ -86,19 +86,14 @@ class StreamableHttpConnectionConfig(BaseConnectionConfig):
     All other HTTP operations are controlled by `timeout`."""
 
 
-class WebsocketConnectionConfig(BaseConnectionConfig):
+class WebsocketConnection(BaseConnection):
     transport: Literal["websocket"]
 
     url: str
     """The URL of the Websocket endpoint to connect to."""
 
 
-ConnectionConfig = (
-    StdioConnectionConfig
-    | SSEConnectionConfig
-    | StreamableHttpConnectionConfig
-    | WebsocketConnectionConfig
-)
+Connection = StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
 
 
 @asynccontextmanager
@@ -224,12 +219,12 @@ async def _connect_to_server_via_websocket(
 
 @asynccontextmanager
 async def connect_to_server(
-    connection_config: ConnectionConfig,
+    connection: Connection,
 ) -> AsyncIterator[ClientSession]:
     """Connect to an MCP server.
 
     Args:
-        connection_config: Connection config to use to connect to the server
+        connection: Connection config to use to connect to the server
 
     Raises:
         ValueError: If transport is not recognized
@@ -238,54 +233,54 @@ async def connect_to_server(
     Yields:
         A ClientSession
     """
-    transport = connection_config["transport"]
+    transport = connection["transport"]
     if transport == "sse":
-        if "url" not in connection_config:
+        if "url" not in connection:
             raise ValueError("'url' parameter is required for SSE connection")
         async with _connect_to_server_via_sse(
-            url=connection_config["url"],
-            headers=connection_config.get("headers"),
-            timeout=connection_config.get("timeout", DEFAULT_HTTP_TIMEOUT),
-            sse_read_timeout=connection_config.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
-            session_kwargs=connection_config.get("session_kwargs"),
+            url=connection["url"],
+            headers=connection.get("headers"),
+            timeout=connection.get("timeout", DEFAULT_HTTP_TIMEOUT),
+            sse_read_timeout=connection.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
+            session_kwargs=connection.get("session_kwargs"),
         ) as session:
             yield session
     elif transport == "streamable_http":
-        if "url" not in connection_config:
+        if "url" not in connection:
             raise ValueError("'url' parameter is required for Streamable HTTP connection")
         async with _connect_to_server_via_streamable_http(
-            url=connection_config["url"],
-            headers=connection_config.get("headers"),
-            timeout=connection_config.get("timeout", DEFAULT_STREAMABLE_HTTP_TIMEOUT),
-            sse_read_timeout=connection_config.get(
+            url=connection["url"],
+            headers=connection.get("headers"),
+            timeout=connection.get("timeout", DEFAULT_STREAMABLE_HTTP_TIMEOUT),
+            sse_read_timeout=connection.get(
                 "sse_read_timeout", DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT
             ),
-            session_kwargs=connection_config.get("session_kwargs"),
+            session_kwargs=connection.get("session_kwargs"),
         ) as session:
             yield session
     elif transport == "stdio":
-        if "command" not in connection_config:
+        if "command" not in connection:
             raise ValueError("'command' parameter is required for stdio connection")
-        if "args" not in connection_config:
+        if "args" not in connection:
             raise ValueError("'args' parameter is required for stdio connection")
         async with _connect_to_server_via_stdio(
-            command=connection_config["command"],
-            args=connection_config["args"],
-            env=connection_config.get("env"),
-            cwd=connection_config.get("cwd"),
-            encoding=connection_config.get("encoding", DEFAULT_ENCODING),
-            encoding_error_handler=connection_config.get(
+            command=connection["command"],
+            args=connection["args"],
+            env=connection.get("env"),
+            cwd=connection.get("cwd"),
+            encoding=connection.get("encoding", DEFAULT_ENCODING),
+            encoding_error_handler=connection.get(
                 "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
             ),
-            session_kwargs=connection_config.get("session_kwargs"),
+            session_kwargs=connection.get("session_kwargs"),
         ) as session:
             yield session
     elif transport == "websocket":
-        if "url" not in connection_config:
+        if "url" not in connection:
             raise ValueError("'url' parameter is required for Websocket connection")
         async with _connect_to_server_via_websocket(
-            url=connection_config["url"],
-            session_kwargs=connection_config.get("session_kwargs"),
+            url=connection["url"],
+            session_kwargs=connection.get("session_kwargs"),
         ) as session:
             yield session
     else:

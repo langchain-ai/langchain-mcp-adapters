@@ -1,6 +1,6 @@
-from contextlib import AsyncExitStack
+from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any, Optional, cast
+from typing import Any, AsyncIterator
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
@@ -9,16 +9,25 @@ from mcp import ClientSession
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
-from langchain_mcp_adapters.sessions import ConnectionConfig, connect_to_server
+from langchain_mcp_adapters.sessions import Connection, connect_to_server
 from langchain_mcp_adapters.tools import load_mcp_tools
+
+ASYNC_CONTEXT_MANAGER_ERROR = (
+    "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a context manager (e.g., async with MultiServerMCPClient(...)). "
+    "Instead, you can do:\n"
+    "1. tools = MultiServerMCPClient(...).get_tools()\n"
+    "2. client = MultiServerMCPClient(...)\n"
+    "   async with client.connect_to_server('math') as session:\n"
+    "       tools = await load_mcp_tools(session)"
+)
 
 
 class MultiServerMCPClient:
-    """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
+    """Client for connecting to multiple MCP servers and loading LangChain-compatible tools, prompts and resources from them."""
 
     def __init__(
         self,
-        connections: dict[str, ConnectionConfig] | None = None,
+        connections: dict[str, Connection] | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -29,7 +38,7 @@ class MultiServerMCPClient:
         Example:
 
         ```python
-        async with MultiServerMCPClient(
+        client = MultiServerMCPClient(
             {
                 "math": {
                     "command": "python",
@@ -39,139 +48,69 @@ class MultiServerMCPClient:
                 },
                 "weather": {
                     # make sure you start your weather server on port 8000
-                    "url": "http://localhost:8000/sse",
-                    "transport": "sse",
+                    "url": "http://localhost:8000/mcp",
+                    "transport": "streamable_http",
                 }
             }
-        ) as client:
-            all_tools = client.get_tools()
-            ...
+        )
+        all_tools = client.get_tools()
         ```
         """
-        self.connections: dict[str, ConnectionConfig] = connections or {}
-        self.exit_stack = AsyncExitStack()
-        self.sessions: dict[str, ClientSession] = {}
-        self.server_name_to_tools: dict[str, list[BaseTool]] = {}
+        self.connections: dict[str, Connection] = connections or {}
 
-    async def _initialize_session_and_load_tools(
-        self, server_name: str, session: ClientSession
-    ) -> None:
-        """Initialize a session and load tools from it.
-
-        Args:
-            server_name: Name to identify this server connection
-            session: The ClientSession to initialize
-        """
-        # Initialize the session
-        await session.initialize()
-        self.sessions[server_name] = session
-
-        # Load tools from this server
-        server_tools = await load_mcp_tools(session)
-        self.server_name_to_tools[server_name] = server_tools
-
+    @asynccontextmanager
     async def connect_to_server(
         self,
         server_name: str,
-        **connection_config: dict[str, Any],
-    ) -> None:
-        """Connect to an MCP server.
-
-        This is a generic method that calls individual connection methods
-        based on the provided transport parameter
-        (e.g., `connect_to_server_via_stdio`, etc.).
+    ) -> AsyncIterator[ClientSession]:
+        """Connect to an MCP server and initialize a session.
 
         Args:
             server_name: Name to identify this server connection
-            **connection_config: Additional arguments to pass to the specific connection method
 
         Raises:
-            ValueError: If transport is not recognized
-            ValueError: If required parameters for the specified transport are missing
-        """
-        session = cast(
-            ClientSession,
-            await self.exit_stack.enter_async_context(connect_to_server(connection_config)),
-        )
-        await self._initialize_session_and_load_tools(server_name, session)
+            ValueError: If the server name is not found in the connections
 
-    async def connect_to_server_via_stdio(
-        self,
-        server_name: str,
-        **connection_config: dict[str, Any],
-    ) -> None:
-        """Connect to a specific MCP server using stdio
+        Yields:
+            An initialized ClientSession
+        """
+        if server_name not in self.connections:
+            raise ValueError(f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'")
+
+        async with connect_to_server(self.connections[server_name]) as session:
+            await session.initialize()
+            yield session
+
+    async def get_tools(self, server_name: str | None = None) -> list[BaseTool]:
+        """Get a list of all tools from all connected servers.
 
         Args:
-            server_name: Name to identify this server connection
-            **connection_config: connection config, e.g. StdioConnectionConfig
+            server_name: Optional name of the server to get tools from.
+                If None, all tools from all servers will be returned (default).
+
+        NOTE: a new session will be created for each tool call
+
+        Returns:
+            A list of LangChain tools
         """
-        if "transport" not in connection_config:
-            connection_config["transport"] = "stdio"
+        if server_name is not None:
+            if server_name not in self.connections:
+                raise ValueError(f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'")
+            return await load_mcp_tools(None, connection=self.connections[server_name])
 
-        await self.connect_to_server(server_name, **connection_config)
-
-    async def connect_to_server_via_sse(
-        self,
-        server_name: str,
-        **connection_config: dict[str, Any],
-    ) -> None:
-        """Connect to a specific MCP server using SSE
-
-        Args:
-            server_name: Name to identify this server connection
-            **connection_config: connection config, e.g. SSEConnectionConfig
-        """
-        if "transport" not in connection_config:
-            connection_config["transport"] = "sse"
-
-        await self.connect_to_server(server_name, **connection_config)
-
-    async def connect_to_server_via_streamable_http(
-        self,
-        server_name: str,
-        **connection_config: dict[str, Any],
-    ) -> None:
-        """Connect to a specific MCP server using Streamable HTTP
-
-        Args:
-            server_name: Name to identify this server connection
-            **connection_config: connection config, e.g. StreamableHttpConnectionConfig
-        """
-        if "transport" not in connection_config:
-            connection_config["transport"] = "streamable_http"
-
-        await self.connect_to_server(server_name, **connection_config)
-
-    async def connect_to_server_via_websocket(
-        self,
-        server_name: str,
-        **connection_config: dict[str, Any],
-    ):
-        """Connect to a specific MCP server using Websockets
-
-        Args:
-            server_name: Name to identify this server connection
-            **connection_config: connection config, e.g. WebsocketConnectionConfig
-        """
-        if "transport" not in connection_config:
-            connection_config["transport"] = "websocket"
-
-        await self.connect_to_server(server_name, **connection_config)
-
-    def get_tools(self) -> list[BaseTool]:
-        """Get a list of all tools from all connected servers."""
         all_tools: list[BaseTool] = []
-        for server_tools in self.server_name_to_tools.values():
-            all_tools.extend(server_tools)
+        for connection in self.connections.values():
+            tools = await load_mcp_tools(None, connection=connection)
+            all_tools.extend(tools)
         return all_tools
 
     async def get_prompt(
-        self, server_name: str, prompt_name: str, arguments: Optional[dict[str, Any]]
+        self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None
     ) -> list[HumanMessage | AIMessage]:
         """Get a prompt from a given MCP server."""
-        session = self.sessions[server_name]
-        return await load_mcp_prompt(session, prompt_name, arguments)
+        async with self.connect_to_server(server_name) as session:
+            prompt = await load_mcp_prompt(session, prompt_name, arguments)
+            return prompt
 
     async def get_resources(
         self, server_name: str, uris: str | list[str] | None = None
@@ -185,24 +124,17 @@ class MultiServerMCPClient:
         Returns:
             A list of LangChain Blobs
         """
-        session = self.sessions[server_name]
-        return await load_mcp_resources(session, uris)
+        async with self.connect_to_server(server_name) as session:
+            resources = await load_mcp_resources(session, uris)
+            return resources
 
     async def __aenter__(self) -> "MultiServerMCPClient":
-        try:
-            connections = self.connections or {}
-            for server_name, connection in connections.items():
-                await self.connect_to_server(server_name, **connection)
+        raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
 
-            return self
-        except Exception:
-            await self.exit_stack.aclose()
-            raise
-
-    async def __aexit__(
+    def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        await self.exit_stack.aclose()
+        raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)

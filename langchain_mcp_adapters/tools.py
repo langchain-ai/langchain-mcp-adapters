@@ -12,7 +12,7 @@ from mcp.types import (
     Tool as MCPTool,
 )
 
-from langchain_mcp_adapters.sessions import ConnectionConfig, connect_to_server
+from langchain_mcp_adapters.sessions import Connection, connect_to_server
 
 NonTextContent = ImageContent | EmbeddedResource
 
@@ -44,7 +44,7 @@ def convert_mcp_tool_to_langchain_tool(
     session: ClientSession | None,
     tool: MCPTool,
     *,
-    connection_config: ConnectionConfig | None = None,
+    connection: Connection | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -53,12 +53,12 @@ def convert_mcp_tool_to_langchain_tool(
     Args:
         session: MCP client session
         tool: MCP tool to convert
-        connection_config: Connection config to use to create a new session if a `session` is not provided
+        connection: Connection config to use to create a new session if a `session` is not provided
 
     Returns:
         a LangChain tool
     """
-    if session is None and connection_config is None:
+    if session is None and connection is None:
         raise ValueError("Either a session or a connection config must be provided")
 
     async def call_tool(
@@ -66,7 +66,7 @@ def convert_mcp_tool_to_langchain_tool(
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         if session is None:
             # If a session is not provided, we will create one on the fly
-            async with connect_to_server(connection_config) as tool_session:
+            async with connect_to_server(connection) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast(ClientSession, tool_session).call_tool(
                     tool.name, arguments
@@ -87,21 +87,21 @@ def convert_mcp_tool_to_langchain_tool(
 async def load_mcp_tools(
     session: ClientSession | None,
     *,
-    connection_config: ConnectionConfig | None = None,
+    connection: Connection | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools."""
-    if session is None and connection_config is None:
+    if session is None and connection is None:
         raise ValueError("Either a session or a connection config must be provided")
 
     if session is None:
         # If a session is not provided, we will create one on the fly
-        async with connect_to_server(connection_config) as tool_session:
+        async with connect_to_server(connection) as tool_session:
             await tool_session.initialize()
             tools = await tool_session.list_tools()
     else:
         tools = await session.list_tools()
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection_config=connection_config)
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
         for tool in tools.tools
     ]
