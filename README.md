@@ -78,22 +78,6 @@ async with stdio_client(server_params) as (read, write):
         agent_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
-You can choose to automatically create a new client session on each tool execution by passing empty session to `load_mcp_tools`:
-
-```python
-from langchain_mcp_adapters.tools import load_mcp_tools
-
-connection = {
-    "command": "python",
-    # Make sure to update to the full absolute path to your math_server.py file
-    "args": ["/path/to/math_server.py"],
-    "transport": "stdio",
-}
-
-tools = await load_mcp_tools(None, connection=connection)
-agent = create_react_agent("openai:gpt-4.1", tools)
-```
-
 ## Multiple MCP Servers
 
 The library also allows you to connect to multiple MCP servers and load tools from them:
@@ -149,6 +133,17 @@ agent = create_react_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
+
+> [!note] "Session management"
+> Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
+
+    ```python
+    from langchain_mcp_adapters.tools import load_mcp_tools
+
+    client = MultiServerMCPClient({...})
+    async with client.session("math") as session:
+        tools = await load_mcp_tools(session)
+    ```
 
 ## Streamable HTTP
 

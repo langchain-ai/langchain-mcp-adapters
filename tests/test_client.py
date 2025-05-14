@@ -55,18 +55,18 @@ async def test_multi_server_mcp_client(
     assert tool_names == {"add", "multiply", "get_weather", "get_time"}
 
     # Check math server tools
-    math_tools = await client.get_tools("math")
+    math_tools = await client.get_tools(server_name="math")
     assert len(math_tools) == 2
     math_tool_names = {tool.name for tool in math_tools}
     assert math_tool_names == {"add", "multiply"}
 
     # Check weather server tools
-    weather_tools = await client.get_tools("weather")
+    weather_tools = await client.get_tools(server_name="weather")
     assert len(weather_tools) == 1
     assert weather_tools[0].name == "get_weather"
 
     # Check time server tools
-    time_tools = await client.get_tools("time")
+    time_tools = await client.get_tools(server_name="time")
     assert len(time_tools) == 1
     assert time_tools[0].name == "get_time"
 
@@ -118,7 +118,7 @@ async def test_multi_server_connect_methods(
         }
     )
     tool_names = set()
-    async with client.connect_to_server("math") as session:
+    async with client.session("math") as session:
         tools = await load_mcp_tools(session)
         assert len(tools) == 2
         result = await tools[0].ainvoke({"a": 2, "b": 3})
@@ -127,7 +127,7 @@ async def test_multi_server_connect_methods(
         for tool in tools:
             tool_names.add(tool.name)
 
-    async with client.connect_to_server("time") as session:
+    async with client.session("time") as session:
         tools = await load_mcp_tools(session)
         assert len(tools) == 1
         result = await tools[0].ainvoke({"args": ""})
@@ -158,7 +158,7 @@ async def test_get_prompt():
     )
     # Test getting a prompt from the math server
     messages = await client.get_prompt(
-        "math", "configure_assistant", {"skills": "math, addition, multiplication"}
+        "math", "configure_assistant", arguments={"skills": "math, addition, multiplication"}
     )
 
     # Check that we got an AIMessage back

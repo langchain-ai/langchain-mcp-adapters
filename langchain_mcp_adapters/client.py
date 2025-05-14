@@ -9,7 +9,7 @@ from mcp import ClientSession
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
-from langchain_mcp_adapters.sessions import Connection, connect_to_server
+from langchain_mcp_adapters.sessions import Connection, create_session
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
@@ -35,9 +35,11 @@ class MultiServerMCPClient:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
 
-        Example:
+        Example: basic usage (starting a new session on each tool call)
 
         ```python
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+
         client = MultiServerMCPClient(
             {
                 "math": {
@@ -53,20 +55,34 @@ class MultiServerMCPClient:
                 }
             }
         )
-        all_tools = client.get_tools()
+        all_tools = await client.get_tools()
+        ```
+
+        Example: explicitly starting a session
+
+        ```python
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+        from langchain_mcp_adapters.tools import load_mcp_tools
+
+        client = MultiServerMCPClient({...})
+        async with client.session("math") as session:
+            tools = await load_mcp_tools(session)
         ```
         """
         self.connections: dict[str, Connection] = connections or {}
 
     @asynccontextmanager
-    async def connect_to_server(
+    async def session(
         self,
         server_name: str,
+        *,
+        auto_initialize: bool = True,
     ) -> AsyncIterator[ClientSession]:
         """Connect to an MCP server and initialize a session.
 
         Args:
             server_name: Name to identify this server connection
+            auto_initialize: Whether to automatically initialize the session
 
         Raises:
             ValueError: If the server name is not found in the connections
@@ -79,11 +95,12 @@ class MultiServerMCPClient:
                 f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
             )
 
-        async with connect_to_server(self.connections[server_name]) as session:
-            await session.initialize()
+        async with create_session(self.connections[server_name]) as session:
+            if auto_initialize:
+                await session.initialize()
             yield session
 
-    async def get_tools(self, server_name: str | None = None) -> list[BaseTool]:
+    async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
         """Get a list of all tools from all connected servers.
 
         Args:
@@ -109,15 +126,15 @@ class MultiServerMCPClient:
         return all_tools
 
     async def get_prompt(
-        self, server_name: str, prompt_name: str, arguments: dict[str, Any] | None = None
+        self, server_name: str, prompt_name: str, *, arguments: dict[str, Any] | None = None
     ) -> list[HumanMessage | AIMessage]:
         """Get a prompt from a given MCP server."""
-        async with self.connect_to_server(server_name) as session:
-            prompt = await load_mcp_prompt(session, prompt_name, arguments)
+        async with self.session(server_name) as session:
+            prompt = await load_mcp_prompt(session, prompt_name, arguments=arguments)
             return prompt
 
     async def get_resources(
-        self, server_name: str, uris: str | list[str] | None = None
+        self, server_name: str, *, uris: str | list[str] | None = None
     ) -> list[Blob]:
         """Get resources from a given MCP server.
 
@@ -128,8 +145,8 @@ class MultiServerMCPClient:
         Returns:
             A list of LangChain Blobs
         """
-        async with self.connect_to_server(server_name) as session:
-            resources = await load_mcp_resources(session, uris)
+        async with self.session(server_name) as session:
+            resources = await load_mcp_resources(session, uris=uris)
             return resources
 
     async def __aenter__(self) -> "MultiServerMCPClient":

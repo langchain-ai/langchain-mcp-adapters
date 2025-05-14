@@ -141,7 +141,7 @@ async def test_load_mcp_resources_with_list_of_uris():
         ),
     ]
 
-    blobs = await load_mcp_resources(session, [uri1, uri2])
+    blobs = await load_mcp_resources(session, uris=[uri1, uri2])
 
     assert len(blobs) == 2
     assert all(isinstance(d, Blob) for d in blobs)
@@ -165,7 +165,7 @@ async def test_load_mcp_resources_with_single_uri_string():
         )
     )
 
-    blobs = await load_mcp_resources(session, uri)
+    blobs = await load_mcp_resources(session, uris=uri)
 
     assert len(blobs) == 1
     assert isinstance(blobs[0], Blob)
@@ -229,7 +229,7 @@ async def test_load_mcp_resources_with_error_handling():
     ]
 
     with pytest.raises(RuntimeError) as exc_info:
-        await load_mcp_resources(session, [uri1, uri2])
+        await load_mcp_resources(session, uris=[uri1, uri2])
 
     assert "Error fetching resource" in str(exc_info.value)
 
@@ -249,7 +249,7 @@ async def test_load_mcp_resources_with_blob_content():
         )
     )
 
-    blobs = await load_mcp_resources(session, uri)
+    blobs = await load_mcp_resources(session, uris=uri)
 
     assert len(blobs) == 1
     assert isinstance(blobs[0], Blob)

@@ -53,6 +53,7 @@ async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
 
 async def load_mcp_resources(
     session: ClientSession,
+    *,
     uris: str | list[str] | None = None,
 ) -> list[Blob]:
     """Load MCP resources and convert them to LangChain Blobs.
