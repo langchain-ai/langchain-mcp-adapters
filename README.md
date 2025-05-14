@@ -134,16 +134,16 @@ math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
-> [!note] "Session management"
+> [!note]
 > Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
-
-    ```python
-    from langchain_mcp_adapters.tools import load_mcp_tools
-
-    client = MultiServerMCPClient({...})
-    async with client.session("math") as session:
-        tools = await load_mcp_tools(session)
-    ```
+>
+>    ```python
+>    from langchain_mcp_adapters.tools import load_mcp_tools
+>
+>    client = MultiServerMCPClient({...})
+>    async with client.session("math") as session:
+>        tools = await load_mcp_tools(session)
+>    ```
 
 ## Streamable HTTP
 
