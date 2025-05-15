@@ -9,7 +9,14 @@ from mcp import ClientSession
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
-from langchain_mcp_adapters.sessions import Connection, create_session
+from langchain_mcp_adapters.sessions import (
+    Connection,
+    SSEConnection,
+    StdioConnection,
+    StreamableHttpConnection,
+    WebsocketConnection,
+    create_session,
+)
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
@@ -70,7 +77,7 @@ class MultiServerMCPClient:
             tools = await load_mcp_tools(session)
         ```
         """
-        self.connections: dict[str, Connection] = connections or {}
+        self.connections: dict[str, Connection] = connections if connections is not None else {}
 
     @asynccontextmanager
     async def session(
@@ -160,3 +167,12 @@ class MultiServerMCPClient:
         exc_tb: TracebackType | None,
     ) -> None:
         raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
+
+
+__all__ = [
+    "MultiServerMCPClient",
+    "SSEConnection",
+    "StdioConnection",
+    "StreamableHttpConnection",
+    "WebsocketConnection",
+]
