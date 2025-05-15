@@ -15,6 +15,7 @@ from mcp.types import (
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | EmbeddedResource
+MAX_ITERATIONS = 1000
 
 
 def _convert_call_tool_result(
@@ -38,6 +39,31 @@ def _convert_call_tool_result(
         raise ToolException(tool_content)
 
     return tool_content, non_text_contents or None
+
+
+async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
+    current_cursor: str | None = None
+    all_tools: list[MCPTool] = []
+
+    iterations = 0
+    while True:
+        iterations += 1
+        if iterations > MAX_ITERATIONS:
+            raise RuntimeError("Reached max of 1000 iterations while listing tools.")
+
+        list_tools_page_result = await session.list_tools(cursor=current_cursor)
+
+        if list_tools_page_result.tools:
+            all_tools.extend(list_tools_page_result.tools)
+
+        if list_tools_page_result.nextCursor is None:
+            break
+
+        if list_tools_page_result.nextCursor == current_cursor:
+            raise RuntimeError("MCP returned the same cursor twice")
+
+        current_cursor = list_tools_page_result.nextCursor
+    return all_tools
 
 
 def convert_mcp_tool_to_langchain_tool(
@@ -105,11 +131,10 @@ async def load_mcp_tools(
         # If a session is not provided, we will create one on the fly
         async with create_session(connection) as tool_session:
             await tool_session.initialize()
-            tools = await tool_session.list_tools()
+            tools = await _list_all_tools(tool_session)
     else:
-        tools = await session.list_tools()
+        tools = await _list_all_tools(session)
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
-        for tool in tools.tools
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection) for tool in tools
     ]
