@@ -166,7 +166,7 @@ async def test_load_mcp_tools():
             inputSchema=tool_input_schema,
         ),
     ]
-    session.list_tools.return_value = MagicMock(tools=mcp_tools)
+    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
     async def mock_call_tool(tool_name, arguments):
