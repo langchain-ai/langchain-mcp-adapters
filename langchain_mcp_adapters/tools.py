@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any, TypedDict, cast, overload
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from mcp import ClientSession
@@ -15,6 +15,24 @@ from mcp.types import (
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | EmbeddedResource
+
+
+class Annotations(TypedDict, total=False):
+    """Annotations for a tool.
+
+    https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
+    """
+
+    title: str
+    """Human-readable title for the tool"""
+    readOnlyHint: bool
+    """"If true, the tool does not modify its environment"""
+    destructiveHint: bool
+    """If true, the tool may perform destructive updates"""
+    idempotentHint: bool
+    """If true, repeated calls with same args have no additional effect"""
+    openWorldHint: bool
+    """If true, tool interacts with external entities"""
 
 
 def _convert_call_tool_result(
@@ -54,6 +72,7 @@ def convert_mcp_tool_to_langchain_tool(
         session: MCP client session
         tool: MCP tool to convert
         connection: Optional connection config to use to create a new session if a `session` is not provided
+        include_annotations: Whether to include annotations in the tool description
 
     Returns:
         a LangChain tool
@@ -84,19 +103,40 @@ def convert_mcp_tool_to_langchain_tool(
     )
 
 
+@overload
 async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
-) -> list[BaseTool]:
+    include_annotations: bool = False,
+) -> list[BaseTool]: ...
+
+
+@overload
+async def load_mcp_tools(
+    session: ClientSession | None,
+    *,
+    connection: Connection | None = None,
+    include_annotations: bool = True,
+) -> list[tuple[BaseTool, Annotations]]: ...
+
+
+async def load_mcp_tools(
+    session: ClientSession | None,
+    *,
+    connection: Connection | None = None,
+    include_annotations: bool = False,
+) -> list[BaseTool] | list[tuple[BaseTool, Annotations]]:
     """Load all available MCP tools and convert them to LangChain tools.
 
     Args:
         session: MCP client session
         connection: Optional connection config to use to create a new session if a `session` is not provided
+        include_annotations: Whether to include annotations in the tool description
 
     Returns:
-        a list of LangChain tools
+        List of LangChain tools if include_annotations is False, otherwise
+        a list of tuples containing LangChain tools and their annotations
     """
     if session is None and connection is None:
         raise ValueError("Either a session or a connection config must be provided")
@@ -109,7 +149,11 @@ async def load_mcp_tools(
     else:
         tools = await session.list_tools()
 
-    return [
+    converted_tools = [
         convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
         for tool in tools.tools
     ]
+
+    if include_annotations:
+        return [(tool, tool.annotations) for tool in converted_tools]
+    return converted_tools
