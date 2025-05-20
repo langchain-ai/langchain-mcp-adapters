@@ -76,24 +76,13 @@ def convert_mcp_tool_to_langchain_tool(
             call_tool_result = await session.call_tool(tool.name, arguments)
         return _convert_call_tool_result(call_tool_result)
 
-    if tool.annotations is not None:
-        # Explicitly filter out None values from the model dump result.
-        # The MCP SDK is using Optional values instead of NotRequired values, diverging
-        # from the MCP Specification.
-        # https: // modelcontextprotocol.io / docs / concepts / tools
-        metadata: dict | None = {
-            key: value for key, value in tool.annotations.model_dump().items() if value is not None
-        }
-    else:
-        metadata = None
-
     return StructuredTool(
         name=tool.name,
         description=tool.description or "",
         args_schema=tool.inputSchema,
         coroutine=call_tool,
         response_format="content_and_artifact",
-        metadata=metadata,
+        metadata=tool.annotations.model_dump() if tool.annotations else None,
     )
 
 
