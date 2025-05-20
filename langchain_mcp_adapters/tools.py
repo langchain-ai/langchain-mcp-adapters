@@ -1,4 +1,4 @@
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from mcp import ClientSession
@@ -15,24 +15,6 @@ from mcp.types import (
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | EmbeddedResource
-
-
-class Annotations(TypedDict, total=False):
-    """Annotations for a tool.
-
-    https://modelcontextprotocol.io/docs/concepts/tools#tool-definition-structure
-    """
-
-    title: str
-    """Human-readable title for the tool"""
-    readOnlyHint: bool
-    """"If true, the tool does not modify its environment"""
-    destructiveHint: bool
-    """If true, the tool may perform destructive updates"""
-    idempotentHint: bool
-    """If true, repeated calls with same args have no additional effect"""
-    openWorldHint: bool
-    """If true, tool interacts with external entities"""
 
 
 def _convert_call_tool_result(
