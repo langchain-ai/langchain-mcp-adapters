@@ -50,8 +50,7 @@ async def run_streamable_http(server: FastMCP) -> AsyncGenerator[None, None]:
     config = uvicorn.Config(
         app,
         host="localhost",
-        # port=server.settings.port,
-        port=8181,
+        port=server.settings.port,
     )
     server = uvicorn.Server(config)
     serve_task = asyncio.create_task(server.serve())
