@@ -247,6 +247,4 @@ async def test_load_mcp_tools_with_annotations(
             "title": "Get Time",
             "readOnlyHint": True,
             "idempotentHint": False,
-            "destructiveHint": None,
-            "openWorldHint": None,
         }
