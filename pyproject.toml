@@ -31,10 +31,15 @@ test = [
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q -v"
+# -ra: Report all extra test outcomes (passed, skipped, failed, etc.)
+# -q: Enable quiet mode for less cluttered output
+# -v: Enable verbose output to display detailed test names and statuses
+# --durations=5: Show the 10 slowest tests after the run (useful for performance tuning)
+addopts = "-ra -q -v --durations=5"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
