@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any, AsyncIterator
@@ -128,8 +129,12 @@ class MultiServerMCPClient:
             return await load_mcp_tools(None, connection=self.connections[server_name])
 
         all_tools: list[BaseTool] = []
+        load_mcp_tool_tasks = []
         for connection in self.connections.values():
-            tools = await load_mcp_tools(None, connection=connection)
+            load_mcp_tool_task = asyncio.create_task(load_mcp_tools(None, connection=connection))
+            load_mcp_tool_tasks.append(load_mcp_tool_task)
+        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        for tools in tools_list:
             all_tools.extend(tools)
         return all_tools
 
