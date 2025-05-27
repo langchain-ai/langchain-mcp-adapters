@@ -17,6 +17,8 @@ from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.sessions import Connection, create_session
 
+FAST_MCP_CONTEXT_KWARG = "__context"
+
 NonTextContent = ImageContent | EmbeddedResource
 
 
@@ -140,7 +142,9 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
     async def fn(**arguments: dict[str, Any]) -> Any:
-        return await tool.ainvoke(arguments)
+        context = arguments.pop(FAST_MCP_CONTEXT_KWARG, {})
+        combined_arguments = {**arguments, **context}
+        return await tool.ainvoke(combined_arguments)
 
     fastmcp_tool = FastMCPTool(
         fn=fn,
@@ -149,5 +153,6 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
         parameters=parameters,
         fn_metadata=fn_metadata,
         is_async=True,
+        context_kwarg=FAST_MCP_CONTEXT_KWARG,
     )
     return fastmcp_tool

@@ -1,9 +1,10 @@
+from typing import Annotated
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import ArgsSchema, BaseTool, ToolException, tool
+from langchain_core.tools import ArgsSchema, BaseTool, InjectedToolArg, ToolException, tool
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
@@ -273,6 +274,12 @@ def add_with_schema(a: int, b: int) -> int:
     return a + b
 
 
+@tool("add")
+def add_with_injection(a: int, b: int, injected_arg: Annotated[str, InjectedToolArg()]) -> int:
+    """Add two numbers"""
+    return a + b
+
+
 class AddTool(BaseTool):
     name: str = "add"
     description: str = "Add two numbers"
@@ -290,15 +297,16 @@ class AddTool(BaseTool):
 
 
 @pytest.mark.parametrize(
-    "tool_instance",
+    "tool_instance, has_injected_args",
     [
-        add,
-        add_with_schema,
-        AddTool(),
+        (add, False),
+        (add_with_schema, False),
+        (add_with_injection, True),
+        (AddTool(), False),
     ],
-    ids=["tool", "tool_with_schema", "tool_class"],
+    ids=["tool", "tool_with_schema", "tool_with_injection", "tool_class"],
 )
-async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
+async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance, has_injected_args):
     fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(tool_instance)
     assert fastmcp_tool.name == "add"
     assert fastmcp_tool.description == "Add two numbers"
@@ -322,4 +330,6 @@ async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
         "type": "object",
     }
 
-    assert await fastmcp_tool.run(arguments={"a": 1, "b": 2}) == 3
+    arguments = {"a": 1, "b": 2}
+    context = {"injected_arg": "123"} if has_injected_args else None
+    assert await fastmcp_tool.run(arguments=arguments, context=context) == 3
