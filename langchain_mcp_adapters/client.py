@@ -1,127 +1,55 @@
-import os
-from contextlib import AsyncExitStack
-from datetime import timedelta
-from pathlib import Path
+import asyncio
+from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any, Literal, Optional, TypedDict, cast
+from typing import Any, AsyncIterator
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.sse import sse_client
-from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp import ClientSession
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
+from langchain_mcp_adapters.sessions import (
+    Connection,
+    SSEConnection,
+    StdioConnection,
+    StreamableHttpConnection,
+    WebsocketConnection,
+    create_session,
+)
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-EncodingErrorHandler = Literal["strict", "ignore", "replace"]
-
-DEFAULT_ENCODING = "utf-8"
-DEFAULT_ENCODING_ERROR_HANDLER: EncodingErrorHandler = "strict"
-
-DEFAULT_HTTP_TIMEOUT = 5
-DEFAULT_SSE_READ_TIMEOUT = 60 * 5
-
-DEFAULT_STREAMABLE_HTTP_TIMEOUT = timedelta(seconds=30)
-DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
-
-
-class Connection(TypedDict):
-    session_kwargs: dict[str, Any] | None
-    """Additional keyword arguments to pass to the ClientSession"""
-
-
-class StdioConnection(Connection):
-    transport: Literal["stdio"]
-
-    command: str
-    """The executable to run to start the server."""
-
-    args: list[str]
-    """Command line arguments to pass to the executable."""
-
-    env: dict[str, str] | None
-    """The environment to use when spawning the process."""
-
-    cwd: str | Path | None
-    """The working directory to use when spawning the process."""
-
-    encoding: str
-    """The text encoding used when sending/receiving messages to the server."""
-
-    encoding_error_handler: EncodingErrorHandler
-    """
-    The text encoding error handler.
-
-    See https://docs.python.org/3/library/codecs.html#codec-base-classes for
-    explanations of possible values
-    """
-
-
-class SSEConnection(Connection):
-    transport: Literal["sse"]
-
-    url: str
-    """The URL of the SSE endpoint to connect to."""
-
-    headers: dict[str, Any] | None
-    """HTTP headers to send to the SSE endpoint"""
-
-    timeout: float
-    """HTTP timeout"""
-
-    sse_read_timeout: float
-    """SSE read timeout"""
-
-
-class StreamableHttpConnection(Connection):
-    transport: Literal["streamable_http"]
-
-    url: str
-    """The URL of the endpoint to connect to."""
-
-    headers: dict[str, Any] | None
-    """HTTP headers to send to the endpoint."""
-
-    timeout: timedelta
-    """HTTP timeout."""
-
-    sse_read_timeout: timedelta
-    """How long (in seconds) the client will wait for a new event before disconnecting.
-    All other HTTP operations are controlled by `timeout`."""
-
-
-class WebsocketConnection(Connection):
-    transport: Literal["websocket"]
-
-    url: str
-    """The URL of the Websocket endpoint to connect to."""
+ASYNC_CONTEXT_MANAGER_ERROR = (
+    "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a context manager (e.g., async with MultiServerMCPClient(...)). "
+    "Instead, you can do one of the following:\n"
+    "1. client = MultiServerMCPClient(...)\n"
+    "   tools = await client.get_tools()\n"
+    "2. client = MultiServerMCPClient(...)\n"
+    "   async with client.session(server_name) as session:\n"
+    "       tools = await load_mcp_tools(session)"
+)
 
 
 class MultiServerMCPClient:
-    """Client for connecting to multiple MCP servers and loading LangChain-compatible tools from them."""
+    """Client for connecting to multiple MCP servers and loading LangChain-compatible tools, prompts and resources from them."""
 
     def __init__(
         self,
-        connections: dict[
-            str, StdioConnection | SSEConnection | WebsocketConnection | StreamableHttpConnection
-        ]
-        | None = None,
+        connections: dict[str, Connection] | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
         Args:
             connections: A dictionary mapping server names to connection configurations.
-                Each configuration can be a StdioConnection, SSEConnection, WebsocketConnection or StreamableHttpConnection.
                 If None, no initial connections are established.
 
-        Example:
+        Example: basic usage (starting a new session on each tool call)
 
         ```python
-        async with MultiServerMCPClient(
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+
+        client = MultiServerMCPClient(
             {
                 "math": {
                     "command": "python",
@@ -131,286 +59,95 @@ class MultiServerMCPClient:
                 },
                 "weather": {
                     # make sure you start your weather server on port 8000
-                    "url": "http://localhost:8000/sse",
-                    "transport": "sse",
+                    "url": "http://localhost:8000/mcp",
+                    "transport": "streamable_http",
                 }
             }
-        ) as client:
-            all_tools = client.get_tools()
-            ...
+        )
+        all_tools = await client.get_tools()
+        ```
+
+        Example: explicitly starting a session
+
+        ```python
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+        from langchain_mcp_adapters.tools import load_mcp_tools
+
+        client = MultiServerMCPClient({...})
+        async with client.session("math") as session:
+            tools = await load_mcp_tools(session)
         ```
         """
-        self.connections: dict[str, StdioConnection | SSEConnection | WebsocketConnection] = (
-            connections or {}
-        )
-        self.exit_stack = AsyncExitStack()
-        self.sessions: dict[str, ClientSession] = {}
-        self.server_name_to_tools: dict[str, list[BaseTool]] = {}
+        self.connections: dict[str, Connection] = connections if connections is not None else {}
 
-    async def _initialize_session_and_load_tools(
-        self, server_name: str, session: ClientSession
-    ) -> None:
-        """Initialize a session and load tools from it.
-
-        Args:
-            server_name: Name to identify this server connection
-            session: The ClientSession to initialize
-        """
-        # Initialize the session
-        await session.initialize()
-        self.sessions[server_name] = session
-
-        # Load tools from this server
-        server_tools = await load_mcp_tools(session)
-        self.server_name_to_tools[server_name] = server_tools
-
-    async def connect_to_server(
+    @asynccontextmanager
+    async def session(
         self,
         server_name: str,
         *,
-        transport: Literal["stdio", "sse", "websocket", "streamable_http"] = "stdio",
-        **kwargs: dict[str, Any],
-    ) -> None:
-        """Connect to an MCP server.
-
-        This is a generic method that calls individual connection methods
-        based on the provided transport parameter
-        (e.g., `connect_to_server_via_stdio`, etc.).
+        auto_initialize: bool = True,
+    ) -> AsyncIterator[ClientSession]:
+        """Connect to an MCP server and initialize a session.
 
         Args:
             server_name: Name to identify this server connection
-            transport: Type of transport to use, defaults to "stdio"
-            **kwargs: Additional arguments to pass to the specific connection method
+            auto_initialize: Whether to automatically initialize the session
 
         Raises:
-            ValueError: If transport is not recognized
-            ValueError: If required parameters for the specified transport are missing
+            ValueError: If the server name is not found in the connections
+
+        Yields:
+            An initialized ClientSession
         """
-        if transport == "sse":
-            if "url" not in kwargs:
-                raise ValueError("'url' parameter is required for SSE connection")
-            await self.connect_to_server_via_sse(
-                server_name,
-                url=kwargs["url"],
-                headers=kwargs.get("headers"),
-                timeout=kwargs.get("timeout", DEFAULT_HTTP_TIMEOUT),
-                sse_read_timeout=kwargs.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
-                session_kwargs=kwargs.get("session_kwargs"),
-            )
-        elif transport == "streamable_http":
-            if "url" not in kwargs:
-                raise ValueError("'url' parameter is required for Streamable HTTP connection")
-            await self.connect_to_server_via_streamable_http(
-                server_name,
-                url=kwargs["url"],
-                headers=kwargs.get("headers"),
-                timeout=kwargs.get("timeout", DEFAULT_STREAMABLE_HTTP_TIMEOUT),
-                sse_read_timeout=kwargs.get(
-                    "sse_read_timeout", DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT
-                ),
-                session_kwargs=kwargs.get("session_kwargs"),
-            )
-        elif transport == "stdio":
-            if "command" not in kwargs:
-                raise ValueError("'command' parameter is required for stdio connection")
-            if "args" not in kwargs:
-                raise ValueError("'args' parameter is required for stdio connection")
-            await self.connect_to_server_via_stdio(
-                server_name,
-                command=kwargs["command"],
-                args=kwargs["args"],
-                env=kwargs.get("env"),
-                cwd=kwargs.get("cwd"),
-                encoding=kwargs.get("encoding", DEFAULT_ENCODING),
-                encoding_error_handler=kwargs.get(
-                    "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
-                ),
-                session_kwargs=kwargs.get("session_kwargs"),
-            )
-        elif transport == "websocket":
-            if "url" not in kwargs:
-                raise ValueError("'url' parameter is required for Websocket connection")
-            await self.connect_to_server_via_websocket(
-                server_name,
-                url=kwargs["url"],
-                session_kwargs=kwargs.get("session_kwargs"),
-            )
-        else:
+        if server_name not in self.connections:
             raise ValueError(
-                f"Unsupported transport: {transport}. Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
+                f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
             )
 
-    async def connect_to_server_via_stdio(
-        self,
-        server_name: str,
-        *,
-        command: str,
-        args: list[str],
-        env: dict[str, str] | None = None,
-        cwd: str | Path | None = None,
-        encoding: str = DEFAULT_ENCODING,
-        encoding_error_handler: Literal[
-            "strict", "ignore", "replace"
-        ] = DEFAULT_ENCODING_ERROR_HANDLER,
-        session_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        """Connect to a specific MCP server using stdio
+        async with create_session(self.connections[server_name]) as session:
+            if auto_initialize:
+                await session.initialize()
+            yield session
+
+    async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
+        """Get a list of all tools from all connected servers.
 
         Args:
-            server_name: Name to identify this server connection
-            command: Command to execute
-            args: Arguments for the command
-            env: Environment variables for the command
-            cwd: Working directory for the command
-            encoding: Character encoding
-            encoding_error_handler: How to handle encoding errors
-            session_kwargs: Additional keyword arguments to pass to the ClientSession
+            server_name: Optional name of the server to get tools from.
+                If None, all tools from all servers will be returned (default).
+
+        NOTE: a new session will be created for each tool call
+
+        Returns:
+            A list of LangChain tools
         """
-        # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
-        # To address this, we automatically inject existing PATH envvar into the `env` value,
-        # if it's not already set.
-        env = env or {}
-        if "PATH" not in env:
-            env["PATH"] = os.environ.get("PATH", "")
+        if server_name is not None:
+            if server_name not in self.connections:
+                raise ValueError(
+                    f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
+                )
+            return await load_mcp_tools(None, connection=self.connections[server_name])
 
-        server_params = StdioServerParameters(
-            command=command,
-            args=args,
-            env=env,
-            cwd=cwd,
-            encoding=encoding,
-            encoding_error_handler=encoding_error_handler,
-        )
-
-        # Create and store the connection
-        stdio_transport = await self.exit_stack.enter_async_context(stdio_client(server_params))
-        read, write = stdio_transport
-        session_kwargs = session_kwargs or {}
-        session = cast(
-            ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
-        )
-
-        await self._initialize_session_and_load_tools(server_name, session)
-
-    async def connect_to_server_via_sse(
-        self,
-        server_name: str,
-        *,
-        url: str,
-        headers: dict[str, Any] | None = None,
-        timeout: float = DEFAULT_HTTP_TIMEOUT,
-        sse_read_timeout: float = DEFAULT_SSE_READ_TIMEOUT,
-        session_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        """Connect to a specific MCP server using SSE
-
-        Args:
-            server_name: Name to identify this server connection
-            url: URL of the SSE server
-            headers: HTTP headers to send to the SSE endpoint
-            timeout: HTTP timeout
-            sse_read_timeout: SSE read timeout
-            session_kwargs: Additional keyword arguments to pass to the ClientSession
-        """
-        # Create and store the connection
-        sse_transport = await self.exit_stack.enter_async_context(
-            sse_client(url, headers, timeout, sse_read_timeout)
-        )
-        read, write = sse_transport
-        session_kwargs = session_kwargs or {}
-        session = cast(
-            ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
-        )
-
-        await self._initialize_session_and_load_tools(server_name, session)
-
-    async def connect_to_server_via_streamable_http(
-        self,
-        server_name: str,
-        *,
-        url: str,
-        headers: dict[str, Any] | None = None,
-        timeout: timedelta = DEFAULT_STREAMABLE_HTTP_TIMEOUT,
-        sse_read_timeout: timedelta = DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT,
-        session_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        """Connect to a specific MCP server using Streamable HTTP
-
-        Args:
-            server_name: Name to identify this server connection
-            url: URL of the endpoint to connect to
-            headers: HTTP headers to send to the endpoint
-            timeout: HTTP timeout
-            sse_read_timeout: How long (in seconds) the client will wait for a new event before disconnecting.
-            session_kwargs: Additional keyword arguments to pass to the ClientSession
-        """
-        # Create and store the connection
-        streamable_http_transport = await self.exit_stack.enter_async_context(
-            streamablehttp_client(url, headers, timeout, sse_read_timeout)
-        )
-        read, write, _ = streamable_http_transport
-        session_kwargs = session_kwargs or {}
-        session = cast(
-            ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
-        )
-
-        await self._initialize_session_and_load_tools(server_name, session)
-
-    async def connect_to_server_via_websocket(
-        self,
-        server_name: str,
-        *,
-        url: str,
-        session_kwargs: dict[str, Any] | None = None,
-    ):
-        """Connect to a specific MCP server using Websockets
-
-        Args:
-            server_name: Name to identify this server connection
-            url: URL of the Websocket endpoint
-            session_kwargs: Additional keyword arguments to pass to the ClientSession
-
-        Raises:
-            ImportError: If websockets package is not installed
-        """
-        try:
-            from mcp.client.websocket import websocket_client
-        except ImportError:
-            raise ImportError(
-                "Could not import websocket_client. ",
-                "To use Websocket connections, please install the required dependency with: ",
-                "'pip install mcp[ws]' or 'pip install websockets'",
-            ) from None
-
-        ws_transport = await self.exit_stack.enter_async_context(websocket_client(url))
-        read, write = ws_transport
-        session_kwargs = session_kwargs or {}
-        session = cast(
-            ClientSession,
-            await self.exit_stack.enter_async_context(ClientSession(read, write, **session_kwargs)),
-        )
-
-        await self._initialize_session_and_load_tools(server_name, session)
-
-    def get_tools(self) -> list[BaseTool]:
-        """Get a list of all tools from all connected servers."""
         all_tools: list[BaseTool] = []
-        for server_tools in self.server_name_to_tools.values():
-            all_tools.extend(server_tools)
+        load_mcp_tool_tasks = []
+        for connection in self.connections.values():
+            load_mcp_tool_task = asyncio.create_task(load_mcp_tools(None, connection=connection))
+            load_mcp_tool_tasks.append(load_mcp_tool_task)
+        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        for tools in tools_list:
+            all_tools.extend(tools)
         return all_tools
 
     async def get_prompt(
-        self, server_name: str, prompt_name: str, arguments: Optional[dict[str, Any]]
+        self, server_name: str, prompt_name: str, *, arguments: dict[str, Any] | None = None
     ) -> list[HumanMessage | AIMessage]:
         """Get a prompt from a given MCP server."""
-        session = self.sessions[server_name]
-        return await load_mcp_prompt(session, prompt_name, arguments)
+        async with self.session(server_name) as session:
+            prompt = await load_mcp_prompt(session, prompt_name, arguments=arguments)
+            return prompt
 
     async def get_resources(
-        self, server_name: str, uris: str | list[str] | None = None
+        self, server_name: str, *, uris: str | list[str] | None = None
     ) -> list[Blob]:
         """Get resources from a given MCP server.
 
@@ -421,24 +158,26 @@ class MultiServerMCPClient:
         Returns:
             A list of LangChain Blobs
         """
-        session = self.sessions[server_name]
-        return await load_mcp_resources(session, uris)
+        async with self.session(server_name) as session:
+            resources = await load_mcp_resources(session, uris=uris)
+            return resources
 
     async def __aenter__(self) -> "MultiServerMCPClient":
-        try:
-            connections = self.connections or {}
-            for server_name, connection in connections.items():
-                await self.connect_to_server(server_name, **connection)
+        raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
 
-            return self
-        except Exception:
-            await self.exit_stack.aclose()
-            raise
-
-    async def __aexit__(
+    def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        await self.exit_stack.aclose()
+        raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
+
+
+__all__ = [
+    "MultiServerMCPClient",
+    "SSEConnection",
+    "StdioConnection",
+    "StreamableHttpConnection",
+    "WebsocketConnection",
+]

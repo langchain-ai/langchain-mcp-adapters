@@ -1,6 +1,10 @@
+import asyncio
+import contextlib
 import time
+from typing import AsyncGenerator
 
 import uvicorn
+from mcp.server.fastmcp import FastMCP
 from mcp.server.websocket import websocket_server
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute
@@ -34,3 +38,28 @@ def run_server(server_port: int) -> None:
     # Give server time to start
     while not server.started:
         time.sleep(0.5)
+
+
+@contextlib.asynccontextmanager
+async def run_streamable_http(server: FastMCP) -> AsyncGenerator[None, None]:
+    """Run the server in a separate task exposing a streamable HTTP endpoint.
+
+    The endpoint will be available at `http://localhost:{server.settings.port}/mcp/`.
+    """
+    app = server.streamable_http_app()
+    config = uvicorn.Config(
+        app,
+        host="localhost",
+        port=server.settings.port,
+    )
+    server = uvicorn.Server(config)
+    serve_task = asyncio.create_task(server.serve())
+
+    while not server.started:
+        await asyncio.sleep(0.1)
+
+    try:
+        yield
+    finally:
+        server.should_exit = True
+        await serve_task

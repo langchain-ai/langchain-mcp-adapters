@@ -20,7 +20,7 @@ pip install langchain-mcp-adapters
 Here is a simple example of using the MCP tools with a LangGraph agent.
 
 ```bash
-pip install langchain-mcp-adapters langgraph langchain-openai
+pip install langchain-mcp-adapters langgraph "langchain[openai]"
 
 export OPENAI_API_KEY=<your_api_key>
 ```
@@ -100,7 +100,7 @@ async def get_weather(location: str) -> str:
     return "It's always sunny in New York"
 
 if __name__ == "__main__":
-    mcp.run(transport="sse")
+    mcp.run(transport="streamable-http")
 ```
 
 ```bash
@@ -113,7 +113,7 @@ python weather_server.py
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
 
-async with MultiServerMCPClient(
+client = MultiServerMCPClient(
     {
         "math": {
             "command": "python",
@@ -123,26 +123,40 @@ async with MultiServerMCPClient(
         },
         "weather": {
             # make sure you start your weather server on port 8000
-            "url": "http://localhost:8000/sse",
-            "transport": "sse",
+            "url": "http://localhost:8000/mcp",
+            "transport": "streamable_http",
         }
     }
-) as client:
-    agent = create_react_agent("openai:gpt-4.1", client.get_tools())
-    math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
-    weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
+)
+tools = await client.get_tools()
+agent = create_react_agent("openai:gpt-4.1", tools)
+math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
+weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
+
+> [!note]
+> Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
+>
+>    ```python
+>    from langchain_mcp_adapters.tools import load_mcp_tools
+>
+>    client = MultiServerMCPClient({...})
+>    async with client.session("math") as session:
+>        tools = await load_mcp_tools(session)
+>    ```
 
 ## Streamable HTTP
 
 MCP now supports [streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) transport.
 
-To start an [example](examples/servers/streamable-http-stateless/) stremable HTTP server:
+To start an [example](examples/servers/streamable-http-stateless/) streamable HTTP server, run the following:
 
 ```bash
 cd examples/servers/streamable-http-stateless/
 uv run mcp-simple-streamablehttp-stateless --port 3000
 ```
+
+Alternatively, you can use FastMCP directly (as in the examples above).
 
 To use it with Python MCP SDK `streamablehttp_client`:
 
@@ -173,16 +187,17 @@ Use it with `MultiServerMCPClient`:
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
 
-async with MultiServerMCPClient(
+client = MultiServerMCPClient(
     {
         "math": {
             "transport": "streamable_http",
             "url": "http://localhost:3000/mcp"
         },
     }
-) as client:
-    agent = create_react_agent("openai:gpt-4.1", client.get_tools())
-    math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
+)
+tools = await client.get_tools()
+agent = create_react_agent("openai:gpt-4.1", tools)
+math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
 ## Using with LangGraph StateGraph
@@ -195,7 +210,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain.chat_models import init_chat_model
 model = init_chat_model("openai:gpt-4.1")
 
-async with MultiServerMCPClient(
+client = MultiServerMCPClient(
     {
         "math": {
             "command": "python",
@@ -205,28 +220,29 @@ async with MultiServerMCPClient(
         },
         "weather": {
             # make sure you start your weather server on port 8000
-            "url": "http://localhost:8000/sse",
-            "transport": "sse",
+            "url": "http://localhost:8000/mcp",
+            "transport": "streamable_http",
         }
     }
-) as client:
-    tools = client.get_tools()
-    def call_model(state: MessagesState):
-        response = model.bind_tools(tools).invoke(state["messages"])
-        return {"messages": response}
+)
+tools = await client.get_tools()
 
-    builder = StateGraph(MessagesState)
-    builder.add_node(call_model)
-    builder.add_node(ToolNode(tools))
-    builder.add_edge(START, "call_model")
-    builder.add_conditional_edges(
-        "call_model",
-        tools_condition,
-    )
-    builder.add_edge("tools", "call_model")
-    graph = builder.compile()
-    math_response = await graph.ainvoke({"messages": "what's (3 + 5) x 12?"})
-    weather_response = await graph.ainvoke({"messages": "what is the weather in nyc?"})
+def call_model(state: MessagesState):
+    response = model.bind_tools(tools).invoke(state["messages"])
+    return {"messages": response}
+
+builder = StateGraph(MessagesState)
+builder.add_node(call_model)
+builder.add_node(ToolNode(tools))
+builder.add_edge(START, "call_model")
+builder.add_conditional_edges(
+    "call_model",
+    tools_condition,
+)
+builder.add_edge("tools", "call_model")
+graph = builder.compile()
+math_response = await graph.ainvoke({"messages": "what's (3 + 5) x 12?"})
+weather_response = await graph.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
 ## Using with LangGraph API Server
@@ -241,13 +257,9 @@ If you want to run a LangGraph agent that uses MCP tools in a LangGraph API serv
 from contextlib import asynccontextmanager
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
-from langchain_anthropic import ChatAnthropic
 
-model = ChatAnthropic(model="claude-3-5-sonnet-latest")
-
-@asynccontextmanager
 async def make_graph():
-    async with MultiServerMCPClient(
+    client = MultiServerMCPClient(
         {
             "math": {
                 "command": "python",
@@ -257,13 +269,14 @@ async def make_graph():
             },
             "weather": {
                 # make sure you start your weather server on port 8000
-                "url": "http://localhost:8000/sse",
-                "transport": "sse",
+                "url": "http://localhost:8000/mcp",
+                "transport": "streamable_http",
             }
         }
-    ) as client:
-        agent = create_react_agent(model, client.get_tools())
-        yield agent
+    )
+    tools = await client.get_tools()
+    agent = create_react_agent("openai:gpt-4.1", tools)
+    return agent
 ```
 
 In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/reference/cli/#configuration-file) make sure to specify `make_graph` as your graph entrypoint:

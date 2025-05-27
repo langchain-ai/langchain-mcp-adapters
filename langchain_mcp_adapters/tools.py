@@ -1,9 +1,8 @@
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langchain_core.tools import tool as create_langchain_tool
 from mcp import ClientSession
-from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
@@ -16,6 +15,8 @@ from mcp.types import (
     Tool as MCPTool,
 )
 from pydantic import BaseModel, create_model
+
+from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | EmbeddedResource
 
@@ -44,8 +45,10 @@ def _convert_call_tool_result(
 
 
 def convert_mcp_tool_to_langchain_tool(
-    session: ClientSession,
+    session: ClientSession | None,
     tool: MCPTool,
+    *,
+    connection: Connection | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -54,15 +57,27 @@ def convert_mcp_tool_to_langchain_tool(
     Args:
         session: MCP client session
         tool: MCP tool to convert
+        connection: Optional connection config to use to create a new session
+                    if a `session` is not provided
 
     Returns:
         a LangChain tool
     """
+    if session is None and connection is None:
+        raise ValueError("Either a session or a connection config must be provided")
 
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
-        call_tool_result = await session.call_tool(tool.name, arguments)
+        if session is None:
+            # If a session is not provided, we will create one on the fly
+            async with create_session(connection) as tool_session:
+                await tool_session.initialize()
+                call_tool_result = await cast(ClientSession, tool_session).call_tool(
+                    tool.name, arguments
+                )
+        else:
+            call_tool_result = await session.call_tool(tool.name, arguments)
         return _convert_call_tool_result(call_tool_result)
 
     return StructuredTool(
@@ -71,16 +86,40 @@ def convert_mcp_tool_to_langchain_tool(
         args_schema=tool.inputSchema,
         coroutine=call_tool,
         response_format="content_and_artifact",
+        metadata=tool.annotations.model_dump() if tool.annotations else None,
     )
 
 
-async def load_mcp_tools(session: ClientSession) -> list[BaseTool]:
-    """Load all available MCP tools and convert them to LangChain tools."""
-    tools = await session.list_tools()
-    return [convert_mcp_tool_to_langchain_tool(session, tool) for tool in tools.tools]
+async def load_mcp_tools(
+    session: ClientSession | None,
+    *,
+    connection: Connection | None = None,
+) -> list[BaseTool]:
+    """Load all available MCP tools and convert them to LangChain tools.
+
+    Returns:
+        list of LangChain tools. Tool annotations are returned as part
+        of the tool metadata object.
+    """
+    if session is None and connection is None:
+        raise ValueError("Either a session or a connection config must be provided")
+
+    if session is None:
+        # If a session is not provided, we will create one on the fly
+        async with create_session(connection) as tool_session:
+            await tool_session.initialize()
+            tools = await tool_session.list_tools()
+    else:
+        tools = await session.list_tools()
+
+    converted_tools = [
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        for tool in tools.tools
+    ]
+    return converted_tools
 
 
-def add_langchain_tool(server: FastMCP, tool: BaseTool | Callable[[Any], Any]) -> None:
+def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool | Callable[[Any], Any]) -> None:
     """Add LangChain tool to an MCP server."""
     if not isinstance(tool, BaseTool):
         tool = create_langchain_tool(tool)
@@ -114,13 +153,4 @@ def add_langchain_tool(server: FastMCP, tool: BaseTool | Callable[[Any], Any]) -
         fn_metadata=fn_metadata,
         is_async=True,
     )
-    if tool.name in server._tool_manager._tools:
-        raise ValueError(f"Tool {tool.name} already exists on the server")
-
-    server._tool_manager._tools[tool.name] = fastmcp_tool
-
-
-def add_langchain_tools(server: FastMCP, tools: list[BaseTool | Callable[[Any], Any]]) -> None:
-    """Add multiple LangChain tools to an MCP server."""
-    for tool in tools:
-        add_langchain_tool(server, tool)
+    return fastmcp_tool

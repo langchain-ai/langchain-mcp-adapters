@@ -5,7 +5,7 @@ from collections.abc import Generator
 
 import pytest
 
-from tests.utils.websocket import run_server
+from tests.utils import run_server
 
 
 @pytest.fixture

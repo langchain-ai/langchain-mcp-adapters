@@ -12,11 +12,13 @@ from mcp.types import (
 )
 from mcp.types import Tool as MCPTool
 
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import (
     _convert_call_tool_result,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
 )
+from tests.utils import run_streamable_http
 
 
 def test_convert_empty_text_content():
@@ -207,3 +209,44 @@ async def test_load_mcp_tools():
     assert result2 == ToolMessage(
         content="tool2 result with {'param1': 'test2', 'param2': 2}", name="tool2", tool_call_id="2"
     )
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_with_annotations(
+    socket_enabled,
+) -> None:
+    """Test load mcp tools with annotations."""
+    from mcp.server import FastMCP
+    from mcp.types import ToolAnnotations
+
+    server = FastMCP(port=8181)
+
+    @server.tool(
+        annotations=ToolAnnotations(title="Get Time", readOnlyHint=True, idempotentHint=False)
+    )
+    def get_time() -> str:
+        """Get current time"""
+        return "5:20:00 PM EST"
+
+    async with run_streamable_http(server):
+        # Initialize client without initial connections
+        client = MultiServerMCPClient(
+            {
+                "time": {
+                    "url": "http://localhost:8181/mcp/",
+                    "transport": "streamable_http",
+                },
+            }
+        )
+        # pass
+        tools = await client.get_tools(server_name="time")
+        assert len(tools) == 1
+        tool = tools[0]
+        assert tool.name == "get_time"
+        assert tool.metadata == {
+            "title": "Get Time",
+            "readOnlyHint": True,
+            "idempotentHint": False,
+            "destructiveHint": None,
+            "openWorldHint": None,
+        }
