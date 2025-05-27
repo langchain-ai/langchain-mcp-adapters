@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import ArgsSchema, BaseTool, InjectedToolArg, ToolException, tool
 from mcp.types import (
     CallToolResult,
@@ -280,6 +281,12 @@ def add_with_injection(a: int, b: int, injected_arg: Annotated[str, InjectedTool
     return a + b
 
 
+@tool("add")
+def add_with_config(a: int, b: int, config: RunnableConfig) -> int:
+    """Add two numbers"""
+    return a + b
+
+
 class AddTool(BaseTool):
     name: str = "add"
     description: str = "Add two numbers"
@@ -302,9 +309,10 @@ class AddTool(BaseTool):
         (add, False),
         (add_with_schema, False),
         (add_with_injection, True),
+        (add_with_config, True),
         (AddTool(), False),
     ],
-    ids=["tool", "tool_with_schema", "tool_with_injection", "tool_class"],
+    ids=["tool", "tool_with_schema", "tool_with_injection", "tool_with_config", "tool_class"],
 )
 async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance, has_injected_args):
     fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(tool_instance)

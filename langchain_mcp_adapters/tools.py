@@ -1,6 +1,8 @@
-from typing import Any, cast
+from typing import Any, cast, get_args, get_type_hints
 
-from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool, ToolException
+from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
@@ -120,6 +122,35 @@ async def load_mcp_tools(
     return converted_tools
 
 
+def _get_injected_args(tool: BaseTool) -> list[str]:
+    def _is_injected_arg_type(type_: type) -> bool:
+        return any(
+            isinstance(arg, InjectedToolArg)
+            or (isinstance(arg, type) and issubclass(arg, InjectedToolArg))
+            for arg in get_args(type_)[1:]
+        )
+
+    def _get_runnable_config_param() -> str | None:
+        type_hints = get_type_hints(tool._run)
+        if not type_hints:
+            return None
+        for name, type_ in type_hints.items():
+            if type_ is RunnableConfig:
+                return name
+        return None
+
+    injected_args = [
+        field
+        for field, field_info in get_all_basemodel_annotations(tool.args_schema).items()
+        if _is_injected_arg_type(field_info)
+    ]
+    config_arg = _get_runnable_config_param()
+    if config_arg:
+        injected_args.append(config_arg)
+
+    return injected_args
+
+
 def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
     """Add LangChain tool to an MCP server."""
 
@@ -146,10 +177,8 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
         combined_arguments = {**arguments, **context}
         return await tool.ainvoke(combined_arguments)
 
-    has_injected_args = (
-        tool.args_schema.model_json_schema()["properties"]
-        != tool.tool_call_schema.model_json_schema()["properties"]
-    )
+    injected_args = _get_injected_args(tool)
+    has_injected_args = len(injected_args) > 0
     fastmcp_tool = FastMCPTool(
         fn=fn,
         name=tool.name,
