@@ -119,7 +119,7 @@ async def load_mcp_tools(
     return converted_tools
 
 
-def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool | Callable[[Any], Any]) -> None:
+def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool | Callable[[Any], Any]) -> FastMCPTool:
     """Add LangChain tool to an MCP server."""
     if not isinstance(tool, BaseTool):
         tool = create_langchain_tool(tool)

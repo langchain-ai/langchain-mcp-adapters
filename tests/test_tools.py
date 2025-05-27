@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import BaseTool, ToolException
+from langchain_core.tools import BaseTool, ToolException, tool
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
@@ -15,6 +15,7 @@ from mcp.types import Tool as MCPTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import (
     _convert_call_tool_result,
+    convert_langchain_tool_to_fastmcp_tool,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
 )
@@ -250,3 +251,35 @@ async def test_load_mcp_tools_with_annotations(
             "destructiveHint": None,
             "openWorldHint": None,
         }
+
+
+async def test_convert_langchain_tool_to_fastmcp_tool():
+    @tool
+    def add(a: int, b: int) -> int:
+        """Add two numbers"""
+        return a + b
+
+    fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(add)
+    assert fastmcp_tool.name == "add"
+    assert fastmcp_tool.description == "Add two numbers"
+    assert fastmcp_tool.parameters == {
+        "description": "Add two numbers",
+        "properties": {
+            "a": {"title": "A", "type": "integer"},
+            "b": {"title": "B", "type": "integer"},
+        },
+        "required": ["a", "b"],
+        "title": "add",
+        "type": "object",
+    }
+    assert fastmcp_tool.fn_metadata.arg_model.model_json_schema() == {
+        "properties": {
+            "a": {"title": "A", "type": "integer"},
+            "b": {"title": "B", "type": "integer"},
+        },
+        "required": ["a", "b"],
+        "title": "addArguments",
+        "type": "object",
+    }
+
+    assert await fastmcp_tool.run(arguments={"a": 1, "b": 2}) == 3

@@ -289,3 +289,23 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
   }
 }
 ```
+
+## Add LangChain tools to a FastMCP server
+
+You can convert LangChain tools to FastMCP tools by using the `convert_langchain_tool_to_fastmcp_tool` function. To add those tools to a FastMCP server, you can pass them to the `FastMCP` constructor:
+
+```python
+from mcp.server.fastmcp import FastMCP
+from langchain_mcp_adapters.tools import convert_langchain_tool_to_fastmcp_tool
+from langchain_core.tools import tool
+
+@tool
+def add(a: int, b: int) -> int:
+    """Add two numbers"""
+    return a + b
+
+fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(add)
+
+mcp = FastMCP("Math", tools=[fastmcp_tool])
+mcp.run(transport="stdio")
+```
