@@ -1,6 +1,5 @@
-from typing import Any, cast, get_args, get_type_hints
+from typing import Any, cast, get_args
 
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool, ToolException
 from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
@@ -18,8 +17,6 @@ from mcp.types import (
 from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.sessions import Connection, create_session
-
-FAST_MCP_CONTEXT_KWARG = "__context"
 
 NonTextContent = ImageContent | EmbeddedResource
 
@@ -130,24 +127,11 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
             for arg in get_args(type_)[1:]
         )
 
-    def _get_runnable_config_param() -> str | None:
-        type_hints = get_type_hints(tool._run)
-        if not type_hints:
-            return None
-        for name, type_ in type_hints.items():
-            if type_ is RunnableConfig:
-                return name
-        return None
-
     injected_args = [
         field
         for field, field_info in get_all_basemodel_annotations(tool.args_schema).items()
         if _is_injected_arg_type(field_info)
     ]
-    config_arg = _get_runnable_config_param()
-    if config_arg:
-        injected_args.append(config_arg)
-
     return injected_args
 
 
@@ -173,12 +157,12 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
     async def fn(**arguments: dict[str, Any]) -> Any:
-        context = arguments.pop(FAST_MCP_CONTEXT_KWARG, {})
-        combined_arguments = {**arguments, **context}
-        return await tool.ainvoke(combined_arguments)
+        return await tool.ainvoke(arguments)
 
     injected_args = _get_injected_args(tool)
-    has_injected_args = len(injected_args) > 0
+    if len(injected_args) > 0:
+        raise NotImplementedError("LangChain tools with injected arguments are not supported")
+
     fastmcp_tool = FastMCPTool(
         fn=fn,
         name=tool.name,
@@ -186,6 +170,5 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
         parameters=parameters,
         fn_metadata=fn_metadata,
         is_async=True,
-        context_kwarg=FAST_MCP_CONTEXT_KWARG if has_injected_args else None,
     )
     return fastmcp_tool
