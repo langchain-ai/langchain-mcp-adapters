@@ -136,8 +136,7 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
 
 
 def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
-    """Add LangChain tool to an MCP server."""
-
+    """Convert a LangChain tool to a FastMCP tool."""
     if not issubclass(tool.args_schema, BaseModel):
         raise ValueError(
             "Tool args_schema must be a subclass of pydantic.BaseModel. "
