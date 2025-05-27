@@ -1,7 +1,6 @@
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
-from langchain_core.tools import tool as create_langchain_tool
 from mcp import ClientSession
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
@@ -119,10 +118,8 @@ async def load_mcp_tools(
     return converted_tools
 
 
-def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool | Callable[[Any], Any]) -> FastMCPTool:
+def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
     """Add LangChain tool to an MCP server."""
-    if not isinstance(tool, BaseTool):
-        tool = create_langchain_tool(tool)
 
     if not issubclass(tool.args_schema, BaseModel):
         raise ValueError(
