@@ -255,59 +255,71 @@ async def test_load_mcp_tools_with_annotations(
         }
 
 
-async def test_convert_langchain_tool_to_fastmcp_tool():
-    @tool
-    def add(a: int, b: int) -> int:
-        """Add two numbers"""
+@tool
+def add(a: int, b: int) -> int:
+    """Add two numbers"""
+    return a + b
+
+
+class AddInput(BaseModel):
+    """Add two numbers"""
+
+    a: int
+    b: int
+
+
+@tool("add", args_schema=AddInput)
+def add_with_schema(a: int, b: int) -> int:
+    return a + b
+
+
+class AddTool(BaseTool):
+    name: str = "add"
+    description: str = "Add two numbers"
+    args_schema: ArgsSchema | None = AddInput
+
+    def _run(self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None) -> int:
+        """Use the tool."""
         return a + b
 
-    class AddInput(BaseModel):
-        """Add two numbers"""
+    async def _arun(
+        self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None
+    ) -> int:
+        """Use the tool."""
+        return self._run(a, b, run_manager=run_manager)
 
-        a: int
-        b: int
 
-    @tool("add", args_schema=AddInput)
-    def add_with_schema(a: int, b: int) -> int:
-        return a + b
+@pytest.mark.parametrize(
+    "tool_instance",
+    [
+        add,
+        add_with_schema,
+        AddTool(),
+    ],
+    ids=["tool", "tool_with_schema", "tool_class"],
+)
+async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
+    fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(tool_instance)
+    assert fastmcp_tool.name == "add"
+    assert fastmcp_tool.description == "Add two numbers"
+    assert fastmcp_tool.parameters == {
+        "description": "Add two numbers",
+        "properties": {
+            "a": {"title": "A", "type": "integer"},
+            "b": {"title": "B", "type": "integer"},
+        },
+        "required": ["a", "b"],
+        "title": "add",
+        "type": "object",
+    }
+    assert fastmcp_tool.fn_metadata.arg_model.model_json_schema() == {
+        "properties": {
+            "a": {"title": "A", "type": "integer"},
+            "b": {"title": "B", "type": "integer"},
+        },
+        "required": ["a", "b"],
+        "title": "addArguments",
+        "type": "object",
+    }
 
-    class AddTool(BaseTool):
-        name: str = "add"
-        description: str = "Add two numbers"
-        args_schema: ArgsSchema | None = AddInput
-
-        def _run(self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None) -> int:
-            """Use the tool."""
-            return a + b
-
-        async def _arun(
-            self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None
-        ) -> int:
-            """Use the tool."""
-            return self._run(a, b, run_manager=run_manager)
-
-    for tool_ in [add, add_with_schema, AddTool()]:
-        fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(tool_)
-        assert fastmcp_tool.name == "add"
-        assert fastmcp_tool.description == "Add two numbers"
-        assert fastmcp_tool.parameters == {
-            "description": "Add two numbers",
-            "properties": {
-                "a": {"title": "A", "type": "integer"},
-                "b": {"title": "B", "type": "integer"},
-            },
-            "required": ["a", "b"],
-            "title": "add",
-            "type": "object",
-        }
-        assert fastmcp_tool.fn_metadata.arg_model.model_json_schema() == {
-            "properties": {
-                "a": {"title": "A", "type": "integer"},
-                "b": {"title": "B", "type": "integer"},
-            },
-            "required": ["a", "b"],
-            "title": "addArguments",
-            "type": "object",
-        }
-
-        assert await fastmcp_tool.run(arguments={"a": 1, "b": 2}) == 3
+    assert await fastmcp_tool.run(arguments={"a": 1, "b": 2}) == 3
