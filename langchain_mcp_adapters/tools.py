@@ -146,6 +146,10 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
         combined_arguments = {**arguments, **context}
         return await tool.ainvoke(combined_arguments)
 
+    has_injected_args = (
+        tool.args_schema.model_json_schema()["properties"]
+        != tool.tool_call_schema.model_json_schema()["properties"]
+    )
     fastmcp_tool = FastMCPTool(
         fn=fn,
         name=tool.name,
@@ -153,6 +157,6 @@ def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
         parameters=parameters,
         fn_metadata=fn_metadata,
         is_async=True,
-        context_kwarg=FAST_MCP_CONTEXT_KWARG,
+        context_kwarg=FAST_MCP_CONTEXT_KWARG if has_injected_args else None,
     )
     return fastmcp_tool

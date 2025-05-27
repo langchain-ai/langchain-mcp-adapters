@@ -331,5 +331,5 @@ async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance, has_injecte
     }
 
     arguments = {"a": 1, "b": 2}
-    context = {"injected_arg": "123"} if has_injected_args else None
+    context = {"injected_arg": "123"} if has_injected_args else {}
     assert await fastmcp_tool.run(arguments=arguments, context=context) == 3
