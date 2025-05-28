@@ -294,6 +294,9 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
 
 Use `convert_langchain_tool_to_fastmcp_tool` to convert LangChain tools to FastMCP, and then add them to the `FastMCP` server via the initializer:
 
+> [!NOTE]
+> `tools` argument is only available in FastMCP as of `mcp >= 1.9.1`
+
 ```python
 from langchain_mcp_adapters.tools import convert_langchain_tool_to_fastmcp_tool
 from langchain_core.tools import tool
