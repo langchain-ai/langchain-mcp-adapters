@@ -313,7 +313,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "langchain-core", specifier = ">=0.3.36,<0.4" },
-    { name = "mcp", specifier = ">=1.7" },
+    { name = "mcp", specifier = ">=1.8" },
 ]
 
 [package.metadata.requires-dev]
