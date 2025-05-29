@@ -298,8 +298,8 @@ Use `to_fastmcp` to convert LangChain tools to FastMCP, and then add them to the
 > `tools` argument is only available in FastMCP as of `mcp >= 1.9.1`
 
 ```python
-from langchain_mcp_adapters.tools import to_fastmcp
 from langchain_core.tools import tool
+from langchain_mcp_adapters.tools import to_fastmcp
 from mcp.server.fastmcp import FastMCP
 
 
