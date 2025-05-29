@@ -135,7 +135,7 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
     return injected_args
 
 
-def convert_langchain_tool_to_fastmcp_tool(tool: BaseTool) -> FastMCPTool:
+def to_fastmcp(tool: BaseTool) -> FastMCPTool:
     """Convert a LangChain tool to a FastMCP tool."""
     if not issubclass(tool.args_schema, BaseModel):
         raise ValueError(

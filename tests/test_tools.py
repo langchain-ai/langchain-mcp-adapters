@@ -18,9 +18,9 @@ from pydantic import BaseModel
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import (
     _convert_call_tool_result,
-    convert_langchain_tool_to_fastmcp_tool,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
+    to_fastmcp,
 )
 from tests.utils import run_streamable_http
 
@@ -306,7 +306,7 @@ class AddTool(BaseTool):
     ids=["tool", "tool_with_schema", "tool_class"],
 )
 async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
-    fastmcp_tool = convert_langchain_tool_to_fastmcp_tool(tool_instance)
+    fastmcp_tool = to_fastmcp(tool_instance)
     assert fastmcp_tool.name == "add"
     assert fastmcp_tool.description == "Add two numbers"
     assert fastmcp_tool.parameters == {
@@ -335,4 +335,4 @@ async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
 
 def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
     with pytest.raises(NotImplementedError):
-        convert_langchain_tool_to_fastmcp_tool(add_with_injection)
+        to_fastmcp(add_with_injection)
