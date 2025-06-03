@@ -316,7 +316,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "langchain-core", specifier = ">=0.3.36,<0.4" },
-    { name = "mcp", specifier = ">=1.9.1" },
+    { name = "mcp", specifier = ">=1.9.2" },
 ]
 
 [package.metadata.requires-dev]
