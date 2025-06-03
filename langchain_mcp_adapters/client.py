@@ -12,6 +12,7 @@ from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
     Connection,
+    McpHttpClientFactory,
     SSEConnection,
     StdioConnection,
     StreamableHttpConnection,
@@ -176,6 +177,7 @@ class MultiServerMCPClient:
 
 __all__ = [
     "MultiServerMCPClient",
+    "McpHttpClientFactory",
     "SSEConnection",
     "StdioConnection",
     "StreamableHttpConnection",
