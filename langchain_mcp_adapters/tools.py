@@ -139,8 +139,7 @@ async def load_mcp_tools(
         tools = await _list_all_tools(session)
 
     converted_tools = [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
-        for tool in tools.tools
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection) for tool in tools
     ]
     return converted_tools
 
