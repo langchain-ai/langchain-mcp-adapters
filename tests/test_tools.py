@@ -372,7 +372,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
-    async with run_streamable_http(server):
+    with run_streamable_http(server):
         # Initialize client with custom httpx_client_factory
         client = MultiServerMCPClient(
             {
@@ -424,7 +424,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             limits=httpx.Limits(max_keepalive_connections=3, max_connections=5),
         )
 
-    async with run_streamable_http(server):
+    with run_streamable_http(server):
         # Initialize client with custom httpx_client_factory for SSE
         client = MultiServerMCPClient(
             {
