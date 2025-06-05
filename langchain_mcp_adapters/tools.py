@@ -1,7 +1,10 @@
-from typing import Any, cast
+from typing import Any, cast, get_args
 
-from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langchain_core.tools import BaseTool, InjectedToolArg, StructuredTool, ToolException
+from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
+from mcp.server.fastmcp.tools import Tool as FastMCPTool
+from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
@@ -11,6 +14,7 @@ from mcp.types import (
 from mcp.types import (
     Tool as MCPTool,
 )
+from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.sessions import Connection, create_session
 
@@ -79,7 +83,8 @@ def convert_mcp_tool_to_langchain_tool(
     Args:
         session: MCP client session
         tool: MCP tool to convert
-        connection: Optional connection config to use to create a new session if a `session` is not provided
+        connection: Optional connection config to use to create a new session
+                    if a `session` is not provided
 
     Returns:
         a LangChain tool
@@ -107,6 +112,7 @@ def convert_mcp_tool_to_langchain_tool(
         args_schema=tool.inputSchema,
         coroutine=call_tool,
         response_format="content_and_artifact",
+        metadata=tool.annotations.model_dump() if tool.annotations else None,
     )
 
 
@@ -117,12 +123,9 @@ async def load_mcp_tools(
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
-    Args:
-        session: MCP client session
-        connection: Optional connection config to use to create a new session if a `session` is not provided
-
     Returns:
-        a list of LangChain tools
+        list of LangChain tools. Tool annotations are returned as part
+        of the tool metadata object.
     """
     if session is None and connection is None:
         raise ValueError("Either a session or a connection config must be provided")
@@ -135,6 +138,62 @@ async def load_mcp_tools(
     else:
         tools = await _list_all_tools(session)
 
-    return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection) for tool in tools
+    converted_tools = [
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        for tool in tools.tools
     ]
+    return converted_tools
+
+
+def _get_injected_args(tool: BaseTool) -> list[str]:
+    def _is_injected_arg_type(type_: type) -> bool:
+        return any(
+            isinstance(arg, InjectedToolArg)
+            or (isinstance(arg, type) and issubclass(arg, InjectedToolArg))
+            for arg in get_args(type_)[1:]
+        )
+
+    injected_args = [
+        field
+        for field, field_info in get_all_basemodel_annotations(tool.args_schema).items()
+        if _is_injected_arg_type(field_info)
+    ]
+    return injected_args
+
+
+def to_fastmcp(tool: BaseTool) -> FastMCPTool:
+    """Convert a LangChain tool to a FastMCP tool."""
+    if not issubclass(tool.args_schema, BaseModel):
+        raise ValueError(
+            "Tool args_schema must be a subclass of pydantic.BaseModel. "
+            "Tools with dict args schema are not supported."
+        )
+
+    parameters = tool.tool_call_schema.model_json_schema()
+    field_definitions = {
+        field: (field_info.annotation, field_info)
+        for field, field_info in tool.tool_call_schema.model_fields.items()
+    }
+    arg_model = create_model(
+        f"{tool.name}Arguments",
+        **field_definitions,
+        __base__=ArgModelBase,
+    )
+    fn_metadata = FuncMetadata(arg_model=arg_model)
+
+    async def fn(**arguments: dict[str, Any]) -> Any:
+        return await tool.ainvoke(arguments)
+
+    injected_args = _get_injected_args(tool)
+    if len(injected_args) > 0:
+        raise NotImplementedError("LangChain tools with injected arguments are not supported")
+
+    fastmcp_tool = FastMCPTool(
+        fn=fn,
+        name=tool.name,
+        description=tool.description,
+        parameters=parameters,
+        fn_metadata=fn_metadata,
+        is_async=True,
+    )
+    return fastmcp_tool
