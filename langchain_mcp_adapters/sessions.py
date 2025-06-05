@@ -247,6 +247,15 @@ async def create_session(
     Yields:
         A ClientSession
     """
+
+    if "transport" not in connection:
+        raise ValueError(
+            "Configuration error: Missing 'transport' key in server configuration. "
+            "Each server must include 'transport' with one of: 'stdio', 'sse', 'websocket', 'streamable_http'. "
+            f"Received: {connection}. "
+            "Refer to the documentation: https://github.com/langchain-ai/langchain-mcp-adapters?tab=readme-ov-file#client-1"
+        )
+        
     transport = connection["transport"]
     if transport == "sse":
         if "url" not in connection:
