@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import ArgsSchema, BaseTool, InjectedToolArg, ToolException, tool
+from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
@@ -257,13 +257,6 @@ async def test_load_mcp_tools_with_annotations(
 
 
 # Tests for to_fastmcp functionality
-from typing import Annotated
-
-from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_core.tools import BaseTool, InjectedToolArg, tool
-from pydantic import BaseModel
-
-from langchain_mcp_adapters.tools import to_fastmcp
 
 
 @tool
@@ -390,16 +383,14 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(
                 },
             }
         )
-        
+
         tools = await client.get_tools(server_name="status")
         assert len(tools) == 1
         tool = tools[0]
         assert tool.name == "get_status"
-        
+
         # Test that the tool works correctly
-        result = await tool.ainvoke(
-            {"args": {}, "id": "1", "type": "tool_call"}
-        )
+        result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
         assert result.content == "Server is running"
 
 
@@ -444,7 +435,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
                 },
             }
         )
-        
+
         # Note: This test may not work in practice since the server doesn't expose SSE endpoint,
         # but it tests the configuration propagation
         try:

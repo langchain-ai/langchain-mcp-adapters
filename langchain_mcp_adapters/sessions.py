@@ -2,13 +2,13 @@ import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, TypedDict, Protocol
+from typing import Any, AsyncIterator, Literal, Protocol, TypedDict
 
+import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
-import httpx
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -21,14 +21,15 @@ DEFAULT_SSE_READ_TIMEOUT = 60 * 5
 DEFAULT_STREAMABLE_HTTP_TIMEOUT = timedelta(seconds=30)
 DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
 
+
 class McpHttpClientFactory(Protocol):
     def __call__(
         self,
         headers: dict[str, str] | None = None,
         timeout: httpx.Timeout | None = None,
         auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
-        ...
+    ) -> httpx.AsyncClient: ...
+
 
 class StdioConnection(TypedDict):
     transport: Literal["stdio"]
@@ -81,6 +82,7 @@ class SSEConnection(TypedDict):
     httpx_client_factory: McpHttpClientFactory | None
     """Custom factory for httpx.AsyncClient (optional)"""
 
+
 class StreamableHttpConnection(TypedDict):
     transport: Literal["streamable_http"]
 
@@ -105,6 +107,7 @@ class StreamableHttpConnection(TypedDict):
 
     httpx_client_factory: McpHttpClientFactory | None
     """Custom factory for httpx.AsyncClient (optional)"""
+
 
 class WebsocketConnection(TypedDict):
     transport: Literal["websocket"]
@@ -187,7 +190,7 @@ async def _create_sse_session(
     kwargs = {}
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
-    
+
     async with sse_client(url, headers, timeout, sse_read_timeout, **kwargs) as (read, write):
         async with ClientSession(read, write, **(session_kwargs or {})) as session:
             yield session
@@ -219,7 +222,7 @@ async def _create_streamable_http_session(
     kwargs = {}
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
-    
+
     async with streamablehttp_client(
         url, headers, timeout, sse_read_timeout, terminate_on_close, **kwargs
     ) as (read, write, _):
