@@ -50,6 +50,7 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     all_tools: list[MCPTool] = []
 
     iterations = 0
+
     while True:
         iterations += 1
         if iterations > MAX_ITERATIONS:
@@ -62,9 +63,6 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
 
         if list_tools_page_result.nextCursor is None:
             break
-
-        if list_tools_page_result.nextCursor == current_cursor:
-            raise RuntimeError("MCP returned the same cursor twice")
 
         current_cursor = list_tools_page_result.nextCursor
     return all_tools
