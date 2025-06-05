@@ -232,7 +232,7 @@ async def test_load_mcp_tools_with_annotations(
         """Get current time"""
         return "5:20:00 PM EST"
 
-    async with run_streamable_http(server):
+    with run_streamable_http(server):
         # Initialize client without initial connections
         client = MultiServerMCPClient(
             {
