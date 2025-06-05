@@ -251,11 +251,11 @@ async def create_session(
     if "transport" not in connection:
         raise ValueError(
             "Configuration error: Missing 'transport' key in server configuration. "
-            "Each server must include 'transport' with one of: 'stdio', 'sse', 'websocket', 'streamable_http'. "
-            f"Received: {connection}. "
-            "Refer to the documentation: https://github.com/langchain-ai/langchain-mcp-adapters?tab=readme-ov-file#client-1"
+            "Each server must include 'transport' with one of: "
+            "'stdio', 'sse', 'websocket', 'streamable_http'. "
+            "Please refer to the langchain-mcp-adapters documentation for more details."
         )
-        
+
     transport = connection["transport"]
     if transport == "sse":
         if "url" not in connection:
@@ -308,5 +308,6 @@ async def create_session(
             yield session
     else:
         raise ValueError(
-            f"Unsupported transport: {transport}. Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
+            f"Unsupported transport: {transport}. "
+            f"Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
         )
