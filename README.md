@@ -123,7 +123,7 @@ client = MultiServerMCPClient(
         },
         "weather": {
             # make sure you start your weather server on port 8000
-            "url": "http://localhost:8000/mcp",
+            "url": "http://localhost:8000/mcp/",
             "transport": "streamable_http",
         }
     }
@@ -169,7 +169,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from langgraph.prebuilt import create_react_agent
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-async with streamablehttp_client("http://localhost:3000/mcp") as (read, write, _):
+async with streamablehttp_client("http://localhost:3000/mcp/") as (read, write, _):
     async with ClientSession(read, write) as session:
         # Initialize the connection
         await session.initialize()
@@ -191,7 +191,7 @@ client = MultiServerMCPClient(
     {
         "math": {
             "transport": "streamable_http",
-            "url": "http://localhost:3000/mcp"
+            "url": "http://localhost:3000/mcp/"
         },
     }
 )
@@ -220,7 +220,7 @@ client = MultiServerMCPClient(
         },
         "weather": {
             # make sure you start your weather server on port 8000
-            "url": "http://localhost:8000/mcp",
+            "url": "http://localhost:8000/mcp/",
             "transport": "streamable_http",
         }
     }
@@ -269,7 +269,7 @@ async def make_graph():
             },
             "weather": {
                 # make sure you start your weather server on port 8000
-                "url": "http://localhost:8000/mcp",
+                "url": "http://localhost:8000/mcp/",
                 "transport": "streamable_http",
             }
         }
