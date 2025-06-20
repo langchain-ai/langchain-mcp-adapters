@@ -200,6 +200,39 @@ agent = create_react_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
+## Passing runtime headers
+
+When connecting to MCP servers, you can include custom headers (e.g., for authentication or tracing) using the `headers` field in the connection configuration. This is supported for the following transports:
+
+* `sse`
+* `streamable_http`
+
+### Example: passing headers with `MultiServerMCPClient`
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+
+client = MultiServerMCPClient(
+    {
+        "weather": {
+            "transport": "streamable_http",
+            "url": "http://localhost:8000/mcp",
+            "headers": {
+                "Authorization": "Bearer YOUR_TOKEN",
+                "X-Custom-Header": "custom-value"
+            },
+        }
+    }
+)
+tools = await client.get_tools()
+agent = create_react_agent("openai:gpt-4.1", tools)
+response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
+```
+
+> Only `sse` and `streamable_http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
+
+
 ## Using with LangGraph StateGraph
 
 ```python
