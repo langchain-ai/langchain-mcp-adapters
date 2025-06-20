@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 from types import TracebackType
 from typing import Any, AsyncIterator
 
@@ -78,6 +78,14 @@ class MultiServerMCPClient:
         async with client.session("math") as session:
             tools = await load_mcp_tools(session)
         ```
+
+        Example: get all tools from all servers while keep session
+        ```python
+        client = MultiServerMCPClient({...})
+        async with client.tools() as all_tools:
+            # use all tools here
+            # sessions are kept alive until exiting the context
+        ```
         """
         self.connections: dict[str, Connection] = connections if connections is not None else {}
 
@@ -109,6 +117,35 @@ class MultiServerMCPClient:
             if auto_initialize:
                 await session.initialize()
             yield session
+
+    @asynccontextmanager
+    async def tools(self, *, server_name: str | None = None) -> AsyncIterator[list[BaseTool]]:
+        """Get tools from MCP server(s) while keeping the session(s) alive.
+
+        Args:
+            server_name: Optional name of the server to get tools from.
+                If None, tools from all servers will be returned (default).
+
+        Yields:
+            A list of LangChain tools
+        """
+        async with AsyncExitStack() as stack:
+            all_tools: list[BaseTool] = []
+            if server_name is not None:
+                if server_name not in self.connections:
+                    raise ValueError(
+                        f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
+                    )
+                session = await stack.enter_async_context(self.session(server_name))
+                tools = await load_mcp_tools(session)
+                all_tools.extend(tools)
+            else:
+                for name in self.connections:
+                    session = await stack.enter_async_context(self.session(name))
+                    tools = await load_mcp_tools(session)
+                    all_tools.extend(tools)
+
+            yield all_tools
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
         """Get a list of all tools from all connected servers.
