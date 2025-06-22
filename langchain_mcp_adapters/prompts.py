@@ -14,7 +14,7 @@ def convert_mcp_prompt_message_to_langchain_message(
         message: MCP prompt message to convert
 
     Returns:
-        a LangChain message
+        A LangChain message
     """
     if message.content.type == "text":
         if message.role == "user":
