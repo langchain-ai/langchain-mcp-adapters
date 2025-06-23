@@ -44,7 +44,9 @@ jobs:
       matrix:
         include:
           - language: python
-            build-mode: none 
+            build-mode: none
+          - language: actions
+            build-mode: none
         # CodeQL supports the following values keywords for 'language': $supported-codeql-languages
         # Use `c-cpp` to analyze code written in C, C++ or both
         # Use 'java-kotlin' to analyze code written in Java, Kotlin or both
