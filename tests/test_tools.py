@@ -327,7 +327,7 @@ async def test_convert_langchain_tools_to_fastmcp_tools(tool_instance):
     assert tool.parameters["properties"].keys() == {"a", "b"}
     assert tool.fn_metadata.arg_model.model_json_schema()["properties"].keys() == {"a", "b"}
     arguments = {"a": 1, "b": 2}
-    assert await to_fastmcp.run(arguments=arguments) == 4
+    assert await tool.run(arguments=arguments) == 3
 
 
 def test_convert_langchain_tool_to_fastmcp_tool_with_injection():

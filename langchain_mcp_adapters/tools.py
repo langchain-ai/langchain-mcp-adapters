@@ -180,7 +180,7 @@ def to_fastmcp(tools: list[BaseTool]) -> list[FastMCPTool]:
         )
         fn_metadata = FuncMetadata(arg_model=arg_model)
 
-        async def fn(**arguments: dict[str, Any], _tool=tool) -> Any:
+        async def fn(_tool=tool,**arguments: dict[str, Any], ) -> Any:
             return await _tool.ainvoke(arguments)
 
         injected_args = _get_injected_args(tool)
