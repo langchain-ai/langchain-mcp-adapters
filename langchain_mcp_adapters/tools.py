@@ -158,39 +158,42 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
     return injected_args
 
 
-def to_fastmcp(tool: BaseTool) -> FastMCPTool:
-    """Convert a LangChain tool to a FastMCP tool."""
-    if not issubclass(tool.args_schema, BaseModel):
-        raise ValueError(
-            "Tool args_schema must be a subclass of pydantic.BaseModel. "
-            "Tools with dict args schema are not supported."
+def to_fastmcp(tools: list[BaseTool]) -> list[FastMCPTool]:
+    """Convert a list of LangChain tools to a list of FastMCP tools."""
+    fastmcp_tools = []
+    for tool in tools:
+        if not issubclass(tool.args_schema, BaseModel):
+            raise ValueError(
+                "Tool args_schema must be a subclass of pydantic.BaseModel. "
+                "Tools with dict args schema are not supported."
+            )
+
+        parameters = tool.tool_call_schema.model_json_schema()
+        field_definitions = {
+            field: (field_info.annotation, field_info)
+            for field, field_info in tool.tool_call_schema.model_fields.items()
+        }
+        arg_model = create_model(
+            f"{tool.name}Arguments",
+            **field_definitions,
+            __base__=ArgModelBase,
         )
+        fn_metadata = FuncMetadata(arg_model=arg_model)
 
-    parameters = tool.tool_call_schema.model_json_schema()
-    field_definitions = {
-        field: (field_info.annotation, field_info)
-        for field, field_info in tool.tool_call_schema.model_fields.items()
-    }
-    arg_model = create_model(
-        f"{tool.name}Arguments",
-        **field_definitions,
-        __base__=ArgModelBase,
-    )
-    fn_metadata = FuncMetadata(arg_model=arg_model)
+        async def fn(**arguments: dict[str, Any], _tool=tool) -> Any:
+            return await _tool.ainvoke(arguments)
 
-    async def fn(**arguments: dict[str, Any]) -> Any:
-        return await tool.ainvoke(arguments)
+        injected_args = _get_injected_args(tool)
+        if len(injected_args) > 0:
+            raise NotImplementedError("LangChain tools with injected arguments are not supported")
 
-    injected_args = _get_injected_args(tool)
-    if len(injected_args) > 0:
-        raise NotImplementedError("LangChain tools with injected arguments are not supported")
-
-    fastmcp_tool = FastMCPTool(
-        fn=fn,
-        name=tool.name,
-        description=tool.description,
-        parameters=parameters,
-        fn_metadata=fn_metadata,
-        is_async=True,
-    )
-    return fastmcp_tool
+        fastmcp_tool = FastMCPTool(
+            fn=fn,
+            name=tool.name,
+            description=tool.description,
+            parameters=parameters,
+            fn_metadata=fn_metadata,
+            is_async=True,
+        )
+        fastmcp_tools.append(fastmcp_tool)
+    return fastmcp_tools

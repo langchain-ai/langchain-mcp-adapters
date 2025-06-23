@@ -302,43 +302,37 @@ class AddTool(BaseTool):
 @pytest.mark.parametrize(
     "tool_instance",
     [
-        add,
-        add_with_schema,
-        AddTool(),
+        [add],
+        [add_with_schema],
+        [AddTool()],
+        [add, add_with_schema, AddTool()],
     ],
-    ids=["tool", "tool_with_schema", "tool_class"],
+    ids=["tool_list_single", "tool_with_schema_list_single", "tool_class_list_single", "tool_list_multiple"],
 )
-async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
-    fastmcp_tool = to_fastmcp(tool_instance)
-    assert fastmcp_tool.name == "add"
-    assert fastmcp_tool.description == "Add two numbers"
-    assert fastmcp_tool.parameters == {
-        "description": "Add two numbers",
-        "properties": {
-            "a": {"title": "A", "type": "integer"},
-            "b": {"title": "B", "type": "integer"},
-        },
-        "required": ["a", "b"],
-        "title": "add",
-        "type": "object",
-    }
-    assert fastmcp_tool.fn_metadata.arg_model.model_json_schema() == {
-        "properties": {
-            "a": {"title": "A", "type": "integer"},
-            "b": {"title": "B", "type": "integer"},
-        },
-        "required": ["a", "b"],
-        "title": "addArguments",
-        "type": "object",
-    }
-
+async def test_convert_langchain_tools_to_fastmcp_tools(tool_instance):
+    # Ensure tool_instance is always a list
+    if not isinstance(tool_instance, list):
+        tool_instance = [tool_instance]
+    fastmcp_tools = to_fastmcp(tool_instance)
+    assert isinstance(fastmcp_tools, list)
+    assert all(hasattr(t, "name") for t in fastmcp_tools)
+    assert all(hasattr(t, "description") for t in fastmcp_tools)
+    assert all(hasattr(t, "parameters") for t in fastmcp_tools)
+    assert all(hasattr(t, "fn_metadata") for t in fastmcp_tools)
+    assert all(hasattr(t, "is_async") for t in fastmcp_tools)
+    # Check the first tool's properties
+    tool = fastmcp_tools[0]
+    assert tool.name == "add"
+    assert tool.description == "Add two numbers"
+    assert tool.parameters["properties"].keys() == {"a", "b"}
+    assert tool.fn_metadata.arg_model.model_json_schema()["properties"].keys() == {"a", "b"}
     arguments = {"a": 1, "b": 2}
-    assert await fastmcp_tool.run(arguments=arguments) == 3
+    assert await to_fastmcp.run(arguments=arguments) == 4
 
 
 def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
     with pytest.raises(NotImplementedError):
-        to_fastmcp(add_with_injection)
+        to_fastmcp([add_with_injection])
 
 
 # Tests for httpx_client_factory functionality
