@@ -1,6 +1,9 @@
 ---
 name: Run CI Tests
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ main ]

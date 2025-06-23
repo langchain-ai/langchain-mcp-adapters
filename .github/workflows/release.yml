@@ -25,6 +25,8 @@ env:
 
 jobs:
   build:
+    permissions:
+      contents: read
     if: github.ref == 'refs/heads/main' || inputs.dangerous-nonmain-release
     environment: Scheduled testing
     runs-on: ubuntu-latest
