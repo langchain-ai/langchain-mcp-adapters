@@ -8,6 +8,9 @@ This library provides a lightweight wrapper that makes [Anthropic Model Context 
 
 - 🛠️ Convert MCP tools into [LangChain tools](https://python.langchain.com/docs/concepts/tools/) that can be used with [LangGraph](https://github.com/langchain-ai/langgraph) agents
 - 📦 A client implementation that allows you to connect to multiple MCP servers and load tools from them
+- 🚀 **NEW**: Enhanced FastMCP integration for seamless tool loading and LangGraph integration
+- 🔧 **NEW**: Simplified API for connecting to FastMCP servers with automatic tool conversion
+- 🌐 **NEW**: Support for both local (stdio) and remote (HTTP) FastMCP servers
 
 ## Installation
 
@@ -24,6 +27,24 @@ pip install langchain-mcp-adapters langgraph "langchain[openai]"
 
 export OPENAI_API_KEY=<your_api_key>
 ```
+
+### FastMCP Integration (Recommended)
+
+For the simplest FastMCP integration:
+
+```python
+from langchain_mcp_adapters import quick_load_fastmcp_tools
+from langgraph.prebuilt import create_react_agent
+
+# Load tools from FastMCP server
+tools = await quick_load_fastmcp_tools(server_script="./math_server.py")
+
+# Create and use agent
+agent = create_react_agent("openai:gpt-4", tools)
+response = await agent.ainvoke({"messages": "What's (3 + 5) x 12?"})
+```
+
+For more advanced FastMCP usage, see the [FastMCP Integration Guide](FASTMCP_INTEGRATION.md).
 
 ### Server
 
