@@ -10,17 +10,31 @@ from .fastmcp_client import (
     quick_load_fastmcp_tools_sync,
 )
 
+# FastMCP 2.0 SDK integration (jlowin/fastmcp)
 try:
+    from .fastmcp2_client import (
+        FastMCP2Client,
+        FastMCP2MultiClient,
+        create_fastmcp2_client,
+        quick_load_fastmcp2_tools,
+        quick_load_fastmcp2_tools_sync,
+    )
     from .fastmcp_adapter import (
+        FastMCP2Adapter,
+        FastMCP2ServerAdapter,
+        load_fastmcp2_tools,
+        load_fastmcp2_tools_sync,
+        create_fastmcp2_tool_from_function,
+        # Backward compatibility aliases
         FastMCPAdapter,
         FastMCPServerAdapter,
         load_fastmcp_tools as load_fastmcp_tools_v2,
         load_fastmcp_tools_sync,
         create_fastmcp_tool_from_function,
     )
-    FASTMCP_V2_AVAILABLE = True
+    FASTMCP2_AVAILABLE = True
 except ImportError:
-    FASTMCP_V2_AVAILABLE = False
+    FASTMCP2_AVAILABLE = False
 
 __all__ = [
     # Original MCP adapters
@@ -37,12 +51,28 @@ __all__ = [
     "quick_load_fastmcp_tools_sync",
 ]
 
-# Add FastMCP v2 exports if available
-if FASTMCP_V2_AVAILABLE:
+# Add FastMCP 2.0 SDK exports if available
+if FASTMCP2_AVAILABLE:
     __all__.extend([
+        # FastMCP 2.0 SDK specific
+        "FastMCP2Client",
+        "FastMCP2MultiClient",
+        "create_fastmcp2_client",
+        "quick_load_fastmcp2_tools",
+        "quick_load_fastmcp2_tools_sync",
+        "FastMCP2Adapter",
+        "FastMCP2ServerAdapter",
+        "load_fastmcp2_tools",
+        "load_fastmcp2_tools_sync",
+        "create_fastmcp2_tool_from_function",
+        
+        # Backward compatibility aliases
         "FastMCPAdapter",
         "FastMCPServerAdapter", 
         "load_fastmcp_tools_v2",
         "load_fastmcp_tools_sync",
         "create_fastmcp_tool_from_function",
+        
+        # Availability flag
+        "FASTMCP2_AVAILABLE",
     ])

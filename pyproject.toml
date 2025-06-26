@@ -18,6 +18,14 @@ dependencies = [
     "mcp>=1.9.2",
 ]
 
+[project.optional-dependencies]
+fastmcp2 = [
+    "fastmcp>=0.1.0",  # FastMCP 2.0 SDK (jlowin/fastmcp)
+]
+all = [
+    "fastmcp>=0.1.0",
+]
+
 [dependency-groups]
 test = [
     "pytest>=8.0.0",

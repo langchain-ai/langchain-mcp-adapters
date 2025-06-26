@@ -1,6 +1,8 @@
-# FastMCP Integration Guide
+# FastMCP 2.0 Integration Guide
 
-This guide explains how to use the enhanced FastMCP integration features in `langchain-mcp-adapters` to seamlessly connect FastMCP servers with LangGraph agents.
+This guide explains how to use the FastMCP 2.0 integration features in `langchain-mcp-adapters` to seamlessly connect FastMCP 2.0 servers with LangGraph agents.
+
+**Important**: This guide covers integration with the independent FastMCP 2.0 SDK (jlowin/fastmcp), not the `fastmcp` module in the official MCP Python SDK.
 
 ## Overview
 

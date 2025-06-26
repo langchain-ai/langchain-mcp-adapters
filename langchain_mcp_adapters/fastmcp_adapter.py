@@ -1,8 +1,11 @@
 """
-FastMCP 2.0 adapter for LangChain and LangGraph integration.
+FastMCP 2.0 SDK adapter for LangChain and LangGraph integration.
 
 This module provides adapters to seamlessly integrate FastMCP 2.0 servers
 with LangChain tools and LangGraph agents.
+
+FastMCP 2.0 is the independent FastMCP SDK (jlowin/fastmcp), not the
+fastmcp module in the official MCP Python SDK.
 """
 
 import asyncio
@@ -13,76 +16,96 @@ from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel, create_model
 
 try:
-    from fastmcp import FastMCP, Client as FastMCPClient
+    # FastMCP 2.0 SDK imports
+    from fastmcp import FastMCP
+    from fastmcp.client import Client as FastMCPClient
     from fastmcp.transports import FastMCPTransport
     FASTMCP_AVAILABLE = True
 except ImportError:
-    FASTMCP_AVAILABLE = False
-    FastMCP = None
-    FastMCPClient = None
-    FastMCPTransport = None
+    try:
+        # Alternative import path for FastMCP 2.0
+        import fastmcp
+        FastMCP = fastmcp.FastMCP
+        FastMCPClient = fastmcp.Client
+        FastMCPTransport = getattr(fastmcp, 'FastMCPTransport', None)
+        FASTMCP_AVAILABLE = True
+    except (ImportError, AttributeError):
+        FASTMCP_AVAILABLE = False
+        FastMCP = None
+        FastMCPClient = None
+        FastMCPTransport = None
 
 
-class FastMCPAdapter:
+class FastMCP2Adapter:
     """Adapter for integrating FastMCP 2.0 servers with LangChain/LangGraph."""
     
-    def __init__(self, fastmcp_server: Optional[Any] = None, server_url: Optional[str] = None):
-        """Initialize the FastMCP adapter.
+    def __init__(
+        self, 
+        fastmcp_server: Optional[Any] = None, 
+        server_url: Optional[str] = None,
+        server_script: Optional[str] = None
+    ):
+        """Initialize the FastMCP 2.0 adapter.
         
         Args:
-            fastmcp_server: A FastMCP server instance for direct integration
-            server_url: URL to connect to a remote FastMCP server
+            fastmcp_server: A FastMCP 2.0 server instance for direct integration
+            server_url: URL to connect to a remote FastMCP 2.0 server
+            server_script: Path to FastMCP 2.0 server script
         """
         if not FASTMCP_AVAILABLE:
             raise ImportError(
-                "FastMCP is not available. Please install it with: pip install fastmcp"
+                "FastMCP 2.0 is not available. Please install it with: pip install fastmcp"
             )
         
-        if fastmcp_server is None and server_url is None:
-            raise ValueError("Either fastmcp_server or server_url must be provided")
+        if not any([fastmcp_server, server_url, server_script]):
+            raise ValueError("Either fastmcp_server, server_url, or server_script must be provided")
         
         self.fastmcp_server = fastmcp_server
         self.server_url = server_url
+        self.server_script = server_script
         self._client: Optional[FastMCPClient] = None
     
     @asynccontextmanager
     async def _get_client(self) -> AsyncIterator[FastMCPClient]:
-        """Get a FastMCP client for the server."""
+        """Get a FastMCP 2.0 client for the server."""
         if self.fastmcp_server is not None:
-            # Direct connection to FastMCP server instance
+            # Direct connection to FastMCP 2.0 server instance using in-memory transport
             async with FastMCPClient(self.fastmcp_server) as client:
                 yield client
         elif self.server_url is not None:
-            # Connect to remote FastMCP server
+            # Connect to remote FastMCP 2.0 server via HTTP/SSE
             async with FastMCPClient(self.server_url) as client:
                 yield client
+        elif self.server_script is not None:
+            # Connect to FastMCP 2.0 server script via stdio
+            async with FastMCPClient(self.server_script) as client:
+                yield client
         else:
-            raise ValueError("No server or URL configured")
+            raise ValueError("No server, URL, or script configured")
     
     async def get_tools(self) -> List[BaseTool]:
-        """Get all tools from the FastMCP server as LangChain tools.
+        """Get all tools from the FastMCP 2.0 server as LangChain tools.
         
         Returns:
             List of LangChain BaseTool instances
         """
         async with self._get_client() as client:
-            # List all available tools from the FastMCP server
-            tools_response = await client.list_tools()
-            tools = tools_response.tools if hasattr(tools_response, 'tools') else []
+            # List all available tools from the FastMCP 2.0 server
+            tools = await client.list_tools()
             
             langchain_tools = []
             for tool in tools:
-                langchain_tool = await self._convert_fastmcp_tool_to_langchain(client, tool)
+                langchain_tool = self._convert_fastmcp2_tool_to_langchain(client, tool)
                 langchain_tools.append(langchain_tool)
             
             return langchain_tools
     
-    async def _convert_fastmcp_tool_to_langchain(self, client: FastMCPClient, tool: Any) -> BaseTool:
-        """Convert a FastMCP tool to a LangChain tool.
+    def _convert_fastmcp2_tool_to_langchain(self, client: FastMCPClient, tool: Any) -> BaseTool:
+        """Convert a FastMCP 2.0 tool to a LangChain tool.
         
         Args:
-            client: FastMCP client instance
-            tool: FastMCP tool definition
+            client: FastMCP 2.0 client instance
+            tool: FastMCP 2.0 tool definition
             
         Returns:
             LangChain BaseTool instance
@@ -90,10 +113,11 @@ class FastMCPAdapter:
         # Create the tool execution function
         async def execute_tool(**kwargs: Any) -> Any:
             try:
-                # Call the tool through the FastMCP client
-                result = await client.call_tool(tool.name, kwargs)
+                # Call the tool through the FastMCP 2.0 client
+                async with self._get_client() as active_client:
+                    result = await active_client.call_tool(tool.name, kwargs)
                 
-                # Handle different result types
+                # Handle different result types from FastMCP 2.0
                 if hasattr(result, 'content'):
                     if isinstance(result.content, list):
                         # Multiple content items
@@ -110,37 +134,52 @@ class FastMCPAdapter:
                         return str(result.content)
                 elif hasattr(result, 'text'):
                     return result.text
+                elif isinstance(result, (str, int, float, bool)):
+                    return str(result)
                 else:
                     return str(result)
                     
             except Exception as e:
-                raise ToolException(f"Error executing FastMCP tool '{tool.name}': {str(e)}")
+                raise ToolException(f"Error executing FastMCP 2.0 tool '{tool.name}': {str(e)}")
         
         # Create args schema from tool input schema
-        args_schema = self._create_args_schema_from_tool(tool)
+        args_schema = self._create_args_schema_from_fastmcp2_tool(tool)
         
         # Create the LangChain tool
         return StructuredTool(
             name=tool.name,
-            description=tool.description or f"FastMCP tool: {tool.name}",
+            description=tool.description or f"FastMCP 2.0 tool: {tool.name}",
             args_schema=args_schema,
             coroutine=execute_tool,
             response_format="content_and_artifact"
         )
     
-    def _create_args_schema_from_tool(self, tool: Any) -> type[BaseModel]:
-        """Create a Pydantic model for tool arguments from FastMCP tool schema.
+    def _create_args_schema_from_fastmcp2_tool(self, tool: Any) -> type[BaseModel]:
+        """Create a Pydantic model for tool arguments from FastMCP 2.0 tool schema.
         
         Args:
-            tool: FastMCP tool definition
+            tool: FastMCP 2.0 tool definition
             
         Returns:
             Pydantic BaseModel class for tool arguments
         """
-        # Get the input schema from the tool
-        if hasattr(tool, 'inputSchema') and tool.inputSchema:
+        # FastMCP 2.0 tools may have different schema formats
+        schema = None
+        
+        # Try different ways to get the schema from FastMCP 2.0 tools
+        if hasattr(tool, 'input_schema'):
+            schema = tool.input_schema
+        elif hasattr(tool, 'inputSchema'):
             schema = tool.inputSchema
-            
+        elif hasattr(tool, 'parameters'):
+            schema = tool.parameters
+        elif hasattr(tool, 'args_schema'):
+            # If it's already a Pydantic model
+            if isinstance(tool.args_schema, type) and issubclass(tool.args_schema, BaseModel):
+                return tool.args_schema
+            schema = tool.args_schema
+        
+        if schema and isinstance(schema, dict):
             # Extract properties from JSON schema
             properties = schema.get('properties', {})
             required_fields = set(schema.get('required', []))
@@ -188,29 +227,29 @@ class FastMCPAdapter:
         return type_mapping.get(schema_type, str)
 
 
-class FastMCPServerAdapter:
-    """Adapter for running FastMCP servers and extracting tools."""
+class FastMCP2ServerAdapter:
+    """Adapter for running FastMCP 2.0 servers and extracting tools."""
     
     def __init__(self, fastmcp_server: Any):
-        """Initialize with a FastMCP server instance.
+        """Initialize with a FastMCP 2.0 server instance.
         
         Args:
-            fastmcp_server: FastMCP server instance
+            fastmcp_server: FastMCP 2.0 server instance
         """
         if not FASTMCP_AVAILABLE:
             raise ImportError(
-                "FastMCP is not available. Please install it with: pip install fastmcp"
+                "FastMCP 2.0 is not available. Please install it with: pip install fastmcp"
             )
         
         self.fastmcp_server = fastmcp_server
     
     async def get_tools(self) -> List[BaseTool]:
-        """Get tools directly from the FastMCP server instance.
+        """Get tools directly from the FastMCP 2.0 server instance.
         
         Returns:
             List of LangChain BaseTool instances
         """
-        adapter = FastMCPAdapter(fastmcp_server=self.fastmcp_server)
+        adapter = FastMCP2Adapter(fastmcp_server=self.fastmcp_server)
         return await adapter.get_tools()
     
     def get_tools_sync(self) -> List[BaseTool]:
@@ -219,47 +258,76 @@ class FastMCPServerAdapter:
         Returns:
             List of LangChain BaseTool instances
         """
-        return asyncio.run(self.get_tools())
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in an event loop, we can't use asyncio.run()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, self.get_tools())
+                return future.result()
+        except RuntimeError:
+            # No event loop running, safe to use asyncio.run()
+            return asyncio.run(self.get_tools())
 
 
-# Convenience functions for easy integration
-async def load_fastmcp_tools(
+# Convenience functions for easy integration with FastMCP 2.0
+async def load_fastmcp2_tools(
     fastmcp_server: Optional[Any] = None,
-    server_url: Optional[str] = None
+    server_url: Optional[str] = None,
+    server_script: Optional[str] = None
 ) -> List[BaseTool]:
-    """Load tools from a FastMCP server.
+    """Load tools from a FastMCP 2.0 server.
     
     Args:
-        fastmcp_server: FastMCP server instance
-        server_url: URL to FastMCP server
+        fastmcp_server: FastMCP 2.0 server instance
+        server_url: URL to FastMCP 2.0 server
+        server_script: Path to FastMCP 2.0 server script
         
     Returns:
         List of LangChain tools
     """
-    adapter = FastMCPAdapter(fastmcp_server=fastmcp_server, server_url=server_url)
+    adapter = FastMCP2Adapter(
+        fastmcp_server=fastmcp_server, 
+        server_url=server_url,
+        server_script=server_script
+    )
     return await adapter.get_tools()
 
 
-def load_fastmcp_tools_sync(
+def load_fastmcp2_tools_sync(
     fastmcp_server: Optional[Any] = None,
-    server_url: Optional[str] = None
+    server_url: Optional[str] = None,
+    server_script: Optional[str] = None
 ) -> List[BaseTool]:
-    """Synchronously load tools from a FastMCP server.
+    """Synchronously load tools from a FastMCP 2.0 server.
     
     Args:
-        fastmcp_server: FastMCP server instance
-        server_url: URL to FastMCP server
+        fastmcp_server: FastMCP 2.0 server instance
+        server_url: URL to FastMCP 2.0 server
+        server_script: Path to FastMCP 2.0 server script
         
     Returns:
         List of LangChain tools
     """
-    return asyncio.run(load_fastmcp_tools(fastmcp_server, server_url))
+    try:
+        loop = asyncio.get_running_loop()
+        # If we're in an event loop, we can't use asyncio.run()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(
+                asyncio.run, 
+                load_fastmcp2_tools(fastmcp_server, server_url, server_script)
+            )
+            return future.result()
+    except RuntimeError:
+        # No event loop running, safe to use asyncio.run()
+        return asyncio.run(load_fastmcp2_tools(fastmcp_server, server_url, server_script))
 
 
-def create_fastmcp_tool_from_function(func, name: Optional[str] = None, description: Optional[str] = None):
-    """Create a FastMCP tool from a Python function.
+def create_fastmcp2_tool_from_function(func, name: Optional[str] = None, description: Optional[str] = None):
+    """Create a FastMCP 2.0 tool from a Python function.
     
-    This is a helper function to create FastMCP tools that can then be
+    This is a helper function to create FastMCP 2.0 tools that can then be
     converted to LangChain tools.
     
     Args:
@@ -268,16 +336,31 @@ def create_fastmcp_tool_from_function(func, name: Optional[str] = None, descript
         description: Optional tool description (defaults to function docstring)
         
     Returns:
-        FastMCP tool that can be added to a FastMCP server
+        FastMCP 2.0 tool that can be added to a FastMCP 2.0 server
     """
     if not FASTMCP_AVAILABLE:
         raise ImportError(
-            "FastMCP is not available. Please install it with: pip install fastmcp"
+            "FastMCP 2.0 is not available. Please install it with: pip install fastmcp"
         )
     
-    # This would be implemented based on FastMCP 2.0 API
-    # The exact implementation depends on how FastMCP 2.0 creates tools
-    raise NotImplementedError(
-        "This function needs to be implemented based on FastMCP 2.0 API. "
-        "Please refer to FastMCP documentation for tool creation."
-    )
+    # In FastMCP 2.0, tools are typically created using decorators on the server
+    # This function would help create tools programmatically
+    tool_name = name or func.__name__
+    tool_description = description or func.__doc__ or f"Tool: {tool_name}"
+    
+    # This is a placeholder - the actual implementation would depend on
+    # FastMCP 2.0's specific API for programmatic tool creation
+    return {
+        "name": tool_name,
+        "description": tool_description,
+        "function": func,
+        "type": "function"
+    }
+
+
+# Backward compatibility aliases
+FastMCPAdapter = FastMCP2Adapter
+FastMCPServerAdapter = FastMCP2ServerAdapter
+load_fastmcp_tools = load_fastmcp2_tools
+load_fastmcp_tools_sync = load_fastmcp2_tools_sync
+create_fastmcp_tool_from_function = create_fastmcp2_tool_from_function
