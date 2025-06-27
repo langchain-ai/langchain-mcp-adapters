@@ -4,7 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, Protocol, TypedDict, NotRequired
+from typing import Any, AsyncIterator, Literal, NotRequired, Protocol, TypedDict
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
