@@ -446,3 +446,49 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             # Expected to fail since server doesn't have SSE endpoint,
             # but the important thing is that httpx_client_factory was passed correctly
             pass
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_with_no_tool_ids():
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+            "param2": {"title": "Param2", "type": "integer"},
+        },
+        "required": ["param1", "param2"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    mcp_tools = [
+        MCPTool(name="tool1", description="Tool 1", inputSchema=tool_input_schema),
+        MCPTool(name="tool2", description="Tool 2", inputSchema=tool_input_schema),
+        MCPTool(name="tool3", description="Tool 3", inputSchema=tool_input_schema),
+    ]
+    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
+    tools = await load_mcp_tools(session)
+    assert len(tools) == 3
+    assert {t.name for t in tools} == {"tool1", "tool2", "tool3"}
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_with_specific_tool_ids():
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+            "param2": {"title": "Param2", "type": "integer"},
+        },
+        "required": ["param1", "param2"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    mcp_tools = [
+        MCPTool(name="tool1", description="Tool 1", inputSchema=tool_input_schema),
+        MCPTool(name="tool2", description="Tool 2", inputSchema=tool_input_schema),
+        MCPTool(name="tool3", description="Tool 3", inputSchema=tool_input_schema),
+    ]
+    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
+    tools = await load_mcp_tools(session, tool_ids=["tool1", "tool3"])
+    assert len(tools) == 2
+    assert {t.name for t in tools} == {"tool1", "tool3"}
