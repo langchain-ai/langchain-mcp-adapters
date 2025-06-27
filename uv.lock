@@ -300,6 +300,7 @@ source = { editable = "." }
 dependencies = [
     { name = "langchain-core" },
     { name = "mcp" },
+    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -318,6 +319,7 @@ test = [
 requires-dist = [
     { name = "langchain-core", specifier = ">=0.3.36,<0.4" },
     { name = "mcp", specifier = ">=1.9.2" },
+    { name = "typing-extensions", specifier = ">=4.14.0" },
 ]
 
 [package.metadata.requires-dev]
