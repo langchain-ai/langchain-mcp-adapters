@@ -118,8 +118,14 @@ async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
+    tool_ids: list[str] | None = None,
 ) -> list[BaseTool]:
-    """Load all available MCP tools and convert them to LangChain tools.
+    """Load selected or all MCP tools and convert them to LangChain tools.
+
+    Args:
+        session: MCP client session
+        connection: Optional connection config to use to create a new session if a `session` is not provided
+        tool_ids: List of specific tool names/ids to load. If empty or None, load all tools.
 
     Returns:
         list of LangChain tools. Tool annotations are returned as part
@@ -135,6 +141,10 @@ async def load_mcp_tools(
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
+
+    # If tool_ids is provided and not empty, filter tools by name
+    if tool_ids:
+        tools = [tool for tool in tools if tool.name in tool_ids]
 
     converted_tools = [
         convert_mcp_tool_to_langchain_tool(session, tool, connection=connection) for tool in tools
