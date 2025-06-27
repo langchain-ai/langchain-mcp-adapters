@@ -1,15 +1,16 @@
+from __future__ import annotations
+
 import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, Protocol, TypedDict
+from typing import Any, AsyncIterator, Literal, Protocol, TypedDict, NotRequired
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
-from mcp.client.auth import OAuthClientProvider
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -83,8 +84,9 @@ class SSEConnection(TypedDict):
     httpx_client_factory: McpHttpClientFactory | None
     """Custom factory for httpx.AsyncClient (optional)."""
 
-    auth: OAuthClientProvider
-    """Optional authentication provider to handle OAuth authorization during connection."""
+    auth: NotRequired[httpx.Auth]
+    """Optional authentication for the HTTP client."""
+
 
 class StreamableHttpConnection(TypedDict):
     transport: Literal["streamable_http"]
@@ -111,8 +113,9 @@ class StreamableHttpConnection(TypedDict):
     httpx_client_factory: McpHttpClientFactory | None
     """Custom factory for httpx.AsyncClient (optional)."""
 
-    auth: OAuthClientProvider
-    """Optional authentication provider to handle OAuth authorization during connection."""
+    auth: NotRequired[httpx.Auth]
+    """Optional authentication for the HTTP client."""
+
 
 class WebsocketConnection(TypedDict):
     transport: Literal["websocket"]
@@ -180,7 +183,7 @@ async def _create_sse_session(
     sse_read_timeout: float = DEFAULT_SSE_READ_TIMEOUT,
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
-    auth: OAuthClientProvider | None = None,
+    auth: httpx.Auth | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using SSE.
 
@@ -191,14 +194,17 @@ async def _create_sse_session(
         sse_read_timeout: SSE read timeout
         session_kwargs: Additional keyword arguments to pass to the ClientSession
         httpx_client_factory: Custom factory for httpx.AsyncClient (optional)
-        auth: OAuth Client provider (optional)
+        auth: httpx.Auth | None = None
     """
     # Create and store the connection
     kwargs = {}
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
 
-    async with sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (read, write):
+    async with sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (
+        read,
+        write,
+    ):
         async with ClientSession(read, write, **(session_kwargs or {})) as session:
             yield session
 
@@ -213,7 +219,7 @@ async def _create_streamable_http_session(
     terminate_on_close: bool = True,
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
-    auth: OAuthClientProvider | None = None,
+    auth: httpx.Auth | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using Streamable HTTP.
 
@@ -225,7 +231,7 @@ async def _create_streamable_http_session(
         terminate_on_close: Whether to terminate the session on close
         session_kwargs: Additional keyword arguments to pass to the ClientSession
         httpx_client_factory: Custom factory for httpx.AsyncClient (optional)
-        auth: OAuth Client provider (optional)
+        auth: httpx.Auth | None = None
     """
     # Create and store the connection
     kwargs = {}
