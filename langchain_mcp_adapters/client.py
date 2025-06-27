@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AsyncExitStack
 from types import TracebackType
 from typing import Any, AsyncIterator
 
@@ -78,8 +78,49 @@ class MultiServerMCPClient:
         async with client.session("math") as session:
             tools = await load_mcp_tools(session)
         ```
+
+        Example: keep session from specific servers
+
+        ```python
+        client = MultiServerMCPClient({...})
+        async with client.keep_sessions(["math", "weather"]):
+            tools = await client.get_tools()
+            resources = await client.get_resources("weather")
+        ```
         """
         self.connections: dict[str, Connection] = connections if connections is not None else {}
+        self._persistent_sessions: dict[str, ClientSession] = {}
+        self._exit_stack: AsyncExitStack | None = None
+
+    @asynccontextmanager
+    async def keep_sessions(self, server_names: list[str]) -> AsyncIterator["MultiServerMCPClient"]:
+        """Keep persistent sessions open for a list of MCP servers.
+
+        Args:
+            server_names: A list of server names for which to keep sessions open.
+                These names must exist in the `connections` dictionary provided during initialization.
+
+        Raises:
+            ValueError: If any of the specified server names are not found in the connections.
+
+        Yields:
+            The current `MultiServerMCPClient` instance with persistent session support enabled
+            for the specified servers within the context block."""
+        self._persistent_sessions = {}
+        self._exit_stack = AsyncExitStack()
+        try:
+            for name in server_names:
+                if name not in self.connections:
+                    raise ValueError(f"Server '{name}' not found in connections.")
+                session_cm = create_session(self.connections[name])
+                session = await self._exit_stack.enter_async_context(session_cm)
+                await session.initialize()
+                self._persistent_sessions[name] = session
+            yield self
+        finally:
+            self._persistent_sessions.clear()
+            await self._exit_stack.aclose()
+            self._exit_stack = None
 
     @asynccontextmanager
     async def session(
@@ -100,6 +141,10 @@ class MultiServerMCPClient:
         Yields:
             An initialized ClientSession
         """
+        if server_name in self._persistent_sessions:
+            yield self._persistent_sessions[server_name]
+            return
+
         if server_name not in self.connections:
             raise ValueError(
                 f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
