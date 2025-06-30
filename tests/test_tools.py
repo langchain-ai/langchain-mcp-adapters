@@ -449,46 +449,68 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
 
 
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_no_tool_ids():
-    tool_input_schema = {
-        "properties": {
-            "param1": {"title": "Param1", "type": "string"},
-            "param2": {"title": "Param2", "type": "integer"},
-        },
-        "required": ["param1", "param2"],
-        "title": "ToolSchema",
-        "type": "object",
-    }
-    session = AsyncMock()
-    mcp_tools = [
-        MCPTool(name="tool1", description="Tool 1", inputSchema=tool_input_schema),
-        MCPTool(name="tool2", description="Tool 2", inputSchema=tool_input_schema),
-        MCPTool(name="tool3", description="Tool 3", inputSchema=tool_input_schema),
-    ]
-    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
-    tools = await load_mcp_tools(session)
-    assert len(tools) == 3
-    assert {t.name for t in tools} == {"tool1", "tool2", "tool3"}
+async def test_load_mcp_tools_with_no_tool_names_e2e(socket_enabled) -> None:
+    """E2E: Load all MCP tools from a running server."""
+    from mcp.server import FastMCP
+
+    server = FastMCP(port=8184)
+
+    @server.tool()
+    def tool1(param1: str, param2: int) -> str:
+        return f"tool1 result with {param1}, {param2}"
+
+    @server.tool()
+    def tool2(param1: str, param2: int) -> str:
+        return f"tool2 result with {param1}, {param2}"
+
+    @server.tool()
+    def tool3(param1: str, param2: int) -> str:
+        return f"tool3 result with {param1}, {param2}"
+
+    with run_streamable_http(server):
+        client = MultiServerMCPClient(
+            {
+                "alltools": {
+                    "url": "http://localhost:8184/mcp/",
+                    "transport": "streamable_http",
+                },
+            }
+        )
+        async with client.session("alltools") as session:
+            tools = await load_mcp_tools(session)
+            assert len(tools) == 3
+            assert {t.name for t in tools} == {"tool1", "tool2", "tool3"}
 
 
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_specific_tool_ids():
-    tool_input_schema = {
-        "properties": {
-            "param1": {"title": "Param1", "type": "string"},
-            "param2": {"title": "Param2", "type": "integer"},
-        },
-        "required": ["param1", "param2"],
-        "title": "ToolSchema",
-        "type": "object",
-    }
-    session = AsyncMock()
-    mcp_tools = [
-        MCPTool(name="tool1", description="Tool 1", inputSchema=tool_input_schema),
-        MCPTool(name="tool2", description="Tool 2", inputSchema=tool_input_schema),
-        MCPTool(name="tool3", description="Tool 3", inputSchema=tool_input_schema),
-    ]
-    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
-    tools = await load_mcp_tools(session, tool_ids=["tool1", "tool3"])
-    assert len(tools) == 2
-    assert {t.name for t in tools} == {"tool1", "tool3"}
+async def test_load_mcp_tools_with_specific_tool_names_e2e(socket_enabled) -> None:
+    """E2E: Load only specific MCP tools from a running server."""
+    from mcp.server import FastMCP
+
+    server = FastMCP(port=8185)
+
+    @server.tool()
+    def tool1(param1: str, param2: int) -> str:
+        return f"tool1 result with {param1}, {param2}"
+
+    @server.tool()
+    def tool2(param1: str, param2: int) -> str:
+        return f"tool2 result with {param1}, {param2}"
+
+    @server.tool()
+    def tool3(param1: str, param2: int) -> str:
+        return f"tool3 result with {param1}, {param2}"
+
+    with run_streamable_http(server):
+        client = MultiServerMCPClient(
+            {
+                "sometools": {
+                    "url": "http://localhost:8185/mcp/",
+                    "transport": "streamable_http",
+                },
+            }
+        )
+        async with client.session("sometools") as session:
+            tools = await load_mcp_tools(session, tool_names=["tool1", "tool3"])
+            assert len(tools) == 2
+            assert {t.name for t in tools} == {"tool1", "tool3"}
