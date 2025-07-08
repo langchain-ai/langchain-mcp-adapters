@@ -44,24 +44,29 @@ class StdioConnection(TypedDict):
     args: list[str]
     """Command line arguments to pass to the executable."""
 
-    env: dict[str, str] | None
+    env: NotRequired[dict[str, str] | None]
     """The environment to use when spawning the process."""
 
-    cwd: str | Path | None
+    cwd: NotRequired[str | Path | None]
     """The working directory to use when spawning the process."""
 
-    encoding: str
-    """The text encoding used when sending/receiving messages to the server."""
+    encoding: NotRequired[str]
+    """The text encoding used when sending/receiving messages to the server.
 
-    encoding_error_handler: EncodingErrorHandler
+    Default is 'utf-8'.
+    """
+
+    encoding_error_handler: NotRequired[EncodingErrorHandler]
     """
     The text encoding error handler.
 
     See https://docs.python.org/3/library/codecs.html#codec-base-classes for
     explanations of possible values.
+
+    Default is 'strict', which raises an error on encoding/decoding errors.
     """
 
-    session_kwargs: dict[str, Any] | None
+    session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession."""
 
 
@@ -71,19 +76,27 @@ class SSEConnection(TypedDict):
     url: str
     """The URL of the SSE endpoint to connect to."""
 
-    headers: dict[str, Any] | None
+    headers: NotRequired[dict[str, Any] | None]
     """HTTP headers to send to the SSE endpoint."""
 
-    timeout: float
-    """HTTP timeout."""
+    timeout: NotRequired[float]
+    """HTTP timeout.
 
-    sse_read_timeout: float
-    """SSE read timeout."""
+    Default is 5 seconds. If the server takes longer to respond,
+    you can increase this value.
+    """
 
-    session_kwargs: dict[str, Any] | None
+    sse_read_timeout: NotRequired[float]
+    """SSE read timeout.
+
+    Default is 300 seconds (5 minutes). This is how long the client will 
+    wait for a new event before disconnecting.
+    """
+
+    session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession."""
 
-    httpx_client_factory: McpHttpClientFactory | None
+    httpx_client_factory: NotRequired[McpHttpClientFactory | None]
     """Custom factory for httpx.AsyncClient (optional)."""
 
     auth: NotRequired[httpx.Auth]
@@ -92,27 +105,28 @@ class SSEConnection(TypedDict):
 
 class StreamableHttpConnection(TypedDict):
     transport: Literal["streamable_http"]
+    """Connection configuration for Streamable HTTP transport."""
 
     url: str
     """The URL of the endpoint to connect to."""
 
-    headers: dict[str, Any] | None
+    headers: NotRequired[dict[str, Any] | None]
     """HTTP headers to send to the endpoint."""
 
-    timeout: timedelta
+    timeout: NotRequired[timedelta]
     """HTTP timeout."""
 
-    sse_read_timeout: timedelta
+    sse_read_timeout: NotRequired[timedelta]
     """How long (in seconds) the client will wait for a new event before disconnecting.
     All other HTTP operations are controlled by `timeout`."""
 
-    terminate_on_close: bool
+    terminate_on_close: NotRequired[bool]
     """Whether to terminate the session on close."""
 
-    session_kwargs: dict[str, Any] | None
+    session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession."""
 
-    httpx_client_factory: McpHttpClientFactory | None
+    httpx_client_factory: NotRequired[McpHttpClientFactory | None]
     """Custom factory for httpx.AsyncClient (optional)."""
 
     auth: NotRequired[httpx.Auth]
@@ -125,7 +139,7 @@ class WebsocketConnection(TypedDict):
     url: str
     """The URL of the Websocket endpoint to connect to."""
 
-    session_kwargs: dict[str, Any] | None
+    session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession"""
 
 
@@ -291,7 +305,6 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
 
     Yields:
         A ClientSession
-
     """
     if "transport" not in connection:
         raise ValueError(
@@ -302,57 +315,29 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
         )
 
     transport = connection["transport"]
+    params = {k: v for k, v in connection.items() if k != "transport"}
+
     if transport == "sse":
-        if "url" not in connection:
+        if "url" not in params:
             raise ValueError("'url' parameter is required for SSE connection")
-        async with _create_sse_session(
-            url=connection["url"],
-            headers=connection.get("headers"),
-            timeout=connection.get("timeout", DEFAULT_HTTP_TIMEOUT),
-            sse_read_timeout=connection.get("sse_read_timeout", DEFAULT_SSE_READ_TIMEOUT),
-            session_kwargs=connection.get("session_kwargs"),
-            httpx_client_factory=connection.get("httpx_client_factory"),
-            auth=connection.get("auth"),
-        ) as session:
+        async with _create_sse_session(**params) as session:
             yield session
     elif transport == "streamable_http":
-        if "url" not in connection:
+        if "url" not in params:
             raise ValueError("'url' parameter is required for Streamable HTTP connection")
-        async with _create_streamable_http_session(
-            url=connection["url"],
-            headers=connection.get("headers"),
-            timeout=connection.get("timeout", DEFAULT_STREAMABLE_HTTP_TIMEOUT),
-            sse_read_timeout=connection.get(
-                "sse_read_timeout", DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT
-            ),
-            session_kwargs=connection.get("session_kwargs"),
-            httpx_client_factory=connection.get("httpx_client_factory"),
-            auth=connection.get("auth"),
-        ) as session:
+        async with _create_streamable_http_session(**params) as session:
             yield session
     elif transport == "stdio":
-        if "command" not in connection:
+        if "command" not in params:
             raise ValueError("'command' parameter is required for stdio connection")
-        if "args" not in connection:
+        if "args" not in params:
             raise ValueError("'args' parameter is required for stdio connection")
-        async with _create_stdio_session(
-            command=connection["command"],
-            args=connection["args"],
-            env=connection.get("env"),
-            cwd=connection.get("cwd"),
-            encoding=connection.get("encoding", DEFAULT_ENCODING),
-            encoding_error_handler=connection.get(
-                "encoding_error_handler", DEFAULT_ENCODING_ERROR_HANDLER
-            ),
-            session_kwargs=connection.get("session_kwargs"),
-        ) as session:
+        async with _create_stdio_session(**params) as session:
             yield session
     elif transport == "websocket":
-        if "url" not in connection:
+        if "url" not in params:
             raise ValueError("'url' parameter is required for Websocket connection")
-        async with _create_websocket_session(
-            url=connection["url"], session_kwargs=connection.get("session_kwargs")
-        ) as session:
+        async with _create_websocket_session(**params) as session:
             yield session
     else:
         raise ValueError(
