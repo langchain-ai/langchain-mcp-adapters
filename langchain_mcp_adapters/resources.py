@@ -21,7 +21,8 @@ def convert_mcp_resource_to_langchain_blob(resource_uri: str, contents: Resource
     elif isinstance(contents, BlobResourceContents):
         data = base64.b64decode(contents.blob)
     else:
-        raise ValueError(f"Unsupported content type for URI {resource_uri}")
+        msg = f"Unsupported content type for URI {resource_uri}"
+        raise TypeError(msg)
 
     return Blob.from_data(data=data, mime_type=contents.mimeType, metadata={"uri": resource_uri})
 
@@ -78,6 +79,7 @@ async def load_mcp_resources(
             resource_blobs = await get_mcp_resource(session, uri)
             blobs.extend(resource_blobs)
         except Exception as e:
-            raise RuntimeError(f"Error fetching resource {uri}") from e
+            msg = f"Error fetching resource {uri}"
+            raise RuntimeError(msg) from e
 
     return blobs

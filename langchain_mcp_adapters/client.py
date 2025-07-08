@@ -98,9 +98,8 @@ class MultiServerMCPClient:
 
         """
         if server_name not in self.connections:
-            raise ValueError(
-                f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
-            )
+            msg = f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
+            raise ValueError(msg)
 
         async with create_session(self.connections[server_name]) as session:
             if auto_initialize:
@@ -122,9 +121,8 @@ class MultiServerMCPClient:
         """
         if server_name is not None:
             if server_name not in self.connections:
-                raise ValueError(
-                    f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
-                )
+                msg = f"Couldn't find a server with name '{server_name}', expected one of '{list(self.connections.keys())}'"
+                raise ValueError(msg)
             return await load_mcp_tools(None, connection=self.connections[server_name])
 
         all_tools: list[BaseTool] = []

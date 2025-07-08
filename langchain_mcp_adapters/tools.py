@@ -47,7 +47,8 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     while True:
         iterations += 1
         if iterations > MAX_ITERATIONS:
-            raise RuntimeError("Reached max of 1000 iterations while listing tools.")
+            msg = "Reached max of 1000 iterations while listing tools."
+            raise RuntimeError(msg)
 
         list_tools_page_result = await session.list_tools(cursor=current_cursor)
 
@@ -79,7 +80,8 @@ def convert_mcp_tool_to_langchain_tool(
 
     """
     if session is None and connection is None:
-        raise ValueError("Either a session or a connection config must be provided")
+        msg = "Either a session or a connection config must be provided"
+        raise ValueError(msg)
 
     async def call_tool(
         **arguments: dict[str, Any],
@@ -116,7 +118,8 @@ async def load_mcp_tools(
 
     """
     if session is None and connection is None:
-        raise ValueError("Either a session or a connection config must be provided")
+        msg = "Either a session or a connection config must be provided"
+        raise ValueError(msg)
 
     if session is None:
         # If a session is not provided, we will create one on the fly
@@ -151,10 +154,11 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
 def to_fastmcp(tool: BaseTool) -> FastMCPTool:
     """Convert a LangChain tool to a FastMCP tool."""
     if not issubclass(tool.args_schema, BaseModel):
-        raise ValueError(
+        msg = (
             "Tool args_schema must be a subclass of pydantic.BaseModel. "
             "Tools with dict args schema are not supported."
         )
+        raise TypeError(msg)
 
     parameters = tool.tool_call_schema.model_json_schema()
     field_definitions = {

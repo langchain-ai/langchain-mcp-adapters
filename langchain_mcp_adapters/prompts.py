@@ -22,9 +22,11 @@ def convert_mcp_prompt_message_to_langchain_message(
             return HumanMessage(content=message.content.text)
         if message.role == "assistant":
             return AIMessage(content=message.content.text)
-        raise ValueError(f"Unsupported prompt message role: {message.role}")
+        msg = f"Unsupported prompt message role: {message.role}"
+        raise ValueError(msg)
 
-    raise ValueError(f"Unsupported prompt message content type: {message.content.type}")
+    msg = f"Unsupported prompt message content type: {message.content.type}"
+    raise ValueError(msg)
 
 
 async def load_mcp_prompt(

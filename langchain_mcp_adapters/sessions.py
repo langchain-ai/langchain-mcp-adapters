@@ -281,11 +281,12 @@ async def _create_websocket_session(
     try:
         from mcp.client.websocket import websocket_client
     except ImportError:
-        raise ImportError(
-            "Could not import websocket_client. ",
-            "To use Websocket connections, please install the required dependency with: ",
-            "'pip install mcp[ws]' or 'pip install websockets'",
-        ) from None
+        msg = (
+            "Could not import websocket_client. "
+            "To use Websocket connections, please install the required dependency with: "
+            "'pip install mcp[ws]' or 'pip install websockets'"
+        )
+        raise ImportError(msg) from None
 
     async with websocket_client(url) as (read, write):
         async with ClientSession(read, write, **(session_kwargs or {})) as session:
@@ -307,40 +308,47 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
         A ClientSession
     """
     if "transport" not in connection:
-        raise ValueError(
+        msg = (
             "Configuration error: Missing 'transport' key in server configuration. "
             "Each server must include 'transport' with one of: "
             "'stdio', 'sse', 'websocket', 'streamable_http'. "
             "Please refer to the langchain-mcp-adapters documentation for more details."
         )
+        raise ValueError(msg)
 
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
 
     if transport == "sse":
         if "url" not in params:
-            raise ValueError("'url' parameter is required for SSE connection")
+            msg = "'url' parameter is required for SSE connection"
+            raise ValueError(msg)
         async with _create_sse_session(**params) as session:
             yield session
     elif transport == "streamable_http":
         if "url" not in params:
-            raise ValueError("'url' parameter is required for Streamable HTTP connection")
+            msg = "'url' parameter is required for Streamable HTTP connection"
+            raise ValueError(msg)
         async with _create_streamable_http_session(**params) as session:
             yield session
     elif transport == "stdio":
         if "command" not in params:
-            raise ValueError("'command' parameter is required for stdio connection")
+            msg = "'command' parameter is required for stdio connection"
+            raise ValueError(msg)
         if "args" not in params:
-            raise ValueError("'args' parameter is required for stdio connection")
+            msg = "'args' parameter is required for stdio connection"
+            raise ValueError(msg)
         async with _create_stdio_session(**params) as session:
             yield session
     elif transport == "websocket":
         if "url" not in params:
-            raise ValueError("'url' parameter is required for Websocket connection")
+            msg = "'url' parameter is required for Websocket connection"
+            raise ValueError(msg)
         async with _create_websocket_session(**params) as session:
             yield session
     else:
-        raise ValueError(
+        msg = (
             f"Unsupported transport: {transport}. "
             f"Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
         )
+        raise ValueError(msg)
