@@ -27,10 +27,7 @@ from tests.utils import run_streamable_http
 
 def test_convert_empty_text_content():
     # Test with a single text content
-    result = CallToolResult(
-        content=[],
-        isError=False,
-    )
+    result = CallToolResult(content=[], isError=False)
 
     text_content, non_text_content = _convert_call_tool_result(result)
 
@@ -40,10 +37,7 @@ def test_convert_empty_text_content():
 
 def test_convert_single_text_content():
     # Test with a single text content
-    result = CallToolResult(
-        content=[TextContent(type="text", text="test result")],
-        isError=False,
-    )
+    result = CallToolResult(content=[TextContent(type="text", text="test result")], isError=False)
 
     text_content, non_text_content = _convert_call_tool_result(result)
 
@@ -76,11 +70,7 @@ def test_convert_with_non_text_content():
     )
 
     result = CallToolResult(
-        content=[
-            TextContent(type="text", text="text result"),
-            image_content,
-            resource_content,
-        ],
+        content=[TextContent(type="text", text="text result"), image_content, resource_content],
         isError=False,
     )
 
@@ -92,10 +82,7 @@ def test_convert_with_non_text_content():
 
 def test_convert_with_error():
     # Test with error
-    result = CallToolResult(
-        content=[TextContent(type="text", text="error message")],
-        isError=True,
-    )
+    result = CallToolResult(content=[TextContent(type="text", text="error message")], isError=True)
 
     with pytest.raises(ToolException) as exc_info:
         _convert_call_tool_result(result)
@@ -117,14 +104,11 @@ async def test_convert_mcp_tool_to_langchain_tool():
     # Mock session and MCP tool
     session = AsyncMock()
     session.call_tool.return_value = CallToolResult(
-        content=[TextContent(type="text", text="tool result")],
-        isError=False,
+        content=[TextContent(type="text", text="tool result")], isError=False
     )
 
     mcp_tool = MCPTool(
-        name="test_tool",
-        description="Test tool description",
-        inputSchema=tool_input_schema,
+        name="test_tool", description="Test tool description", inputSchema=tool_input_schema
     )
 
     # Convert MCP tool to LangChain tool
@@ -161,16 +145,8 @@ async def test_load_mcp_tools():
     # Mock session and list_tools response
     session = AsyncMock()
     mcp_tools = [
-        MCPTool(
-            name="tool1",
-            description="Tool 1 description",
-            inputSchema=tool_input_schema,
-        ),
-        MCPTool(
-            name="tool2",
-            description="Tool 2 description",
-            inputSchema=tool_input_schema,
-        ),
+        MCPTool(name="tool1", description="Tool 1 description", inputSchema=tool_input_schema),
+        MCPTool(name="tool2", description="Tool 2 description", inputSchema=tool_input_schema),
     ]
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
@@ -181,11 +157,9 @@ async def test_load_mcp_tools():
                 content=[TextContent(type="text", text=f"tool1 result with {arguments}")],
                 isError=False,
             )
-        else:
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"tool2 result with {arguments}")],
-                isError=False,
-            )
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"tool2 result with {arguments}")], isError=False
+        )
 
     session.call_tool.side_effect = mock_call_tool
 
@@ -216,9 +190,7 @@ async def test_load_mcp_tools():
 
 
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_annotations(
-    socket_enabled,
-) -> None:
+async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
     """Test load mcp tools with annotations."""
     from mcp.server import FastMCP
     from mcp.types import ToolAnnotations
@@ -235,12 +207,7 @@ async def test_load_mcp_tools_with_annotations(
     with run_streamable_http(server):
         # Initialize client without initial connections
         client = MultiServerMCPClient(
-            {
-                "time": {
-                    "url": "http://localhost:8181/mcp/",
-                    "transport": "streamable_http",
-                },
-            }
+            {"time": {"url": "http://localhost:8181/mcp/", "transport": "streamable_http"}}
         )
         # pass
         tools = await client.get_tools(server_name="time")
@@ -301,11 +268,7 @@ class AddTool(BaseTool):
 
 @pytest.mark.parametrize(
     "tool_instance",
-    [
-        add,
-        add_with_schema,
-        AddTool(),
-    ],
+    [add, add_with_schema, AddTool()],
     ids=["tool", "tool_with_schema", "tool_class"],
 )
 async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
@@ -343,9 +306,7 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
 
 # Tests for httpx_client_factory functionality
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory(
-    socket_enabled,
-) -> None:
+async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
     """Test load mcp tools with custom httpx client factory."""
     import httpx
     from mcp.server import FastMCP
@@ -380,7 +341,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(
                     "url": "http://localhost:8182/mcp/",
                     "transport": "streamable_http",
                     "httpx_client_factory": custom_httpx_client_factory,
-                },
+                }
             }
         )
 
@@ -395,9 +356,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(
 
 
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
-    socket_enabled,
-) -> None:
+async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(socket_enabled) -> None:
     """Test load mcp tools with custom httpx client factory using SSE transport."""
     import httpx
     from mcp.server import FastMCP
@@ -432,7 +391,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
                     "url": "http://localhost:8183/sse",
                     "transport": "sse",
                     "httpx_client_factory": custom_httpx_client_factory,
-                },
+                }
             }
         )
 

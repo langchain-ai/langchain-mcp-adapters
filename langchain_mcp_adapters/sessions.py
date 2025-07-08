@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 from mcp import ClientSession, StdioServerParameters
@@ -152,6 +153,7 @@ async def _create_stdio_session(
         encoding: Character encoding
         encoding_error_handler: How to handle encoding errors
         session_kwargs: Additional keyword arguments to pass to the ClientSession
+
     """
     # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
     # To address this, we automatically inject existing PATH envvar into the `env` value,
@@ -196,6 +198,7 @@ async def _create_sse_session(
         session_kwargs: Additional keyword arguments to pass to the ClientSession
         httpx_client_factory: Custom factory for httpx.AsyncClient (optional)
         auth: httpx.Auth | None = None
+
     """
     # Create and store the connection
     kwargs = {}
@@ -233,6 +236,7 @@ async def _create_streamable_http_session(
         session_kwargs: Additional keyword arguments to pass to the ClientSession
         httpx_client_factory: Custom factory for httpx.AsyncClient (optional)
         auth: httpx.Auth | None = None
+
     """
     # Create and store the connection
     kwargs = {}
@@ -248,9 +252,7 @@ async def _create_streamable_http_session(
 
 @asynccontextmanager
 async def _create_websocket_session(
-    *,
-    url: str,
-    session_kwargs: dict[str, Any] | None = None,
+    *, url: str, session_kwargs: dict[str, Any] | None = None
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using Websockets.
 
@@ -260,6 +262,7 @@ async def _create_websocket_session(
 
     Raises:
         ImportError: If websockets package is not installed
+
     """
     try:
         from mcp.client.websocket import websocket_client
@@ -276,9 +279,7 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
-async def create_session(
-    connection: Connection,
-) -> AsyncIterator[ClientSession]:
+async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
@@ -290,8 +291,8 @@ async def create_session(
 
     Yields:
         A ClientSession
-    """
 
+    """
     if "transport" not in connection:
         raise ValueError(
             "Configuration error: Missing 'transport' key in server configuration. "
@@ -350,8 +351,7 @@ async def create_session(
         if "url" not in connection:
             raise ValueError("'url' parameter is required for Websocket connection")
         async with _create_websocket_session(
-            url=connection["url"],
-            session_kwargs=connection.get("session_kwargs"),
+            url=connection["url"], session_kwargs=connection.get("session_kwargs")
         ) as session:
             yield session
     else:

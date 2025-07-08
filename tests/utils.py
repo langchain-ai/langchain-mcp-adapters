@@ -20,11 +20,7 @@ def make_server_app() -> Starlette:
         async with websocket_server(websocket.scope, websocket.receive, websocket.send) as streams:
             await server.run(streams[0], streams[1], server.create_initialization_options())
 
-    app = Starlette(
-        routes=[
-            WebSocketRoute("/ws", endpoint=handle_ws),
-        ]
-    )
+    app = Starlette(routes=[WebSocketRoute("/ws", endpoint=handle_ws)])
 
     return app
 

@@ -5,10 +5,7 @@ from mcp import ClientSession
 from mcp.types import BlobResourceContents, ResourceContents, TextResourceContents
 
 
-def convert_mcp_resource_to_langchain_blob(
-    resource_uri: str,
-    contents: ResourceContents,
-) -> Blob:
+def convert_mcp_resource_to_langchain_blob(resource_uri: str, contents: ResourceContents) -> Blob:
     """Convert an MCP resource content to a LangChain Blob.
 
     Args:
@@ -17,6 +14,7 @@ def convert_mcp_resource_to_langchain_blob(
 
     Returns:
         A LangChain Blob
+
     """
     if isinstance(contents, TextResourceContents):
         data = contents.text
@@ -25,11 +23,7 @@ def convert_mcp_resource_to_langchain_blob(
     else:
         raise ValueError(f"Unsupported content type for URI {resource_uri}")
 
-    return Blob.from_data(
-        data=data,
-        mime_type=contents.mimeType,
-        metadata={"uri": resource_uri},
-    )
+    return Blob.from_data(data=data, mime_type=contents.mimeType, metadata={"uri": resource_uri})
 
 
 async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
@@ -41,6 +35,7 @@ async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
 
     Returns:
         A list of LangChain Blobs
+
     """
     contents_result = await session.read_resource(uri)
     if not contents_result.contents or len(contents_result.contents) == 0:
@@ -52,9 +47,7 @@ async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
 
 
 async def load_mcp_resources(
-    session: ClientSession,
-    *,
-    uris: str | list[str] | None = None,
+    session: ClientSession, *, uris: str | list[str] | None = None
 ) -> list[Blob]:
     """Load MCP resources and convert them to LangChain Blobs.
 
@@ -68,6 +61,7 @@ async def load_mcp_resources(
 
     Returns:
         A list of LangChain Blobs
+
     """
     blobs = []
 

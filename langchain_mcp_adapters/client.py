@@ -1,7 +1,8 @@
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any, AsyncIterator
+from typing import Any
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
@@ -35,10 +36,7 @@ ASYNC_CONTEXT_MANAGER_ERROR = (
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers and loading LangChain-compatible tools, prompts and resources from them."""
 
-    def __init__(
-        self,
-        connections: dict[str, Connection] | None = None,
-    ) -> None:
+    def __init__(self, connections: dict[str, Connection] | None = None) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
         Args:
@@ -78,15 +76,13 @@ class MultiServerMCPClient:
         async with client.session("math") as session:
             tools = await load_mcp_tools(session)
         ```
+
         """
         self.connections: dict[str, Connection] = connections if connections is not None else {}
 
     @asynccontextmanager
     async def session(
-        self,
-        server_name: str,
-        *,
-        auto_initialize: bool = True,
+        self, server_name: str, *, auto_initialize: bool = True
     ) -> AsyncIterator[ClientSession]:
         """Connect to an MCP server and initialize a session.
 
@@ -99,6 +95,7 @@ class MultiServerMCPClient:
 
         Yields:
             An initialized ClientSession
+
         """
         if server_name not in self.connections:
             raise ValueError(
@@ -121,6 +118,7 @@ class MultiServerMCPClient:
 
         Returns:
             A list of LangChain tools
+
         """
         if server_name is not None:
             if server_name not in self.connections:
@@ -158,6 +156,7 @@ class MultiServerMCPClient:
 
         Returns:
             A list of LangChain Blobs
+
         """
         async with self.session(server_name) as session:
             resources = await load_mcp_resources(session, uris=uris)
@@ -176,8 +175,8 @@ class MultiServerMCPClient:
 
 
 __all__ = [
-    "MultiServerMCPClient",
     "McpHttpClientFactory",
+    "MultiServerMCPClient",
     "SSEConnection",
     "StdioConnection",
     "StreamableHttpConnection",

@@ -17,11 +17,7 @@ from langchain_mcp_adapters.prompts import (
 
 
 @pytest.mark.parametrize(
-    "role,text,expected_cls",
-    [
-        ("assistant", "Hello", AIMessage),
-        ("user", "Hello", HumanMessage),
-    ],
+    "role,text,expected_cls", [("assistant", "Hello", AIMessage), ("user", "Hello", HumanMessage)]
 )
 def test_convert_mcp_prompt_message_to_langchain_message_with_text_content(
     role: str, text: str, expected_cls: type
