@@ -2,7 +2,6 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 
-import anyio
 import click
 import mcp.types as types
 from mcp.server.lowlevel import Server

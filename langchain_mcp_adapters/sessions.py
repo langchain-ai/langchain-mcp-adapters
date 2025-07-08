@@ -89,7 +89,7 @@ class SSEConnection(TypedDict):
     sse_read_timeout: NotRequired[float]
     """SSE read timeout.
 
-    Default is 300 seconds (5 minutes). This is how long the client will 
+    Default is 300 seconds (5 minutes). This is how long the client will
     wait for a new event before disconnecting.
     """
 
