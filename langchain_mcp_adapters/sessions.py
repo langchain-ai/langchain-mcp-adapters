@@ -189,9 +189,11 @@ async def _create_stdio_session(
     )
 
     # Create and store the connection
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write, **(session_kwargs or {})) as session:
-            yield session
+    async with (
+        stdio_client(server_params) as (read, write),
+        ClientSession(read, write, **(session_kwargs or {})) as session,
+    ):
+        yield session
 
 
 @asynccontextmanager
@@ -222,10 +224,13 @@ async def _create_sse_session(
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
 
-    async with sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (
-        read,
-        write,
-    ), ClientSession(read, write, **(session_kwargs or {})) as session:
+    async with (
+        sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (
+            read,
+            write,
+        ),
+        ClientSession(read, write, **(session_kwargs or {})) as session,
+    ):
         yield session
 
 
@@ -259,9 +264,12 @@ async def _create_streamable_http_session(
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
 
-    async with streamablehttp_client(
-        url, headers, timeout, sse_read_timeout, terminate_on_close, auth=auth, **kwargs
-    ) as (read, write, _), ClientSession(read, write, **(session_kwargs or {})) as session:
+    async with (
+        streamablehttp_client(
+            url, headers, timeout, sse_read_timeout, terminate_on_close, auth=auth, **kwargs
+        ) as (read, write, _),
+        ClientSession(read, write, **(session_kwargs or {})) as session,
+    ):
         yield session
 
 
@@ -289,9 +297,11 @@ async def _create_websocket_session(
         )
         raise ImportError(msg) from None
 
-    async with websocket_client(url) as (read, write):
-        async with ClientSession(read, write, **(session_kwargs or {})) as session:
-            yield session
+    async with (
+        websocket_client(url) as (read, write),
+        ClientSession(read, write, **(session_kwargs or {})) as session,
+    ):
+        yield session
 
 
 @asynccontextmanager
