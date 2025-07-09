@@ -251,7 +251,9 @@ async def test_load_mcp_resources_with_blob_content():
         return_value=ReadResourceResult(
             contents=[
                 BlobResourceContents(
-                    uri=uri, mimeType="application/octet-stream", blob=base64_blob
+                    uri=uri,
+                    mimeType="application/octet-stream",
+                    blob=base64_blob,
                 ),
             ],
         ),

@@ -150,7 +150,7 @@ Connection = StdioConnection | SSEConnection | StreamableHttpConnection | Websoc
 
 
 @asynccontextmanager
-async def _create_stdio_session(
+async def _create_stdio_session(  # noqa: PLR0913
     *,
     command: str,
     args: list[str],
@@ -197,7 +197,7 @@ async def _create_stdio_session(
 
 
 @asynccontextmanager
-async def _create_sse_session(
+async def _create_sse_session(  # noqa: PLR0913
     *,
     url: str,
     headers: dict[str, Any] | None = None,
@@ -235,7 +235,7 @@ async def _create_sse_session(
 
 
 @asynccontextmanager
-async def _create_streamable_http_session(
+async def _create_streamable_http_session(  # noqa: PLR0913
     *,
     url: str,
     headers: dict[str, Any] | None = None,
@@ -313,7 +313,7 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
-async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:
+async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:  # noqa: C901
     """Create a new session to an MCP server.
 
     Args:
