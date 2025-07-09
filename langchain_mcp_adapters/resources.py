@@ -1,3 +1,9 @@
+"""Resources adapter for converting MCP resources to LangChain Blobs.
+
+This module provides functionality to convert MCP resources into LangChain Blob
+objects, handling both text and binary resource content types.
+"""
+
 import base64
 
 from langchain_core.documents.base import Blob
@@ -31,12 +37,11 @@ async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
     """Fetch a single MCP resource and convert it to LangChain Blobs.
 
     Args:
-        session: MCP client session
-        uri: URI of the resource to fetch
+        session: MCP client session.
+        uri: URI of the resource to fetch.
 
     Returns:
-        A list of LangChain Blobs
-
+        A list of LangChain Blobs.
     """
     contents_result = await session.read_resource(uri)
     if not contents_result.contents or len(contents_result.contents) == 0:
@@ -55,16 +60,17 @@ async def load_mcp_resources(
     """Load MCP resources and convert them to LangChain Blobs.
 
     Args:
-        session: MCP client session
-        uris: List of URIs to load.
-            If None, all resources will be loaded.
-            NOTE: if you specify None, dynamic resources will NOT be loaded,
-            as they need the parameters to be provided,
-            and are ignored by MCP SDK's session.list_resources() method.
+        session: MCP client session.
+        uris: List of URIs to load. If None, all resources will be loaded.
+            Note: Dynamic resources will NOT be loaded when None is specified,
+            as they require parameters and are ignored by the MCP SDK's
+            session.list_resources() method.
 
     Returns:
-        A list of LangChain Blobs
+        A list of LangChain Blobs.
 
+    Raises:
+        RuntimeError: If an error occurs while fetching a resource.
     """
     blobs = []
 

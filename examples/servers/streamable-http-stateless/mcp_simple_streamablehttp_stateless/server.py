@@ -1,3 +1,9 @@
+"""Simple MCP server example using streamable HTTP transport.
+
+This module demonstrates a basic MCP server implementation using streamable HTTP
+transport with basic math operations (add and multiply).
+"""
+
 import contextlib
 import logging
 from collections.abc import AsyncIterator
@@ -31,6 +37,16 @@ def main(
     log_level: str,
     json_response: bool,
 ) -> int:
+    """Run the MCP server with streamable HTTP transport.
+
+    Args:
+        port: Port to listen on for HTTP requests.
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        json_response: Whether to enable JSON responses instead of SSE streams.
+
+    Returns:
+        Exit code (0 for success).
+    """
     # Configure logging
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
@@ -43,6 +59,18 @@ def main(
     async def call_tool(
         name: str, arguments: dict
     ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+        """Handle tool calls for math operations.
+
+        Args:
+            name: Name of the tool to call.
+            arguments: Dictionary of arguments for the tool.
+
+        Returns:
+            List of content objects with the tool result.
+
+        Raises:
+            ValueError: If the tool name is not recognized.
+        """
         if name == "add":
             return [
                 types.TextContent(
@@ -62,6 +90,11 @@ def main(
 
     @app.list_tools()
     async def list_tools() -> list[types.Tool]:
+        """List all available tools provided by this server.
+
+        Returns:
+            List of tool definitions for add and multiply operations.
+        """
         return [
             types.Tool(
                 name="add",
@@ -112,11 +145,25 @@ def main(
     async def handle_streamable_http(
         scope: Scope, receive: Receive, send: Send
     ) -> None:
+        """Handle streamable HTTP requests through the session manager.
+
+        Args:
+            scope: ASGI scope object.
+            receive: ASGI receive callable.
+            send: ASGI send callable.
+        """
         await session_manager.handle_request(scope, receive, send)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
-        """Context manager for session manager."""
+        """Context manager for session manager lifecycle.
+
+        Args:
+            app: The Starlette application instance.
+
+        Yields:
+            None during the application lifetime.
+        """
         async with session_manager.run():
             logger.info("Application started with StreamableHTTP session manager!")
             try:

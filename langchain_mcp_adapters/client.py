@@ -1,3 +1,9 @@
+"""Client for connecting to multiple MCP servers and loading LangChain-compatible resources.
+
+This module provides the MultiServerMCPClient class for managing connections to multiple
+MCP servers and loading tools, prompts, and resources from them.
+"""
+
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -169,6 +175,11 @@ class MultiServerMCPClient:
             return await load_mcp_resources(session, uris=uris)
 
     async def __aenter__(self) -> "MultiServerMCPClient":
+        """Async context manager entry point.
+
+        Raises:
+            NotImplementedError: Context manager support has been removed.
+        """
         raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
 
     def __aexit__(
@@ -177,6 +188,16 @@ class MultiServerMCPClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        """Async context manager exit point.
+
+        Args:
+            exc_type: Exception type if an exception occurred.
+            exc_val: Exception value if an exception occurred.
+            exc_tb: Exception traceback if an exception occurred.
+
+        Raises:
+            NotImplementedError: Context manager support has been removed.
+        """
         raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
 
 

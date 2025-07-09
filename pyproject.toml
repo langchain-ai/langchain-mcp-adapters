@@ -53,11 +53,6 @@ select = [ "ALL",]
 ignore = [
   "E501", # line-length
   "COM812", # conflict with formatter
-  "D100", 
-  "D101",
-  "D102",
-  "D104",
-  "D105",
 ]
 
 

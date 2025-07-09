@@ -1,3 +1,9 @@
+"""Session management for different MCP transport types.
+
+This module provides connection configurations and session management for various
+MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
+"""
+
 from __future__ import annotations
 
 import os
@@ -30,15 +36,30 @@ DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
 
 
 class McpHttpClientFactory(Protocol):
+    """Protocol for creating httpx.AsyncClient instances for MCP connections."""
+
     def __call__(
         self,
         headers: dict[str, str] | None = None,
         timeout: httpx.Timeout | None = None,
         auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient: ...
+    ) -> httpx.AsyncClient:
+        """Create an httpx.AsyncClient instance.
+
+        Args:
+            headers: HTTP headers to include in requests.
+            timeout: Request timeout configuration.
+            auth: Authentication configuration.
+
+        Returns:
+            Configured httpx.AsyncClient instance.
+        """
+        ...
 
 
 class StdioConnection(TypedDict):
+    """Configuration for stdio transport connections to MCP servers."""
+
     transport: Literal["stdio"]
 
     command: str
@@ -74,6 +95,8 @@ class StdioConnection(TypedDict):
 
 
 class SSEConnection(TypedDict):
+    """Configuration for Server-Sent Events (SSE) transport connections to MCP servers."""
+
     transport: Literal["sse"]
 
     url: str
@@ -107,8 +130,9 @@ class SSEConnection(TypedDict):
 
 
 class StreamableHttpConnection(TypedDict):
-    transport: Literal["streamable_http"]
     """Connection configuration for Streamable HTTP transport."""
+
+    transport: Literal["streamable_http"]
 
     url: str
     """The URL of the endpoint to connect to."""
@@ -137,6 +161,8 @@ class StreamableHttpConnection(TypedDict):
 
 
 class WebsocketConnection(TypedDict):
+    """Configuration for WebSocket transport connections to MCP servers."""
+
     transport: Literal["websocket"]
 
     url: str
@@ -163,14 +189,16 @@ async def _create_stdio_session(  # noqa: PLR0913
     """Create a new session to an MCP server using stdio.
 
     Args:
-        command: Command to execute
-        args: Arguments for the command
-        env: Environment variables for the command
-        cwd: Working directory for the command
-        encoding: Character encoding
-        encoding_error_handler: How to handle encoding errors
-        session_kwargs: Additional keyword arguments to pass to the ClientSession
+        command: Command to execute.
+        args: Arguments for the command.
+        env: Environment variables for the command.
+        cwd: Working directory for the command.
+        encoding: Character encoding.
+        encoding_error_handler: How to handle encoding errors.
+        session_kwargs: Additional keyword arguments to pass to the ClientSession.
 
+    Yields:
+        An initialized ClientSession.
     """
     # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
     # To address this, we automatically inject existing PATH envvar into the `env` value,
@@ -210,14 +238,16 @@ async def _create_sse_session(  # noqa: PLR0913
     """Create a new session to an MCP server using SSE.
 
     Args:
-        url: URL of the SSE server
-        headers: HTTP headers to send to the SSE endpoint
-        timeout: HTTP timeout
-        sse_read_timeout: SSE read timeout
-        session_kwargs: Additional keyword arguments to pass to the ClientSession
-        httpx_client_factory: Custom factory for httpx.AsyncClient (optional)
-        auth: httpx.Auth | None = None
+        url: URL of the SSE server.
+        headers: HTTP headers to send to the SSE endpoint.
+        timeout: HTTP timeout.
+        sse_read_timeout: SSE read timeout.
+        session_kwargs: Additional keyword arguments to pass to the ClientSession.
+        httpx_client_factory: Custom factory for httpx.AsyncClient (optional).
+        auth: Authentication for the HTTP client.
 
+    Yields:
+        An initialized ClientSession.
     """
     # Create and store the connection
     kwargs = {}
@@ -249,15 +279,17 @@ async def _create_streamable_http_session(  # noqa: PLR0913
     """Create a new session to an MCP server using Streamable HTTP.
 
     Args:
-        url: URL of the endpoint to connect to
-        headers: HTTP headers to send to the endpoint
-        timeout: HTTP timeout
-        sse_read_timeout: How long (in seconds) the client will wait for a new event before disconnecting
-        terminate_on_close: Whether to terminate the session on close
-        session_kwargs: Additional keyword arguments to pass to the ClientSession
-        httpx_client_factory: Custom factory for httpx.AsyncClient (optional)
-        auth: httpx.Auth | None = None
+        url: URL of the endpoint to connect to.
+        headers: HTTP headers to send to the endpoint.
+        timeout: HTTP timeout.
+        sse_read_timeout: How long the client will wait for a new event before disconnecting.
+        terminate_on_close: Whether to terminate the session on close.
+        session_kwargs: Additional keyword arguments to pass to the ClientSession.
+        httpx_client_factory: Custom factory for httpx.AsyncClient (optional).
+        auth: Authentication for the HTTP client.
 
+    Yields:
+        An initialized ClientSession.
     """
     # Create and store the connection
     kwargs = {}
@@ -288,12 +320,14 @@ async def _create_websocket_session(
     """Create a new session to an MCP server using Websockets.
 
     Args:
-        url: URL of the Websocket endpoint
-        session_kwargs: Additional keyword arguments to pass to the ClientSession
+        url: URL of the Websocket endpoint.
+        session_kwargs: Additional keyword arguments to pass to the ClientSession.
+
+    Yields:
+        An initialized ClientSession.
 
     Raises:
-        ImportError: If websockets package is not installed
-
+        ImportError: If websockets package is not installed.
     """
     try:
         from mcp.client.websocket import websocket_client
