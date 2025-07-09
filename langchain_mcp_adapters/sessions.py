@@ -225,9 +225,8 @@ async def _create_sse_session(
     async with sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (
         read,
         write,
-    ):
-        async with ClientSession(read, write, **(session_kwargs or {})) as session:
-            yield session
+    ), ClientSession(read, write, **(session_kwargs or {})) as session:
+        yield session
 
 
 @asynccontextmanager
@@ -262,9 +261,8 @@ async def _create_streamable_http_session(
 
     async with streamablehttp_client(
         url, headers, timeout, sse_read_timeout, terminate_on_close, auth=auth, **kwargs
-    ) as (read, write, _):
-        async with ClientSession(read, write, **(session_kwargs or {})) as session:
-            yield session
+    ) as (read, write, _), ClientSession(read, write, **(session_kwargs or {})) as session:
+        yield session
 
 
 @asynccontextmanager

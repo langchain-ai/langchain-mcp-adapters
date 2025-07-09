@@ -129,10 +129,9 @@ async def load_mcp_tools(
     else:
         tools = await _list_all_tools(session)
 
-    converted_tools = [
+    return [
         convert_mcp_tool_to_langchain_tool(session, tool, connection=connection) for tool in tools
     ]
-    return converted_tools
 
 
 def _get_injected_args(tool: BaseTool) -> list[str]:
@@ -143,12 +142,11 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
             for arg in get_args(type_)[1:]
         )
 
-    injected_args = [
+    return [
         field
         for field, field_info in get_all_basemodel_annotations(tool.args_schema).items()
         if _is_injected_arg_type(field_info)
     ]
-    return injected_args
 
 
 def to_fastmcp(tool: BaseTool) -> FastMCPTool:
@@ -176,7 +174,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         msg = "LangChain tools with injected arguments are not supported"
         raise NotImplementedError(msg)
 
-    fastmcp_tool = FastMCPTool(
+    return FastMCPTool(
         fn=fn,
         name=tool.name,
         description=tool.description,
@@ -184,4 +182,3 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         fn_metadata=fn_metadata,
         is_async=True,
     )
-    return fastmcp_tool

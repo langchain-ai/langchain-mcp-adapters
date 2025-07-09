@@ -140,8 +140,7 @@ class MultiServerMCPClient:
     ) -> list[HumanMessage | AIMessage]:
         """Get a prompt from a given MCP server."""
         async with self.session(server_name) as session:
-            prompt = await load_mcp_prompt(session, prompt_name, arguments=arguments)
-            return prompt
+            return await load_mcp_prompt(session, prompt_name, arguments=arguments)
 
     async def get_resources(
         self, server_name: str, *, uris: str | list[str] | None = None
@@ -157,8 +156,7 @@ class MultiServerMCPClient:
 
         """
         async with self.session(server_name) as session:
-            resources = await load_mcp_resources(session, uris=uris)
-            return resources
+            return await load_mcp_resources(session, uris=uris)
 
     async def __aenter__(self) -> "MultiServerMCPClient":
         raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
