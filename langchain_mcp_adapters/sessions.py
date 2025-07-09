@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 from typing_extensions import NotRequired, TypedDict
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
+    import httpx
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
