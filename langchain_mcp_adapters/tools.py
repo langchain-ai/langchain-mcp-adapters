@@ -55,7 +55,9 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
         if list_tools_page_result.tools:
             all_tools.extend(list_tools_page_result.tools)
 
-        if list_tools_page_result.nextCursor is None:
+        # Pagination spec: https://modelcontextprotocol.io/specification/2025-06-18/server/utilities/pagination
+        # compatible with None or ""
+        if not list_tools_page_result.nextCursor:
             break
 
         current_cursor = list_tools_page_result.nextCursor
