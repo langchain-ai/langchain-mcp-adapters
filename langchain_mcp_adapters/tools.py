@@ -173,7 +173,8 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
 
     injected_args = _get_injected_args(tool)
     if len(injected_args) > 0:
-        raise NotImplementedError("LangChain tools with injected arguments are not supported")
+        msg = "LangChain tools with injected arguments are not supported"
+        raise NotImplementedError(msg)
 
     fastmcp_tool = FastMCPTool(
         fn=fn,
