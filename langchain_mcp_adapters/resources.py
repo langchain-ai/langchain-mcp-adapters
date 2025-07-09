@@ -74,12 +74,14 @@ async def load_mcp_resources(
     else:
         uri_list = uris
 
-    for uri in uri_list:
-        try:
+    current_uri = None
+    try:
+        for uri in uri_list:
+            current_uri = uri
             resource_blobs = await get_mcp_resource(session, uri)
             blobs.extend(resource_blobs)
-        except Exception as e:
-            msg = f"Error fetching resource {uri}"
-            raise RuntimeError(msg) from e
+    except Exception as e:
+        msg = f"Error fetching resource {current_uri}"
+        raise RuntimeError(msg) from e
 
     return blobs
