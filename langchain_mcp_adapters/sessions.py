@@ -266,7 +266,13 @@ async def _create_streamable_http_session(
 
     async with (
         streamablehttp_client(
-            url, headers, timeout, sse_read_timeout, terminate_on_close, auth=auth, **kwargs
+            url,
+            headers,
+            timeout,
+            sse_read_timeout,
+            terminate_on_close,
+            auth=auth,
+            **kwargs,
         ) as (read, write, _),
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
@@ -275,7 +281,9 @@ async def _create_streamable_http_session(
 
 @asynccontextmanager
 async def _create_websocket_session(
-    *, url: str, session_kwargs: dict[str, Any] | None = None
+    *,
+    url: str,
+    session_kwargs: dict[str, Any] | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using Websockets.
 

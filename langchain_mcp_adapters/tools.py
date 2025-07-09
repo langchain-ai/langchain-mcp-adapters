@@ -63,7 +63,10 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
 
 
 def convert_mcp_tool_to_langchain_tool(
-    session: ClientSession | None, tool: MCPTool, *, connection: Connection | None = None
+    session: ClientSession | None,
+    tool: MCPTool,
+    *,
+    connection: Connection | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -91,7 +94,8 @@ def convert_mcp_tool_to_langchain_tool(
             async with create_session(connection) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
-                    tool.name, arguments
+                    tool.name,
+                    arguments,
                 )
         else:
             call_tool_result = await session.call_tool(tool.name, arguments)
@@ -108,7 +112,9 @@ def convert_mcp_tool_to_langchain_tool(
 
 
 async def load_mcp_tools(
-    session: ClientSession | None, *, connection: Connection | None = None
+    session: ClientSession | None,
+    *,
+    connection: Connection | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
@@ -166,7 +172,9 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
     arg_model = create_model(f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase)
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
-    async def fn(**arguments: dict[str, Any]) -> Any:
+    # We'll use an Any type for the function return type.
+    # We're providing the parameters separately
+    async def fn(**arguments: dict[str, Any]) -> Any:  # noqa: ANN401
         return await tool.ainvoke(arguments)
 
     injected_args = _get_injected_args(tool)

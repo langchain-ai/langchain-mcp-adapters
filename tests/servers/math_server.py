@@ -21,7 +21,7 @@ def configure_assistant(skills: str) -> list[dict]:
         {
             "role": "assistant",
             "content": f"You are a helpful assistant. You have the following skills: {skills}. Always use only one tool at a time.",
-        }
+        },
     ]
 
 

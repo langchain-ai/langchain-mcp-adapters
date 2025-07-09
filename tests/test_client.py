@@ -11,7 +11,9 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 
 @pytest.mark.asyncio
 async def test_multi_server_mcp_client(
-    socket_enabled, websocket_server, websocket_server_port: int
+    socket_enabled,
+    websocket_server,
+    websocket_server_port: int,
 ):
     """Test that the MultiServerMCPClient can connect to multiple servers and load tools."""
     # Get the absolute path to the server scripts
@@ -24,7 +26,7 @@ async def test_multi_server_mcp_client(
             "math": {"command": "python", "args": [math_server_path], "transport": "stdio"},
             "weather": {"command": "python", "args": [weather_server_path], "transport": "stdio"},
             "time": {"url": f"ws://127.0.0.1:{websocket_server_port}/ws", "transport": "websocket"},
-        }
+        },
     )
     # Check that we have tools from both servers
     all_tools = await client.get_tools()
@@ -79,7 +81,9 @@ async def test_multi_server_mcp_client(
 
 @pytest.mark.asyncio
 async def test_multi_server_connect_methods(
-    socket_enabled, websocket_server, websocket_server_port: int
+    socket_enabled,
+    websocket_server,
+    websocket_server_port: int,
 ):
     """Test the different connect methods for MultiServerMCPClient."""
     # Get the absolute path to the server scripts
@@ -91,7 +95,7 @@ async def test_multi_server_connect_methods(
         {
             "math": {"command": "python", "args": [math_server_path], "transport": "stdio"},
             "time": {"url": f"ws://127.0.0.1:{websocket_server_port}/ws", "transport": "websocket"},
-        }
+        },
     )
     tool_names = set()
     async with client.session("math") as session:
@@ -123,11 +127,13 @@ async def test_get_prompt():
     math_server_path = os.path.join(current_dir, "servers/math_server.py")
 
     client = MultiServerMCPClient(
-        {"math": {"command": "python", "args": [math_server_path], "transport": "stdio"}}
+        {"math": {"command": "python", "args": [math_server_path], "transport": "stdio"}},
     )
     # Test getting a prompt from the math server
     messages = await client.get_prompt(
-        "math", "configure_assistant", arguments={"skills": "math, addition, multiplication"}
+        "math",
+        "configure_assistant",
+        arguments={"skills": "math, addition, multiplication"},
     )
 
     # Check that we got an AIMessage back

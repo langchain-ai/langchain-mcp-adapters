@@ -28,7 +28,7 @@ def make_server_app() -> Starlette:
 def run_server(server_port: int) -> None:
     app = make_server_app()
     server = uvicorn.Server(
-        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error")
+        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error"),
     )
     server.run()
 
@@ -41,7 +41,7 @@ def run_streamable_http_server(server: FastMCP, server_port: int) -> None:
     """Run a FastMCP server in a separate process exposing a streamable HTTP endpoint."""
     app = server.streamable_http_app()
     uvicorn_server = uvicorn.Server(
-        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error")
+        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error"),
     )
     uvicorn_server.run()
 

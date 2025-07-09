@@ -30,7 +30,10 @@ def convert_mcp_prompt_message_to_langchain_message(
 
 
 async def load_mcp_prompt(
-    session: ClientSession, name: str, *, arguments: dict[str, Any] | None = None
+    session: ClientSession,
+    name: str,
+    *,
+    arguments: dict[str, Any] | None = None,
 ) -> list[HumanMessage | AIMessage]:
     """Load MCP prompt and convert to LangChain messages."""
     response = await session.get_prompt(name, arguments)

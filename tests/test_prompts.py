@@ -17,10 +17,13 @@ from langchain_mcp_adapters.prompts import (
 
 
 @pytest.mark.parametrize(
-    "role,text,expected_cls", [("assistant", "Hello", AIMessage), ("user", "Hello", HumanMessage)]
+    "role,text,expected_cls",
+    [("assistant", "Hello", AIMessage), ("user", "Hello", HumanMessage)],
 )
 def test_convert_mcp_prompt_message_to_langchain_message_with_text_content(
-    role: str, text: str, expected_cls: type
+    role: str,
+    text: str,
+    expected_cls: type,
 ):
     message = PromptMessage(role=role, content=TextContent(type="text", text=text))
     result = convert_mcp_prompt_message_to_langchain_message(message)
@@ -35,7 +38,9 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_resource_content(r
         content=EmbeddedResource(
             type="resource",
             resource=TextResourceContents(
-                uri="message://greeting", mimeType="text/plain", text="hi"
+                uri="message://greeting",
+                mimeType="text/plain",
+                text="hi",
             ),
         ),
     )
@@ -46,7 +51,8 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_resource_content(r
 @pytest.mark.parametrize("role", ["assistant", "user"])
 def test_convert_mcp_prompt_message_to_langchain_message_with_image_content(role: str):
     message = PromptMessage(
-        role=role, content=ImageContent(type="image", mimeType="image/png", data="base64data")
+        role=role,
+        content=ImageContent(type="image", mimeType="image/png", data="base64data"),
     )
     with pytest.raises(ValueError):
         convert_mcp_prompt_message_to_langchain_message(message)
@@ -60,8 +66,8 @@ async def test_load_mcp_prompt():
             messages=[
                 PromptMessage(role="user", content=TextContent(type="text", text="Hello")),
                 PromptMessage(role="assistant", content=TextContent(type="text", text="Hi")),
-            ]
-        )
+            ],
+        ),
     )
     result = await load_mcp_prompt(session, "test_prompt")
     assert len(result) == 2

@@ -82,7 +82,10 @@ class MultiServerMCPClient:
 
     @asynccontextmanager
     async def session(
-        self, server_name: str, *, auto_initialize: bool = True
+        self,
+        server_name: str,
+        *,
+        auto_initialize: bool = True,
     ) -> AsyncIterator[ClientSession]:
         """Connect to an MCP server and initialize a session.
 
@@ -136,14 +139,21 @@ class MultiServerMCPClient:
         return all_tools
 
     async def get_prompt(
-        self, server_name: str, prompt_name: str, *, arguments: dict[str, Any] | None = None
+        self,
+        server_name: str,
+        prompt_name: str,
+        *,
+        arguments: dict[str, Any] | None = None,
     ) -> list[HumanMessage | AIMessage]:
         """Get a prompt from a given MCP server."""
         async with self.session(server_name) as session:
             return await load_mcp_prompt(session, prompt_name, arguments=arguments)
 
     async def get_resources(
-        self, server_name: str, *, uris: str | list[str] | None = None
+        self,
+        server_name: str,
+        *,
+        uris: str | list[str] | None = None,
     ) -> list[Blob]:
         """Get resources from a given MCP server.
 
