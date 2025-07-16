@@ -88,7 +88,9 @@ class MultiServerMCPClient:
         ```
 
         """
-        self.connections: dict[str, Connection] = connections if connections is not None else {}
+        self.connections: dict[str, Connection] = (
+            connections if connections is not None else {}
+        )
 
     @asynccontextmanager
     async def session(
@@ -147,7 +149,9 @@ class MultiServerMCPClient:
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
         for connection in self.connections.values():
-            load_mcp_tool_task = asyncio.create_task(load_mcp_tools(None, connection=connection))
+            load_mcp_tool_task = asyncio.create_task(
+                load_mcp_tools(None, connection=connection)
+            )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
         for tools in tools_list:

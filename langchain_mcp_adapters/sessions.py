@@ -172,7 +172,9 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
-Connection = StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
+Connection = (
+    StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
+)
 
 
 @asynccontextmanager
@@ -183,7 +185,9 @@ async def _create_stdio_session(  # noqa: PLR0913
     env: dict[str, str] | None = None,
     cwd: str | Path | None = None,
     encoding: str = DEFAULT_ENCODING,
-    encoding_error_handler: Literal["strict", "ignore", "replace"] = DEFAULT_ENCODING_ERROR_HANDLER,
+    encoding_error_handler: Literal[
+        "strict", "ignore", "replace"
+    ] = DEFAULT_ENCODING_ERROR_HANDLER,
     session_kwargs: dict[str, Any] | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using stdio.

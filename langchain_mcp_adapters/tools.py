@@ -177,7 +177,8 @@ async def load_mcp_tools(
         tools = await _list_all_tools(session)
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection) for tool in tools
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        for tool in tools
     ]
 
 
@@ -230,7 +231,9 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         field: (field_info.annotation, field_info)
         for field, field_info in tool.tool_call_schema.model_fields.items()
     }
-    arg_model = create_model(f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase)
+    arg_model = create_model(
+        f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase
+    )
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
     # We'll use an Any type for the function return type.

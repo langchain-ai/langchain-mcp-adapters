@@ -37,7 +37,9 @@ def test_convert_empty_text_content():
 
 def test_convert_single_text_content():
     # Test with a single text content
-    result = CallToolResult(content=[TextContent(type="text", text="test result")], isError=False)
+    result = CallToolResult(
+        content=[TextContent(type="text", text="test result")], isError=False
+    )
 
     text_content, non_text_content = _convert_call_tool_result(result)
 
@@ -66,11 +68,17 @@ def test_convert_with_non_text_content():
     image_content = ImageContent(type="image", mimeType="image/png", data="base64data")
     resource_content = EmbeddedResource(
         type="resource",
-        resource=TextResourceContents(uri="resource://test", mimeType="text/plain", text="hi"),
+        resource=TextResourceContents(
+            uri="resource://test", mimeType="text/plain", text="hi"
+        ),
     )
 
     result = CallToolResult(
-        content=[TextContent(type="text", text="text result"), image_content, resource_content],
+        content=[
+            TextContent(type="text", text="text result"),
+            image_content,
+            resource_content,
+        ],
         isError=False,
     )
 
@@ -82,7 +90,9 @@ def test_convert_with_non_text_content():
 
 def test_convert_with_error():
     # Test with error
-    result = CallToolResult(content=[TextContent(type="text", text="error message")], isError=True)
+    result = CallToolResult(
+        content=[TextContent(type="text", text="error message")], isError=True
+    )
 
     with pytest.raises(ToolException) as exc_info:
         _convert_call_tool_result(result)
@@ -128,10 +138,14 @@ async def test_convert_mcp_tool_to_langchain_tool():
     )
 
     # Verify session.call_tool was called with correct arguments
-    session.call_tool.assert_called_once_with("test_tool", {"param1": "test", "param2": 42})
+    session.call_tool.assert_called_once_with(
+        "test_tool", {"param1": "test", "param2": 42}
+    )
 
     # Verify result
-    assert result == ToolMessage(content="tool result", name="test_tool", tool_call_id="1")
+    assert result == ToolMessage(
+        content="tool result", name="test_tool", tool_call_id="1"
+    )
 
 
 @pytest.mark.asyncio
@@ -148,8 +162,16 @@ async def test_load_mcp_tools():
     # Mock session and list_tools response
     session = AsyncMock()
     mcp_tools = [
-        MCPTool(name="tool1", description="Tool 1 description", inputSchema=tool_input_schema),
-        MCPTool(name="tool2", description="Tool 2 description", inputSchema=tool_input_schema),
+        MCPTool(
+            name="tool1",
+            description="Tool 1 description",
+            inputSchema=tool_input_schema,
+        ),
+        MCPTool(
+            name="tool2",
+            description="Tool 2 description",
+            inputSchema=tool_input_schema,
+        ),
     ]
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
@@ -157,7 +179,9 @@ async def test_load_mcp_tools():
     async def mock_call_tool(tool_name, arguments):
         if tool_name == "tool1":
             return CallToolResult(
-                content=[TextContent(type="text", text=f"tool1 result with {arguments}")],
+                content=[
+                    TextContent(type="text", text=f"tool1 result with {arguments}")
+                ],
                 isError=False,
             )
         return CallToolResult(
@@ -206,7 +230,9 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
     server = FastMCP(port=8181)
 
     @server.tool(
-        annotations=ToolAnnotations(title="Get Time", readOnlyHint=True, idempotentHint=False),
+        annotations=ToolAnnotations(
+            title="Get Time", readOnlyHint=True, idempotentHint=False
+        ),
     )
     def get_time() -> str:
         """Get current time"""
@@ -215,7 +241,12 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
     with run_streamable_http(server):
         # Initialize client without initial connections
         client = MultiServerMCPClient(
-            {"time": {"url": "http://localhost:8181/mcp/", "transport": "streamable_http"}},
+            {
+                "time": {
+                    "url": "http://localhost:8181/mcp/",
+                    "transport": "streamable_http",
+                }
+            },
         )
         # pass
         tools = await client.get_tools(server_name="time")
@@ -253,7 +284,9 @@ def add_with_schema(a: int, b: int) -> int:
 
 
 @tool("add")
-def add_with_injection(a: int, b: int, injected_arg: Annotated[str, InjectedToolArg()]) -> int:
+def add_with_injection(
+    a: int, b: int, injected_arg: Annotated[str, InjectedToolArg()]
+) -> int:
     """Add two numbers"""
     return a + b
 
@@ -263,7 +296,9 @@ class AddTool(BaseTool):
     description: str = "Add two numbers"
     args_schema: type[BaseModel] | None = AddInput
 
-    def _run(self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None) -> int:
+    def _run(
+        self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None
+    ) -> int:
         """Use the tool."""
         return a + b
 
@@ -367,7 +402,9 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
 
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(socket_enabled) -> None:
+async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
+    socket_enabled,
+) -> None:
     """Test load mcp tools with custom httpx client factory using SSE transport."""
     import httpx
     from mcp.server import FastMCP
