@@ -41,7 +41,7 @@ ASYNC_CONTEXT_MANAGER_ERROR = (
 
 
 class MultiServerMCPClient:
-    """Client for connecting to multiple MCP servers
+    """Client for connecting to multiple MCP servers.
 
     Loads LangChain-compatible tools, prompts and resources from MCP servers.
     """
