@@ -95,7 +95,7 @@ class StdioConnection(TypedDict):
 
 
 class SSEConnection(TypedDict):
-    """Configuration for Server-Sent Events (SSE) transport connections to MCP servers."""
+    """Configuration for Server-Sent Events (SSE) transport connections to MCP."""
 
     transport: Literal["sse"]
 
@@ -205,7 +205,7 @@ async def _create_stdio_session(  # noqa: PLR0913
         An initialized ClientSession.
     """
     # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
-    # To address this, we automatically inject existing PATH envvar into the `env` value,
+    # To address this, we automatically inject existing PATH envvar into the `env`,
     # if it's not already set.
     env = env or {}
     if "PATH" not in env:
@@ -286,7 +286,8 @@ async def _create_streamable_http_session(  # noqa: PLR0913
         url: URL of the endpoint to connect to.
         headers: HTTP headers to send to the endpoint.
         timeout: HTTP timeout.
-        sse_read_timeout: How long the client will wait for a new event before disconnecting.
+        sse_read_timeout: How long the client will wait for a new event before
+            disconnecting.
         terminate_on_close: Whether to terminate the session on close.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
         httpx_client_factory: Custom factory for httpx.AsyncClient (optional).
@@ -338,7 +339,7 @@ async def _create_websocket_session(
     except ImportError:
         msg = (
             "Could not import websocket_client. "
-            "To use Websocket connections, please install the required dependency with: "
+            "To use Websocket connections, please install the required dependency: "
             "'pip install mcp[ws]' or 'pip install websockets'"
         )
         raise ImportError(msg) from None

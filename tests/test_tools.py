@@ -443,7 +443,8 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             },
         )
 
-        # Note: This test may not work in practice since the server doesn't expose SSE endpoint,
+        # Note: This test may not work in practice since the server doesn't expose SSE
+        # endpoint,
         # but it tests the configuration propagation
         try:
             tools = await client.get_tools(server_name="info")

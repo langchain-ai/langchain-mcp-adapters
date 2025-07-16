@@ -15,7 +15,7 @@ async def test_multi_server_mcp_client(
     websocket_server,
     websocket_server_port: int,
 ):
-    """Test that the MultiServerMCPClient can connect to multiple servers and load tools."""
+    """Test that MultiServerMCPClient can connect to multiple servers and load tools."""
     # Get the absolute path to the server scripts
     current_dir = Path(__file__).parent
     math_server_path = os.path.join(current_dir, "servers/math_server.py")

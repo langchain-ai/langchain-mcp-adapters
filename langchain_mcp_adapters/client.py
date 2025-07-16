@@ -1,4 +1,4 @@
-"""Client for connecting to multiple MCP servers and loading LangChain-compatible resources.
+"""Client for connecting to multiple MCP servers and loading LangChain tools/resources.
 
 This module provides the MultiServerMCPClient class for managing connections to multiple
 MCP servers and loading tools, prompts, and resources from them.
@@ -29,8 +29,8 @@ from langchain_mcp_adapters.sessions import (
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
-    "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a context manager "
-    "(e.g., async with MultiServerMCPClient(...)). "
+    "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a "
+    "context manager (e.g., async with MultiServerMCPClient(...)). "
     "Instead, you can do one of the following:\n"
     "1. client = MultiServerMCPClient(...)\n"
     "   tools = await client.get_tools()\n"
@@ -62,7 +62,8 @@ class MultiServerMCPClient:
             {
                 "math": {
                     "command": "python",
-                    # Make sure to update to the full absolute path to your math_server.py file
+                    # Make sure to update to the full absolute path to your
+                    # math_server.py file
                     "args": ["/path/to/math_server.py"],
                     "transport": "stdio",
                 },
