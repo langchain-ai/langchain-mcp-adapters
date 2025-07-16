@@ -44,7 +44,7 @@ def run_server(server_port: int) -> None:
 
 
 def run_streamable_http_server(server: FastMCP, server_port: int) -> None:
-    """Run a FastMCP server in a separate process exposing a streamable HTTP endpoint."""
+    """Run a FastMCP server in a separate process exposing a streamable HTTP."""
     app = server.streamable_http_app()
     uvicorn_server = uvicorn.Server(
         config=uvicorn.Config(
