@@ -32,7 +32,9 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_text_content(
 
 
 @pytest.mark.parametrize("role", ["assistant", "user"])
-def test_convert_mcp_prompt_message_to_langchain_message_with_resource_content(role: str):
+def test_convert_mcp_prompt_message_to_langchain_message_with_resource_content(
+    role: str,
+):
     message = PromptMessage(
         role=role,
         content=EmbeddedResource(
@@ -64,8 +66,12 @@ async def test_load_mcp_prompt():
     session.get_prompt = AsyncMock(
         return_value=AsyncMock(
             messages=[
-                PromptMessage(role="user", content=TextContent(type="text", text="Hello")),
-                PromptMessage(role="assistant", content=TextContent(type="text", text="Hi")),
+                PromptMessage(
+                    role="user", content=TextContent(type="text", text="Hello")
+                ),
+                PromptMessage(
+                    role="assistant", content=TextContent(type="text", text="Hi")
+                ),
             ],
         ),
     )

@@ -45,13 +45,12 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
-line-length = 100
+line-length = 88 
 target-version = "py310"
 
 [tool.ruff.lint]
 select = [ "ALL",]
 ignore = [
-  "E501", # line-length
   "COM812", # conflict with formatter
 ]
 
