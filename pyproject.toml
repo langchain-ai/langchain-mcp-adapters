@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "langchain-mcp-adapters"
-version = "0.1.7"
+version = "0.1.9"
 description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
 authors = [
     { name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com" },
@@ -45,20 +45,18 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
-line-length = 100
+line-length = 88 
 target-version = "py310"
 
 [tool.ruff.lint]
-select = [
-    "E", # pycodestyle errors
-    "W", # pycodestyle warnings
-    "F", # pyflakes
-    "I", # isort
-    "B", # flake8-bugbear
-]
+select = [ "ALL",]
 ignore = [
-    "E501", # line-length
+  "COM812", # conflict with formatter
 ]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 
 [tool.mypy]
@@ -67,3 +65,44 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*.py" = [
+    # at least this three should be fine in tests:
+    "S101", # asserts allowed in tests...
+    "ARG", # Unused function args -> fixtures nevertheless are functionally relevant...
+    "FBT", # Don't care about booleans as positional arguments in tests, e.g. via @pytest.mark.parametrize()
+    "D104",
+    # The below are debateable
+    "PLR2004", # Magic value used in comparison, ...
+    "S311", # Standard pseudo-random generators are not suitable for cryptographic purposes
+    "D100", # Missing docstring in public module
+    "D101", # Missing docstring in public class
+    "D102", # Missing docstring in public method
+    "D103", # Missing docstring in public function
+    "D104", # Missing docstring in public package
+    "D105", # Missing docstring in magic method
+    "D415", # First line should end with a period, question mark, or exclamation point
+    "EM101", # Exception must not use a string literal, assign to variable first
+    "EM102", # Exception must not use an f-string literal, assign to variable first
+    "TRY003", # Avoid specifying long messages outside the exception class
+    "TRY004", # Prefer `TypeError` exception for invalid type
+    "RET504", # Unnecessary assignment before return statement
+    "SIM117", # Use a single `with` statement instead of nested `with` statements
+    "TC002", # Move third-party imports into a type-checking block
+    "TC003", # Move standard library imports into a type-checking block
+    "ANN001", # Missing type annotation for function argument
+    "ANN201", # Missing return type annotation for public function
+    "ANN202", # Missing return type annotation for private function
+    "ANN401", # Dynamically typed expressions (typing.Any) are disallowed
+    "PT006", # Wrong type passed to first argument of `pytest.mark.parametrize`
+    "PT011", # pytest.raises is too broad, set the `match` parameter
+    "PTH118", # `os.path.join()` should be replaced by `Path` with `/` operator
+    "S110", # try-except-pass detected, consider logging the exception
+    "BLE001", # Do not catch blind exception: `Exception`
+    "SLF001", # Private member accessed
+    "PERF203", # `try-except` within a loop incurs performance overhead
+    "C901", # Function is too complex
+
+]
+

@@ -27,10 +27,7 @@ from tests.utils import run_streamable_http
 
 def test_convert_empty_text_content():
     # Test with a single text content
-    result = CallToolResult(
-        content=[],
-        isError=False,
-    )
+    result = CallToolResult(content=[], isError=False)
 
     text_content, non_text_content = _convert_call_tool_result(result)
 
@@ -41,8 +38,7 @@ def test_convert_empty_text_content():
 def test_convert_single_text_content():
     # Test with a single text content
     result = CallToolResult(
-        content=[TextContent(type="text", text="test result")],
-        isError=False,
+        content=[TextContent(type="text", text="test result")], isError=False
     )
 
     text_content, non_text_content = _convert_call_tool_result(result)
@@ -72,7 +68,9 @@ def test_convert_with_non_text_content():
     image_content = ImageContent(type="image", mimeType="image/png", data="base64data")
     resource_content = EmbeddedResource(
         type="resource",
-        resource=TextResourceContents(uri="resource://test", mimeType="text/plain", text="hi"),
+        resource=TextResourceContents(
+            uri="resource://test", mimeType="text/plain", text="hi"
+        ),
     )
 
     result = CallToolResult(
@@ -93,8 +91,7 @@ def test_convert_with_non_text_content():
 def test_convert_with_error():
     # Test with error
     result = CallToolResult(
-        content=[TextContent(type="text", text="error message")],
-        isError=True,
+        content=[TextContent(type="text", text="error message")], isError=True
     )
 
     with pytest.raises(ToolException) as exc_info:
@@ -137,14 +134,18 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Test calling the tool
     result = await lc_tool.ainvoke(
-        {"args": {"param1": "test", "param2": 42}, "id": "1", "type": "tool_call"}
+        {"args": {"param1": "test", "param2": 42}, "id": "1", "type": "tool_call"},
     )
 
     # Verify session.call_tool was called with correct arguments
-    session.call_tool.assert_called_once_with("test_tool", {"param1": "test", "param2": 42})
+    session.call_tool.assert_called_once_with(
+        "test_tool", {"param1": "test", "param2": 42}
+    )
 
     # Verify result
-    assert result == ToolMessage(content="tool result", name="test_tool", tool_call_id="1")
+    assert result == ToolMessage(
+        content="tool result", name="test_tool", tool_call_id="1"
+    )
 
 
 @pytest.mark.asyncio
@@ -178,14 +179,15 @@ async def test_load_mcp_tools():
     async def mock_call_tool(tool_name, arguments):
         if tool_name == "tool1":
             return CallToolResult(
-                content=[TextContent(type="text", text=f"tool1 result with {arguments}")],
+                content=[
+                    TextContent(type="text", text=f"tool1 result with {arguments}")
+                ],
                 isError=False,
             )
-        else:
-            return CallToolResult(
-                content=[TextContent(type="text", text=f"tool2 result with {arguments}")],
-                isError=False,
-            )
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"tool2 result with {arguments}")],
+            isError=False,
+        )
 
     session.call_tool.side_effect = mock_call_tool
 
@@ -200,25 +202,27 @@ async def test_load_mcp_tools():
 
     # Test calling the first tool
     result1 = await tools[0].ainvoke(
-        {"args": {"param1": "test1", "param2": 1}, "id": "1", "type": "tool_call"}
+        {"args": {"param1": "test1", "param2": 1}, "id": "1", "type": "tool_call"},
     )
     assert result1 == ToolMessage(
-        content="tool1 result with {'param1': 'test1', 'param2': 1}", name="tool1", tool_call_id="1"
+        content="tool1 result with {'param1': 'test1', 'param2': 1}",
+        name="tool1",
+        tool_call_id="1",
     )
 
     # Test calling the second tool
     result2 = await tools[1].ainvoke(
-        {"args": {"param1": "test2", "param2": 2}, "id": "2", "type": "tool_call"}
+        {"args": {"param1": "test2", "param2": 2}, "id": "2", "type": "tool_call"},
     )
     assert result2 == ToolMessage(
-        content="tool2 result with {'param1': 'test2', 'param2': 2}", name="tool2", tool_call_id="2"
+        content="tool2 result with {'param1': 'test2', 'param2': 2}",
+        name="tool2",
+        tool_call_id="2",
     )
 
 
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_annotations(
-    socket_enabled,
-) -> None:
+async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
     """Test load mcp tools with annotations."""
     from mcp.server import FastMCP
     from mcp.types import ToolAnnotations
@@ -226,7 +230,9 @@ async def test_load_mcp_tools_with_annotations(
     server = FastMCP(port=8181)
 
     @server.tool(
-        annotations=ToolAnnotations(title="Get Time", readOnlyHint=True, idempotentHint=False)
+        annotations=ToolAnnotations(
+            title="Get Time", readOnlyHint=True, idempotentHint=False
+        ),
     )
     def get_time() -> str:
         """Get current time"""
@@ -239,8 +245,8 @@ async def test_load_mcp_tools_with_annotations(
                 "time": {
                     "url": "http://localhost:8181/mcp/",
                     "transport": "streamable_http",
-                },
-            }
+                }
+            },
         )
         # pass
         tools = await client.get_tools(server_name="time")
@@ -278,7 +284,9 @@ def add_with_schema(a: int, b: int) -> int:
 
 
 @tool("add")
-def add_with_injection(a: int, b: int, injected_arg: Annotated[str, InjectedToolArg()]) -> int:
+def add_with_injection(
+    a: int, b: int, injected_arg: Annotated[str, InjectedToolArg()]
+) -> int:
     """Add two numbers"""
     return a + b
 
@@ -288,12 +296,17 @@ class AddTool(BaseTool):
     description: str = "Add two numbers"
     args_schema: type[BaseModel] | None = AddInput
 
-    def _run(self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None) -> int:
+    def _run(
+        self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None
+    ) -> int:
         """Use the tool."""
         return a + b
 
     async def _arun(
-        self, a: int, b: int, run_manager: CallbackManagerForToolRun | None = None
+        self,
+        a: int,
+        b: int,
+        run_manager: CallbackManagerForToolRun | None = None,
     ) -> int:
         """Use the tool."""
         return self._run(a, b, run_manager=run_manager)
@@ -301,11 +314,7 @@ class AddTool(BaseTool):
 
 @pytest.mark.parametrize(
     "tool_instance",
-    [
-        add,
-        add_with_schema,
-        AddTool(),
-    ],
+    [add, add_with_schema, AddTool()],
     ids=["tool", "tool_with_schema", "tool_class"],
 )
 async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
@@ -343,9 +352,7 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
 
 # Tests for httpx_client_factory functionality
 @pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory(
-    socket_enabled,
-) -> None:
+async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
     """Test load mcp tools with custom httpx client factory."""
     import httpx
     from mcp.server import FastMCP
@@ -381,7 +388,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(
                     "transport": "streamable_http",
                     "httpx_client_factory": custom_httpx_client_factory,
                 },
-            }
+            },
         )
 
         tools = await client.get_tools(server_name="status")
@@ -433,10 +440,11 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
                     "transport": "sse",
                     "httpx_client_factory": custom_httpx_client_factory,
                 },
-            }
+            },
         )
 
-        # Note: This test may not work in practice since the server doesn't expose SSE endpoint,
+        # Note: This test may not work in practice since the server doesn't expose SSE
+        # endpoint,
         # but it tests the configuration propagation
         try:
             tools = await client.get_tools(server_name="info")
