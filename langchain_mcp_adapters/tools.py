@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+from collections.abc import Callable
 from typing import Any, cast, get_args
 
 from langchain_core.tools import (
@@ -25,7 +26,7 @@ from mcp.types import (
     TextContent,
 )
 from mcp.types import Tool as MCPTool
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, ValidationError, create_model
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.hooks import CallToolRequestSpec, Hooks, ToolHookContext
@@ -128,6 +129,10 @@ def convert_mcp_tool_to_langchain_tool(
     callbacks: Callbacks | None = None,
     hooks: Hooks | None = None,
     server_name: str | None = None,
+    handle_tool_error: bool | str | Callable[[ToolException], str] | None = False,
+    handle_validation_error: (
+        bool | str | Callable[[ValidationError], str] | None
+    ) = False,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -141,6 +146,8 @@ def convert_mcp_tool_to_langchain_tool(
         callbacks: Optional callbacks for handling notifications and events
         hooks: Optional hooks for before/after tool call processing
         server_name: Name of the server this tool belongs to
+        handle_tool_error: Optional error handler for tool execution errors.
+        handle_validation_error: Optional error handler for validation errors.
 
     Returns:
         a LangChain tool
@@ -259,6 +266,8 @@ def convert_mcp_tool_to_langchain_tool(
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
+        handle_tool_error=handle_tool_error,
+        handle_validation_error=handle_validation_error,
     )
 
 
@@ -269,6 +278,10 @@ async def load_mcp_tools(
     callbacks: Callbacks | None = None,
     hooks: Hooks | None = None,
     server_name: str | None = None,
+    handle_tool_error: bool | str | Callable[[ToolException], str] | None = False,
+    handle_validation_error: (
+        bool | str | Callable[[ValidationError], str] | None
+    ) = False,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
@@ -278,6 +291,8 @@ async def load_mcp_tools(
         callbacks: Optional callbacks for handling notifications and events.
         hooks: Optional hooks for before/after tool call processing.
         server_name: Name of the server these tools belong to.
+        handle_tool_error: Optional error handler for tool execution errors.
+        handle_validation_error: Optional error handler for validation errors.
 
     Returns:
         List of LangChain tools. Tool annotations are returned as part
@@ -317,6 +332,8 @@ async def load_mcp_tools(
             callbacks=callbacks,
             hooks=hooks,
             server_name=server_name,
+            handle_tool_error=handle_tool_error,
+            handle_validation_error=handle_validation_error,
         )
         for tool in tools
     ]
