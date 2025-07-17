@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/langchain-ai-langchain-mcp-adapters-badge.png)](https://mseep.ai/app/langchain-ai-langchain-mcp-adapters)
+
 # LangChain MCP Adapters
 
 This library provides a lightweight wrapper that makes [Anthropic Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) tools compatible with [LangChain](https://github.com/langchain-ai/langchain) and [LangGraph](https://github.com/langchain-ai/langgraph).
