@@ -5,15 +5,16 @@ MCP servers and loading tools, prompts, and resources from them.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from mcp import ClientSession
+from pydantic import ValidationError
 
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
@@ -125,12 +126,22 @@ class MultiServerMCPClient:
                 await session.initialize()
             yield session
 
-    async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
+    async def get_tools(
+        self,
+        *,
+        server_name: str | None = None,
+        handle_tool_error: bool | str | Callable[[ToolException], str] | None = False,
+        handle_validation_error: (
+            bool | str | Callable[[ValidationError], str] | None
+        ) = False,
+    ) -> list[BaseTool]:
         """Get a list of all tools from all connected servers.
 
         Args:
             server_name: Optional name of the server to get tools from.
                 If None, all tools from all servers will be returned (default).
+            handle_tool_error: Optional error handler for tool execution errors.
+            handle_validation_error: Optional error handler for validation errors.
 
         NOTE: a new session will be created for each tool call
 
@@ -145,13 +156,23 @@ class MultiServerMCPClient:
                     f"expected one of '{list(self.connections.keys())}'"
                 )
                 raise ValueError(msg)
-            return await load_mcp_tools(None, connection=self.connections[server_name])
+            return await load_mcp_tools(
+                None,
+                connection=self.connections[server_name],
+                handle_tool_error=handle_tool_error,
+                handle_validation_error=handle_validation_error,
+            )
 
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
         for connection in self.connections.values():
             load_mcp_tool_task = asyncio.create_task(
-                load_mcp_tools(None, connection=connection)
+                load_mcp_tools(
+                    None,
+                    connection=connection,
+                    handle_tool_error=handle_tool_error,
+                    handle_validation_error=handle_validation_error,
+                )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
