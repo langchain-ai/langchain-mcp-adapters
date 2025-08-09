@@ -8,11 +8,13 @@ from mcp.types import (
     PromptMessage,
     TextContent,
     TextResourceContents,
+    PromptArgument,
 )
 
 from langchain_mcp_adapters.prompts import (
     convert_mcp_prompt_message_to_langchain_message,
     load_mcp_prompt,
+    list_mcp_prompts,
 )
 
 
@@ -81,3 +83,42 @@ async def test_load_mcp_prompt():
     assert result[0].content == "Hello"
     assert isinstance(result[1], AIMessage)
     assert result[1].content == "Hi"
+
+@pytest.mark.asyncio
+async def test_list_mcp_prompts():
+    greeting_mock = AsyncMock()
+    greeting_mock.name = 'greeting'
+    greeting_mock.description = 'A simple greeting prompt'
+    greeting_mock.arguments = [
+        PromptArgument(name="name", description="User's name", required=True),
+        PromptArgument(name="language", description="Language code", required=False)
+    ]
+    
+    summary_mock = AsyncMock()
+    summary_mock.name = 'summary'
+    summary_mock.description = 'Summarize text content'
+    summary_mock.arguments = [
+        PromptArgument(name="text", description="Text to summarize", required=True),
+        PromptArgument(name="max_length", description="Maximum length", required=False)
+    ]
+    
+    session = AsyncMock()
+    session.list_prompts = AsyncMock(
+        return_value=AsyncMock(
+            prompts=[greeting_mock, summary_mock]
+        )
+    )
+    
+    result = await list_mcp_prompts(session)
+    
+    assert len(result) == 2
+    assert result[0]["name"] == "greeting"
+    assert result[0]["description"] == "A simple greeting prompt"
+    assert len(result[0]["arguments"]) == 2
+    assert result[0]["arguments"][0].name == "name"
+    assert result[0]["arguments"][1].name == "language"
+    assert result[1]["name"] == "summary"
+    assert result[1]["description"] == "Summarize text content"
+    assert len(result[1]["arguments"]) == 2
+    assert result[1]["arguments"][0].name == "text"
+    assert result[1]["arguments"][1].name == "max_length"
