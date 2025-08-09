@@ -56,3 +56,25 @@ async def load_mcp_prompt(
         convert_mcp_prompt_message_to_langchain_message(message)
         for message in response.messages
     ]
+
+# Added a function to list ALL available MCP prompts
+
+async def list_mcp_prompts(session: ClientSession) -> list[dict[str, Any]]:
+    """List all available MCP prompts.
+
+    Args:
+        session: The MCP client session.
+
+    Returns:
+        A list of dictionaries containing prompt details.
+    """
+    prompts = await session.list_prompts()
+    
+    return [
+        {
+            "name": prompt.name,
+            "description": prompt.description,
+            "arguments": prompt.arguments
+        }
+        for prompt in prompts.prompts
+    ]
