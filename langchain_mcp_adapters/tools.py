@@ -136,13 +136,18 @@ def convert_mcp_tool_to_langchain_tool(
             call_tool_result = await session.call_tool(tool.name, arguments)
         return _convert_call_tool_result(call_tool_result)
 
+    meta = tool.meta if hasattr(tool, "meta") else None
+    base = tool.annotations.model_dump() if tool.annotations is not None else {}
+    meta = {"_meta": meta} if meta is not None else {}
+    metadata = {**base, **meta} or None
+
     return StructuredTool(
         name=tool.name,
         description=tool.description or "",
         args_schema=tool.inputSchema,
         coroutine=call_tool,
         response_format="content_and_artifact",
-        metadata=tool.annotations.model_dump() if tool.annotations else None,
+        metadata=metadata,
     )
 
 
