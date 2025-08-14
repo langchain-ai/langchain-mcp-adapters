@@ -4,7 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Any, cast, get_args
+from typing import Any, cast, get_args, Annotated
 
 from langchain_core.tools import (
     BaseTool,
@@ -19,6 +19,7 @@ from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadat
 from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextContent
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
+
 
 from langchain_mcp_adapters.sessions import Connection, create_session
 
@@ -135,11 +136,34 @@ def convert_mcp_tool_to_langchain_tool(
         else:
             call_tool_result = await session.call_tool(tool.name, arguments)
         return _convert_call_tool_result(call_tool_result)
+    
+    type_map = {
+        'integer': int,
+        'float': float,
+        'string': str,
+        'bool': bool,
+        'object': dict,
+        'bytes': bytes
+    }
+
+    args = tool.inputSchema
+
+    model_fields = {}
+    injected_state = tool.annotations.model_extra.get('injected_state')
+    if injected_state:
+        from langgraph.prebuilt import InjectedState
+    for field, props in args['properties'].items():
+        field_type = type_map.get(props['type'], dict)
+        if field == injected_state:
+            field_type = Annotated[dict, InjectedState]
+        model_fields[field] = field_type
+ 
+    args_schema = create_model(tool.name, **{k: (v, ...) for k, v in model_fields.items()})
 
     return StructuredTool(
         name=tool.name,
         description=tool.description or "",
-        args_schema=tool.inputSchema,
+        args_schema=args_schema,
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=tool.annotations.model_dump() if tool.annotations else None,
