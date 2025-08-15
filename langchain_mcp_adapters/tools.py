@@ -137,6 +137,7 @@ def convert_mcp_tool_to_langchain_tool(
             call_tool_result = await session.call_tool(tool.name, arguments)
         return _convert_call_tool_result(call_tool_result)
     
+    # base types being mapped from JSON
     type_map = {
         'null': None,
         'integer': int,
@@ -148,6 +149,15 @@ def convert_mcp_tool_to_langchain_tool(
     }
 
     def _parse_model_fields(args, injected_state):
+        """Parse a JSON field into a Pydantic Field, taking into account injected state
+
+        :param args: the function parameter schema
+        :type args: dict
+        :param injected_state: the name of the key used for the InjectedState
+        :type injected_state: str
+        :return: returns a dict of fields with their pydantic type and default value if any
+        :rtype: dict
+        """
         model_fields = {}
 
         def _parse_field(props):
@@ -174,9 +184,12 @@ def convert_mcp_tool_to_langchain_tool(
                 model_fields[field] = (field_type, ...)
         return model_fields
 
-    args = tool.inputSchema    
+    args = tool.inputSchema   
+    # check for the `injected_state`` annotation on the MCP tool. 
+    # The injected_state value is the name of the function parameter used as the injected state
     injected_state = tool.annotations.model_extra.get('injected_state')
     if injected_state:
+        # import langgraph InjectedState only if we need it
         from langgraph.prebuilt import InjectedState
     model_fields = _parse_model_fields(args, injected_state)
 
