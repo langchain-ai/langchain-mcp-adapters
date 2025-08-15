@@ -4,7 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Any, cast, get_args, Annotated
+from typing import Any, cast, get_args, Annotated, List, Union, Literal
 
 from langchain_core.tools import (
     BaseTool,
@@ -138,27 +138,49 @@ def convert_mcp_tool_to_langchain_tool(
         return _convert_call_tool_result(call_tool_result)
     
     type_map = {
+        'null': None,
         'integer': int,
         'float': float,
         'string': str,
         'bool': bool,
         'object': dict,
-        'bytes': bytes
+        'bytes': bytes,
     }
 
-    args = tool.inputSchema
+    def _parse_model_fields(args, injected_state):
+        model_fields = {}
 
-    model_fields = {}
+        def _parse_field(props):
+            if 'anyOf' in props.keys():
+                types = tuple(_parse_field(p) for p in props['anyOf'])
+                return Union[types]
+            if 'enum' in props.keys():
+                return Literal[tuple(props['enum'])]
+            if props['type'] == 'array':
+                items = props['items']
+                return List[tuple(_parse_field(items))]
+            else:
+                return type_map.get(props['type'], dict)
+
+        for field, props in args['properties'].items():
+            if field == injected_state:
+                field_type = Annotated[dict, InjectedState]
+            else:
+                field_type = _parse_field(props)
+            if 'default' in props.keys():
+                default = props['default']
+                model_fields[field] = (field_type, default)
+            else:
+                model_fields[field] = (field_type, ...)
+        return model_fields
+
+    args = tool.inputSchema    
     injected_state = tool.annotations.model_extra.get('injected_state')
     if injected_state:
         from langgraph.prebuilt import InjectedState
-    for field, props in args['properties'].items():
-        field_type = type_map.get(props['type'], dict)
-        if field == injected_state:
-            field_type = Annotated[dict, InjectedState]
-        model_fields[field] = field_type
- 
-    args_schema = create_model(tool.name, **{k: (v, ...) for k, v in model_fields.items()})
+    model_fields = _parse_model_fields(args, injected_state)
+
+    args_schema = create_model(tool.name, **{k: v for k, v in model_fields.items()})
 
     return StructuredTool(
         name=tool.name,
