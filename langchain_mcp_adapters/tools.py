@@ -168,7 +168,7 @@ def convert_mcp_tool_to_langchain_tool(
                 return Literal[tuple(props['enum'])]
             if props['type'] == 'array':
                 items = props['items']
-                return List[tuple(_parse_field(items))]
+                return List[_parse_field(items)]
             else:
                 return type_map.get(props['type'], dict)
 
