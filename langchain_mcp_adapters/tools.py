@@ -193,6 +193,8 @@ def convert_mcp_tool_to_langchain_tool(
         from langgraph.prebuilt import InjectedState
     model_fields = _parse_model_fields(args, injected_state)
 
+    # recreate a dynamic model based on the parsed JSON schema, which will be properly parsed
+    # with annotations for the InjectedState
     args_schema = create_model(tool.name, **{k: v for k, v in model_fields.items()})
 
     return StructuredTool(
