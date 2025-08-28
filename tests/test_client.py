@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -165,3 +167,185 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+@dataclass
+class EnvInheritanceGiven:
+    """Configuration for environment variable inheritance test setup."""
+    client_env_config: Optional[Dict[str, str]]
+    env_vars: Dict[str, str]
+
+
+@dataclass
+class EnvInheritanceExpected:
+    """Configuration for environment variable inheritance test expectations."""
+    env_vars: Dict[str, str]
+    not_env_vars: List[str]
+
+
+async def _test_env_inheritance_case(given: EnvInheritanceGiven, expected: EnvInheritanceExpected):
+    """Helper function to test environment variable inheritance scenarios.
+    
+    Args:
+        given: Configuration for what to set up before running the test
+        expected: Configuration for what to expect after running the test
+    """
+    import os
+    import tempfile
+    import json
+    
+    # Set up test environment variables in parent process
+    # Note: Variable names are unique per test to avoid conflicts
+    for var_name, var_value in given.env_vars.items():
+        os.environ[var_name] = var_value
+    
+    test_server_path = None
+    try:
+        # Create temporary file that persists (delete=False) so subprocess can read it
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False)
+        temp_file.write("""
+from mcp.server.fastmcp import FastMCP
+import os
+import json
+
+mcp = FastMCP("EnvTest")
+
+@mcp.tool()
+def get_all_env_vars() -> str:
+    '''Return all environment variables as JSON'''
+    return json.dumps(dict(os.environ))
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+""")
+        temp_file.close()
+        test_server_path = temp_file.name
+        
+        client_config = {
+            "envtest": {
+                "command": "python",
+                "args": [test_server_path],
+                "transport": "stdio",
+            }
+        }
+        
+        if given.client_env_config is not None:
+            client_config["envtest"]["env"] = given.client_env_config
+        
+        client = MultiServerMCPClient(client_config)
+        
+        # Test that the server can start and load tools
+        tools = await client.get_tools()
+        assert len(tools) == 1  # get_all_env_vars tool
+        
+        # Get environment variables from the server using the get_all_env_vars tool
+        env_tool = tools[0]
+        result = await env_tool.ainvoke({})
+        env_vars = json.loads(result)
+        
+        # Make env var assertions
+        for var_name, expected_value in expected.env_vars.items():
+            assert var_name in env_vars, f"Expected {var_name} to be in environment"
+            assert env_vars[var_name] == expected_value, f"Expected {var_name}='{expected_value}', got '{env_vars[var_name]}'"
+        
+        for var_name in expected.not_env_vars:
+            assert var_name not in env_vars, f"Expected {var_name} to NOT be in environment"
+        
+    finally:
+        # Clean up the temporary file
+        if test_server_path:
+            try:
+                Path(test_server_path).unlink(missing_ok=True)
+            except Exception:
+                # If we can't delete it, that's okay - it's a temp file
+                pass
+        
+        # Clean up test environment variables
+        for var_name in given.env_vars:
+            if var_name in os.environ:
+                del os.environ[var_name]
+
+
+@pytest.mark.asyncio
+async def test_stdio_environment_inheritance_none():
+    """Test that stdio sessions inherit all environment variables when env is None."""
+    test_var1 = "TEST_ENV_INHERITANCE_NONE1"
+    test_var2 = "TEST_ENV_INHERITANCE_NONE2"
+    
+    await _test_env_inheritance_case(
+        given=EnvInheritanceGiven(
+            client_env_config=None,  # Default behavior - should inherit all
+            env_vars={  # MCP library provides minimal default environment in addition to below custom env vars
+                test_var1: "test_value_123",
+                test_var2: "test_value_456",
+            },
+        ),
+        expected=EnvInheritanceExpected(
+            env_vars={
+                test_var1: "test_value_123",
+                test_var2: "test_value_456",
+                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (MCP library controlled)
+            },
+            not_env_vars=[],
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_stdio_environment_inheritance_empty_dict():
+    """Test that stdio sessions get no environment variables when env is empty dict."""
+    test_var1 = "TEST_ENV_INHERITANCE_EMPTY1"
+    test_var2 = "TEST_ENV_INHERITANCE_EMPTY2"
+    
+    await _test_env_inheritance_case(
+        given=EnvInheritanceGiven(
+            client_env_config={},  # Explicit empty dict
+            env_vars={ # MCP library provides minimal default environment in addition to below custom env vars
+                test_var1: "test_value_789",
+                test_var2: "test_value_012",
+            },
+        ),
+        expected=EnvInheritanceExpected(
+            env_vars={
+                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (MCP library controlled)
+            },
+            not_env_vars=[
+                test_var1,
+                test_var2,
+            ],
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_stdio_environment_inheritance_override():
+    """Test that stdio sessions inherit parent env vars and can override specific ones."""
+    test_var1 = "TEST_ENV_INHERITANCE_OVERRIDE1"
+    test_var2 = "TEST_ENV_INHERITANCE_OVERRIDE2"
+    test_var3 = "TEST_ENV_INHERITANCE_OVERRIDE3"
+    
+    await _test_env_inheritance_case(
+        given=EnvInheritanceGiven(
+            client_env_config={
+                test_var1: "override_value1",  # Override this one
+                test_var2: "override_value2",  # Override this one
+                "NEW_VAR": "new_value",        # Add new one
+                # test_var3 not specified - should inherit parent value
+            },
+            env_vars={  # MCP library provides minimal default environment in addition to below custom env vars
+                test_var1: "parent_value1",
+                test_var2: "parent_value2", 
+                test_var3: "parent_value3",
+            },
+        ),
+        expected=EnvInheritanceExpected(
+            env_vars={
+                test_var1: "override_value1",  # Should be overridden
+                test_var2: "override_value2",  # Should be overridden
+                test_var3: "parent_value3",    # Should inherit parent value
+                "NEW_VAR": "new_value",        # Should be added
+                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (MCP library controlled)
+            },
+            not_env_vars=[],
+        ),
+    )
