@@ -204,12 +204,20 @@ async def _create_stdio_session(  # noqa: PLR0913
     Yields:
         An initialized ClientSession.
     """
-    # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
-    # To address this, we automatically inject existing PATH envvar into the `env`,
-    # if it's not already set.
-    env = env or {}
-    if "PATH" not in env:
-        env["PATH"] = os.environ.get("PATH", "")
+    # NOTE: We inherit all environment variables from the parent process by default.
+    # This ensures subprocesses have access to parent process environment variables.
+    # Users can still override specific variables by providing a custom env dict.
+    # Passing env={} explicitly will result in minimal default environment from the MCP
+    # library (e.g. PATH will still be present).
+    if env is None:
+        env = os.environ.copy()  # Inherit all (default behavior)
+    elif env == {}:
+        env = {}  # MCP library provides minimal default environment
+    else:
+        # Merge with parent environment, allowing overrides
+        parent_env = os.environ.copy()
+        parent_env.update(env)
+        env = parent_env
 
     server_params = StdioServerParameters(
         command=command,
