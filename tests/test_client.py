@@ -275,7 +275,9 @@ async def test_stdio_environment_inheritance_none():
     await _test_env_inheritance_case(
         given=EnvInheritanceGiven(
             client_env_config=None,  # Default behavior - should inherit all
-            env_vars={  # MCP library provides minimal default environment in addition to below custom env vars
+            # MCP library creates subprocess with empty env, OS provides minimal default environment
+            # (PATH typically present on Unix-like systems) in addition to below custom env vars
+            env_vars={
                 test_var1: "test_value_123",
                 test_var2: "test_value_456",
             },
@@ -284,7 +286,7 @@ async def test_stdio_environment_inheritance_none():
             env_vars={
                 test_var1: "test_value_123",
                 test_var2: "test_value_456",
-                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (MCP library controlled)
+                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (OS provided on Unix-like systems)
             },
             not_env_vars=[],
         ),
@@ -300,14 +302,16 @@ async def test_stdio_environment_inheritance_empty_dict():
     await _test_env_inheritance_case(
         given=EnvInheritanceGiven(
             client_env_config={},  # Explicit empty dict
-            env_vars={ # MCP library provides minimal default environment in addition to below custom env vars
+            # MCP library creates subprocess with empty env, OS provides minimal default environment
+            # (PATH typically present on Unix-like systems) in addition to below custom env vars
+            env_vars={
                 test_var1: "test_value_789",
                 test_var2: "test_value_012",
             },
         ),
         expected=EnvInheritanceExpected(
             env_vars={
-                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (MCP library controlled)
+                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (OS provided on Unix-like systems)
             },
             not_env_vars=[
                 test_var1,
@@ -332,7 +336,9 @@ async def test_stdio_environment_inheritance_override():
                 "NEW_VAR": "new_value",        # Add new one
                 # test_var3 not specified - should inherit parent value
             },
-            env_vars={  # MCP library provides minimal default environment in addition to below custom env vars
+            # MCP library creates subprocess with empty env, OS provides minimal default environment
+            # (PATH typically present on Unix-like systems) in addition to below custom env vars
+            env_vars={
                 test_var1: "parent_value1",
                 test_var2: "parent_value2", 
                 test_var3: "parent_value3",
@@ -344,7 +350,7 @@ async def test_stdio_environment_inheritance_override():
                 test_var2: "override_value2",  # Should be overridden
                 test_var3: "parent_value3",    # Should inherit parent value
                 "NEW_VAR": "new_value",        # Should be added
-                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (MCP library controlled)
+                "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (OS provided on Unix-like systems)
             },
             not_env_vars=[],
         ),

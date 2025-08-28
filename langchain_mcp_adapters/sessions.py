@@ -207,12 +207,14 @@ async def _create_stdio_session(  # noqa: PLR0913
     # NOTE: We inherit all environment variables from the parent process by default.
     # This ensures subprocesses have access to parent process environment variables.
     # Users can still override specific variables by providing a custom env dict.
-    # Passing env={} explicitly will result in minimal default environment from the MCP
-    # library (e.g. PATH will still be present).
+    # Passing env={} explicitly will result in MCP library creating subprocess with empty env,
+    # OS provides minimal default environment (PATH typically present on Unix-like systems).
     if env is None:
         env = os.environ.copy()  # Inherit all (default behavior)
     elif env == {}:
-        env = {}  # MCP library provides minimal default environment
+        # Empty dict = MCP library creates subprocess with empty env, OS provides minimal default environment
+        # (PATH typically present on Unix-like systems)
+        env = {}
     else:
         # Merge with parent environment, allowing overrides
         parent_env = os.environ.copy()
