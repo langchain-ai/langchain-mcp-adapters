@@ -322,22 +322,21 @@ async def test_stdio_environment_inheritance_empty_dict():
 
 
 @pytest.mark.asyncio
-async def test_stdio_environment_inheritance_override():
-    """Test that stdio sessions inherit parent env vars and can override specific ones."""
-    test_var1 = "TEST_ENV_INHERITANCE_OVERRIDE1"
-    test_var2 = "TEST_ENV_INHERITANCE_OVERRIDE2"
-    test_var3 = "TEST_ENV_INHERITANCE_OVERRIDE3"
+async def test_stdio_environment_inheritance_populated_env():
+    """Test that stdio sessions use exactly the provided env vars (plus OS minimal defaults)."""
+    test_var1 = "TEST_ENV_INHERITANCE_POPULATED1"
+    test_var2 = "TEST_ENV_INHERITANCE_POPULATED2"
+    test_var3 = "TEST_ENV_INHERITANCE_POPULATED3"
     
     await _test_env_inheritance_case(
         given=EnvInheritanceGiven(
             client_env_config={
-                test_var1: "override_value1",  # Override this one
-                test_var2: "override_value2",  # Override this one
+                test_var1: "explicit_value1",  # Only these vars should be present
+                test_var2: "explicit_value2",  # Only these vars should be present
                 "NEW_VAR": "new_value",        # Add new one
-                # test_var3 not specified - should inherit parent value
+                # test_var3 not specified - should NOT inherit parent value
             },
-            # MCP library creates subprocess with empty env, OS provides minimal default environment
-            # (PATH typically present on Unix-like systems) in addition to below custom env vars
+            # Set up parent env vars - these should NOT be inherited when env is explicitly provided
             env_vars={
                 test_var1: "parent_value1",
                 test_var2: "parent_value2", 
@@ -346,11 +345,40 @@ async def test_stdio_environment_inheritance_override():
         ),
         expected=EnvInheritanceExpected(
             env_vars={
-                test_var1: "override_value1",  # Should be overridden
-                test_var2: "override_value2",  # Should be overridden
-                test_var3: "parent_value3",    # Should inherit parent value
+                test_var1: "explicit_value1",  # Should be the explicit value
+                test_var2: "explicit_value2",  # Should be the explicit value
                 "NEW_VAR": "new_value",        # Should be added
                 "PATH": os.environ.get("PATH", ""),  # Should inherit PATH (OS provided on Unix-like systems)
+            },
+            not_env_vars=[
+                test_var3,  # Should NOT inherit parent value when env is explicitly provided
+            ],
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_stdio_environment_inheritance_override_os_defaults():
+    """Test that provided env vars can override OS defaults like PATH."""
+    test_var = "TEST_ENV_INHERITANCE_OVERRIDE_OS"
+    # Include the current PATH so Python can still be found, but add custom entries
+    current_path = os.environ.get("PATH", "")
+    custom_path = f"/custom/path:/another/path:{current_path}"
+    
+    await _test_env_inheritance_case(
+        given=EnvInheritanceGiven(
+            client_env_config={
+                "PATH": custom_path,  # Override the OS-provided PATH
+                test_var: "custom_value",
+            },
+            env_vars={
+                test_var: "parent_value",  # This should not be inherited
+            },
+        ),
+        expected=EnvInheritanceExpected(
+            env_vars={
+                "PATH": custom_path,  # Should be our custom value, not OS default
+                test_var: "custom_value",  # Should be our explicit value
             },
             not_env_vars=[],
         ),
