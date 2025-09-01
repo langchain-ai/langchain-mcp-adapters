@@ -4,7 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Any, cast, get_args
+from typing import Any, TypeAlias, cast, get_args
 
 from langchain_core.tools import (
     BaseTool,
@@ -16,48 +16,122 @@ from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
-from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextContent
+from mcp.types import (
+    CallToolResult,
+    EmbeddedResource,
+    ImageContent,
+    TextContent,
+    TextResourceContents,
+)
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.sessions import Connection, create_session
 
-NonTextContent = ImageContent | EmbeddedResource
+NonTextContent: TypeAlias = ImageContent | EmbeddedResource | TextResourceContents
 MAX_ITERATIONS = 1000
+
+# Define at module level
+JSONValue: TypeAlias = (
+    str | int | float | bool | None |
+    dict[str, "JSONValue"] | list["JSONValue"]
+)
 
 
 def _convert_call_tool_result(
     call_tool_result: CallToolResult,
-) -> tuple[str | list[str], list[NonTextContent] | None]:
+) -> tuple[str | list[str], dict[str, Any] | None]:
     """Convert MCP CallToolResult to LangChain tool result format.
+
+    The returned tuple follows LangChain's "content_and_artifact" format, where
+    the artifact is a dictionary that can include both non-text contents and
+    machine-readable structured content from MCP.
 
     Args:
         call_tool_result: The result from calling an MCP tool.
 
     Returns:
-        A tuple containing the text content and any non-text content.
+        A tuple of (content, artifact). "content" is a string or list of strings
+        from text content blocks. "artifact" is a dict that may include:
+          - "nonText": list of non-text content blocks (e.g., images, resources)
+          - "structuredContent": structuredContent (machine-readable) when provided
+            by MCP
+        If there is no non-text nor structured content, artifact will be None.
 
     Raises:
         ToolException: If the tool call resulted in an error.
     """
-    text_contents: list[TextContent] = []
-    non_text_contents = []
-    for content in call_tool_result.content:
-        if isinstance(content, TextContent):
-            text_contents.append(content)
-        else:
-            non_text_contents.append(content)
-
-    tool_content: str | list[str] = [content.text for content in text_contents]
-    if not text_contents:
-        tool_content = ""
-    elif len(text_contents) == 1:
-        tool_content = tool_content[0]
+    text_contents, non_text_contents = _separate_content_types(call_tool_result.content)
+    tool_content = _format_text_content(text_contents)
 
     if call_tool_result.isError:
         raise ToolException(tool_content)
 
-    return tool_content, non_text_contents or None
+    artifact = _build_artifact(non_text_contents, call_tool_result)
+    structured = getattr(call_tool_result, "structuredContent", None)
+
+    if structured is not None:
+        return _add_structured_content_to_result(tool_content, structured, artifact)
+
+    return tool_content, (artifact if artifact else None)
+
+
+def _separate_content_types(
+    content: list,
+) -> tuple[list[TextContent], list[NonTextContent]]:
+    """Separate content into text and non-text types."""
+    text_contents: list[TextContent] = []
+    non_text_contents: list[NonTextContent] = []
+
+    for item in content:
+        if isinstance(item, TextContent):
+            text_contents.append(item)
+        else:
+            non_text_contents.append(item)
+
+    return text_contents, non_text_contents
+
+
+def _format_text_content(text_contents: list[TextContent]) -> str | list[str]:
+    """Format text content into string or list of strings."""
+    tool_content: str | list[str] = [content.text for content in text_contents]
+    if not text_contents:
+        return ""
+    if len(text_contents) == 1:
+        return tool_content[0]
+    return tool_content
+
+
+def _build_artifact(
+    non_text_contents: list[NonTextContent],
+    call_tool_result: CallToolResult,
+) -> dict[str, Any]:
+    """Build artifact dictionary with non-text and structured content."""
+    artifact: dict[str, Any] = {}
+    if non_text_contents:
+        artifact["nonText"] = non_text_contents
+
+    structured = getattr(call_tool_result, "structuredContent", None)
+    if structured is not None:
+        artifact["structuredContent"] = structured
+
+    return artifact
+
+
+def _add_structured_content_to_result(
+    tool_content: str | list[str],
+    structured: JSONValue,
+    artifact: dict[str, Any],
+) -> tuple[list[Any], dict[str, Any] | None]:
+    """Add structured content to result as JSON block."""
+    content_blocks: list[Any] = []
+    if isinstance(tool_content, str):
+        if tool_content:
+            content_blocks.append(tool_content)
+    else:
+        content_blocks.extend(tool_content)
+    content_blocks.append({"type": "json", "structured": structured})
+    return content_blocks, (artifact if artifact else None)
 
 
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
@@ -123,9 +197,12 @@ def convert_mcp_tool_to_langchain_tool(
 
     async def call_tool(
         **arguments: dict[str, Any],
-    ) -> tuple[str | list[str], list[NonTextContent] | None]:
+    ) -> tuple[str | list[str], dict[str, Any] | None]:
         if session is None:
             # If a session is not provided, we will create one on the fly
+            if connection is None:
+                msg = "Connection must be provided when session is None"
+                raise ValueError(msg)
             async with create_session(connection) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
@@ -175,6 +252,9 @@ async def load_mcp_tools(
 
     if session is None:
         # If a session is not provided, we will create one on the fly
+        if connection is None:
+            msg = "Either a session or a connection config must be provided"
+            raise ValueError(msg)
         async with create_session(connection) as tool_session:
             await tool_session.initialize()
             tools = await _list_all_tools(tool_session)
@@ -224,20 +304,27 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         TypeError: If the tool's args_schema is not a BaseModel subclass.
         NotImplementedError: If the tool has injected arguments.
     """
-    if not issubclass(tool.args_schema, BaseModel):
+    if not (
+        isinstance(tool.args_schema, type) and
+        issubclass(tool.args_schema, BaseModel)
+    ):
         msg = (
             "Tool args_schema must be a subclass of pydantic.BaseModel. "
             "Tools with dict args schema are not supported."
         )
         raise TypeError(msg)
 
-    parameters = tool.tool_call_schema.model_json_schema()
+    # We already checked that args_schema is a BaseModel subclass
+    args_schema = cast("type[BaseModel]", tool.args_schema)
+    parameters = args_schema.model_json_schema()
     field_definitions = {
         field: (field_info.annotation, field_info)
-        for field, field_info in tool.tool_call_schema.model_fields.items()
+        for field, field_info in args_schema.model_fields.items()
     }
-    arg_model = create_model(
-        f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase
+    arg_model = create_model(  # type: ignore[call-overload]
+        f"{tool.name}Arguments",
+        __base__=ArgModelBase,
+        **field_definitions
     )
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
@@ -258,4 +345,6 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         parameters=parameters,
         fn_metadata=fn_metadata,
         is_async=True,
+        context_kwarg=None,
+        annotations=None,
     )

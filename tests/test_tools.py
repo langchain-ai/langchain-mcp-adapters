@@ -83,10 +83,10 @@ def test_convert_with_non_text_content():
         isError=False,
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    text_content, artifact = _convert_call_tool_result(result)
 
     assert text_content == "text result"
-    assert non_text_content == [image_content, resource_content]
+    assert artifact == {"nonText": [image_content, resource_content]}
 
 
 def test_convert_with_error():
