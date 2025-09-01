@@ -31,11 +31,7 @@ from langchain_mcp_adapters.sessions import Connection, create_session
 NonTextContent: TypeAlias = ImageContent | EmbeddedResource | TextResourceContents
 MAX_ITERATIONS = 1000
 
-# Define at module level
-JSONValue: TypeAlias = (
-    str | int | float | bool | None |
-    dict[str, "JSONValue"] | list["JSONValue"]
-)
+
 
 
 def _convert_call_tool_result(
@@ -68,10 +64,6 @@ def _convert_call_tool_result(
         raise ToolException(tool_content)
 
     artifact = _build_artifact(non_text_contents, call_tool_result)
-    structured = getattr(call_tool_result, "structuredContent", None)
-
-    if structured is not None:
-        return _add_structured_content_to_result(tool_content, structured, artifact)
 
     return tool_content, (artifact if artifact else None)
 
@@ -116,22 +108,6 @@ def _build_artifact(
         artifact["structuredContent"] = structured
 
     return artifact
-
-
-def _add_structured_content_to_result(
-    tool_content: str | list[str],
-    structured: JSONValue,
-    artifact: dict[str, Any],
-) -> tuple[list[Any], dict[str, Any] | None]:
-    """Add structured content to result as JSON block."""
-    content_blocks: list[Any] = []
-    if isinstance(tool_content, str):
-        if tool_content:
-            content_blocks.append(tool_content)
-    else:
-        content_blocks.extend(tool_content)
-    content_blocks.append({"type": "json", "structured": structured})
-    return content_blocks, (artifact if artifact else None)
 
 
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:

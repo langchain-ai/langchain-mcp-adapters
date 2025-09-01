@@ -548,15 +548,14 @@ def test_convert_with_structured_content():
     )
     result.structuredContent = structured_data
     
-    content_blocks, artifact = _convert_call_tool_result(result)
+    text_content, artifact = _convert_call_tool_result(result)
     
-    assert content_blocks[0] == "Search completed"
-    assert content_blocks[1] == {"type": "json", "structured": structured_data}
+    assert text_content == "Search completed"
     assert artifact["structuredContent"] == structured_data
 
 
 def test_convert_structured_content_includes_json_block():
-    """Test that structuredContent is included as JSON block in content."""
+    """Test that structuredContent is included in artifact only."""
     structured_data = {"result": "success"}
     
     result = CallToolResult(
@@ -565,11 +564,11 @@ def test_convert_structured_content_includes_json_block():
     )
     result.structuredContent = structured_data
     
-    content_blocks, artifact = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
     
-    assert isinstance(content_blocks, list)
-    assert content_blocks[0] == "Done"
-    assert content_blocks[1] == {"type": "json", "structured": structured_data}
+    # Content stays simple - just the text
+    assert content == "Done"
+    # Structured data goes in artifact
     assert artifact["structuredContent"] == structured_data
 
 
@@ -580,7 +579,14 @@ def test_convert_with_structured_content_only():
     result = CallToolResult(content=[], isError=False)
     result.structuredContent = structured_data
     
-    content_blocks, artifact = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
     
+<<<<<<< HEAD
     assert content_blocks == [{"type": "json", "structured": structured_data}]
     assert artifact["structuredContent"] == structured_data
+=======
+    # Empty text content returns empty string
+    assert content == ""
+    # Structured data goes in artifact
+    assert artifact["structuredContent"] == structured_data
+>>>>>>> 81f6de3 (fix: ensure consistent output for structured content in tool conversion)
