@@ -4,6 +4,9 @@ This library provides a lightweight wrapper that makes [Anthropic Model Context 
 
 ![MCP](static/img/mcp.png)
 
+> [!note]
+> A JavaScript/TypeScript version of this library is also available at [langchainjs](https://github.com/langchain-ai/langchainjs/tree/main/libs/langchain-mcp-adapters/).
+
 ## Features
 
 - 🛠️ Convert MCP tools into [LangChain tools](https://python.langchain.com/docs/concepts/tools/) that can be used with [LangGraph](https://github.com/langchain-ai/langgraph) agents
@@ -137,13 +140,13 @@ weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?
 > [!note]
 > Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
 >
->    ```python
->    from langchain_mcp_adapters.tools import load_mcp_tools
+> ```python
+> from langchain_mcp_adapters.tools import load_mcp_tools
 >
->    client = MultiServerMCPClient({...})
->    async with client.session("math") as session:
->        tools = await load_mcp_tools(session)
->    ```
+> client = MultiServerMCPClient({...})
+> async with client.session("math") as session:
+>     tools = await load_mcp_tools(session)
+> ```
 
 ## Streamable HTTP
 
@@ -204,8 +207,8 @@ math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 
 When connecting to MCP servers, you can include custom headers (e.g., for authentication or tracing) using the `headers` field in the connection configuration. This is supported for the following transports:
 
-* `sse`
-* `streamable_http`
+- `sse`
+- `streamable_http`
 
 ### Example: passing headers with `MultiServerMCPClient`
 
@@ -231,7 +234,6 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
 > Only `sse` and `streamable_http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
-
 
 ## Using with LangGraph StateGraph
 
