@@ -221,9 +221,7 @@ async def test_load_mcp_tools():
     )
 
 
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
-    """Test load mcp tools with annotations."""
+def _create_annotations_server():
     from mcp.server import FastMCP
     from mcp.types import ToolAnnotations
 
@@ -238,7 +236,13 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         """Get current time"""
         return "5:20:00 PM EST"
 
-    with run_streamable_http(server):
+    return server
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
+    """Test load mcp tools with annotations."""
+    with run_streamable_http(_create_annotations_server, 8181):
         # Initialize client without initial connections
         client = MultiServerMCPClient(
             {
@@ -350,11 +354,7 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
         to_fastmcp(add_with_injection)
 
 
-# Tests for httpx_client_factory functionality
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
-    """Test load mcp tools with custom httpx client factory."""
-    import httpx
+def _create_status_server():
     from mcp.server import FastMCP
 
     server = FastMCP(port=8182)
@@ -363,6 +363,15 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
     def get_status() -> str:
         """Get server status"""
         return "Server is running"
+
+    return server
+
+
+# Tests for httpx_client_factory functionality
+@pytest.mark.asyncio
+async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
+    """Test load mcp tools with custom httpx client factory."""
+    import httpx
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -379,7 +388,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
-    with run_streamable_http(server):
+    with run_streamable_http(_create_status_server, 8182):
         # Initialize client with custom httpx_client_factory
         client = MultiServerMCPClient(
             {
@@ -401,12 +410,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
         assert result.content == "Server is running"
 
 
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
-    socket_enabled,
-) -> None:
-    """Test load mcp tools with custom httpx client factory using SSE transport."""
-    import httpx
+def _create_info_server():
     from mcp.server import FastMCP
 
     server = FastMCP(port=8183)
@@ -415,6 +419,16 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
     def get_info() -> str:
         """Get server info"""
         return "SSE Server Info"
+
+    return server
+
+
+@pytest.mark.asyncio
+async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
+    socket_enabled,
+) -> None:
+    """Test load mcp tools with custom httpx client factory using SSE transport."""
+    import httpx
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -431,7 +445,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             limits=httpx.Limits(max_keepalive_connections=3, max_connections=5),
         )
 
-    with run_streamable_http(server):
+    with run_streamable_http(_create_info_server, 8183):
         # Initialize client with custom httpx_client_factory for SSE
         client = MultiServerMCPClient(
             {
