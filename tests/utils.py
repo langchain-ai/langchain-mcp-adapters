@@ -5,7 +5,6 @@ import time
 from collections.abc import Generator
 
 import uvicorn
-from mcp.server.fastmcp import FastMCP
 from mcp.server.websocket import websocket_server
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute
@@ -43,8 +42,9 @@ def run_server(server_port: int) -> None:
         time.sleep(0.5)
 
 
-def run_streamable_http_server(server: FastMCP, server_port: int) -> None:
+def run_streamable_http_server(server_factory, server_port: int) -> None:
     """Run a FastMCP server in a separate process exposing a streamable HTTP."""
+    server = server_factory()
     app = server.streamable_http_app()
     uvicorn_server = uvicorn.Server(
         config=uvicorn.Config(
@@ -55,14 +55,16 @@ def run_streamable_http_server(server: FastMCP, server_port: int) -> None:
 
 
 @contextlib.contextmanager
-def run_streamable_http(server: FastMCP) -> Generator[None, None, None]:
+def run_streamable_http(
+    server_factory, server_port: int
+) -> Generator[None, None, None]:
     """Run the server in a separate process exposing a streamable HTTP endpoint.
 
-    The endpoint will be available at `http://localhost:{server.settings.port}/mcp/`.
+    The endpoint will be available at `http://localhost:{server_port}/mcp/`.
     """
     proc = multiprocessing.Process(
         target=run_streamable_http_server,
-        kwargs={"server": server, "server_port": server.settings.port},
+        kwargs={"server_factory": server_factory, "server_port": server_port},
         daemon=True,
     )
     proc.start()
@@ -74,7 +76,7 @@ def run_streamable_http(server: FastMCP) -> Generator[None, None, None]:
     while attempt < max_attempts:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect(("127.0.0.1", server.settings.port))
+                s.connect(("127.0.0.1", server_port))
                 break
         except ConnectionRefusedError:
             time.sleep(0.1)
