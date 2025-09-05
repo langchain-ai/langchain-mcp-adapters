@@ -57,7 +57,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 
 server_params = StdioServerParameters(
     command="python",
@@ -111,7 +111,7 @@ python weather_server.py
 
 ```python
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 
 client = MultiServerMCPClient(
     {
@@ -137,12 +137,12 @@ weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?
 > [!note]
 > Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
 >
->    ```python
->    from langchain_mcp_adapters.tools import load_mcp_tools
+> ```python
+> from langchain_mcp_adapters.tools import load_mcp_tools
 >
->    client = MultiServerMCPClient({...})
->    async with client.session("math") as session:
->        tools = await load_mcp_tools(session)
+> client = MultiServerMCPClient({...})
+> async with client.session("math") as session:
+>     tools = await load_mcp_tools(session)
 >    ```
 
 ## Streamable HTTP
@@ -166,7 +166,7 @@ To use it with Python MCP SDK `streamablehttp_client`:
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 async with streamablehttp_client("http://localhost:3000/mcp/") as (read, write, _):
@@ -185,7 +185,7 @@ Use it with `MultiServerMCPClient`:
 ```python
 # Use server from examples/servers/streamable-http-stateless/
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 
 client = MultiServerMCPClient(
     {
@@ -204,14 +204,14 @@ math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 
 When connecting to MCP servers, you can include custom headers (e.g., for authentication or tracing) using the `headers` field in the connection configuration. This is supported for the following transports:
 
-* `sse`
-* `streamable_http`
+- `sse`
+- `streamable_http`
 
 ### Example: passing headers with `MultiServerMCPClient`
 
 ```python
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 
 client = MultiServerMCPClient(
     {
@@ -231,7 +231,6 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
 > Only `sse` and `streamable_http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
-
 
 ## Using with LangGraph StateGraph
 
@@ -289,7 +288,7 @@ If you want to run a LangGraph agent that uses MCP tools in a LangGraph API serv
 # graph.py
 from contextlib import asynccontextmanager
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_agent
+from langchain.agents import create_agent
 
 async def make_graph():
     client = MultiServerMCPClient(
