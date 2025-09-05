@@ -146,7 +146,7 @@ weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?
 > client = MultiServerMCPClient({...})
 > async with client.session("math") as session:
 >     tools = await load_mcp_tools(session)
->    ```
+> ```
 
 ## Streamable HTTP
 
