@@ -4,7 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Any, cast, get_args
+from typing import Any, cast, get_args, overload
 
 from langchain_core.tools import (
     BaseTool,
@@ -206,8 +206,8 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
     ]
 
 
-def to_fastmcp(tool: BaseTool) -> FastMCPTool:
-    """Convert a LangChain tool to a FastMCP tool.
+def _convert_single_tool_to_fastmcp(tool: BaseTool) -> FastMCPTool:
+    """Convert a single LangChain tool to a FastMCP tool.
 
     Args:
         tool: The LangChain tool to convert.
@@ -219,20 +219,25 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         TypeError: If the tool's args_schema is not a BaseModel subclass.
         NotImplementedError: If the tool has injected arguments.
     """
-    if not issubclass(tool.args_schema, BaseModel):
+    if (
+        tool.args_schema is None
+        or isinstance(tool.args_schema, dict)
+        or not issubclass(tool.args_schema, BaseModel)
+    ):
         msg = (
             "Tool args_schema must be a subclass of pydantic.BaseModel. "
             "Tools with dict args schema are not supported."
         )
         raise TypeError(msg)
 
-    parameters = tool.tool_call_schema.model_json_schema()
+    args_schema = tool.args_schema
+    parameters = args_schema.model_json_schema()
     field_definitions = {
         field: (field_info.annotation, field_info)
-        for field, field_info in tool.tool_call_schema.model_fields.items()
+        for field, field_info in args_schema.model_fields.items()
     }
     arg_model = create_model(
-        f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase
+        f"{tool.name}Arguments", __base__=ArgModelBase, **field_definitions
     )
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
@@ -253,4 +258,34 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         parameters=parameters,
         fn_metadata=fn_metadata,
         is_async=True,
+        context_kwarg=None,
+        annotations=None,
     )
+
+
+@overload
+def to_fastmcp(tool: BaseTool) -> FastMCPTool: ...
+
+
+@overload
+def to_fastmcp(tool: list[BaseTool]) -> list[FastMCPTool]: ...
+
+
+def to_fastmcp(
+    tool: BaseTool | list[BaseTool],
+) -> FastMCPTool | list[FastMCPTool]:
+    """Convert LangChain tool(s) to FastMCP tool(s).
+
+    Args:
+        tool: A single LangChain tool or a list of LangChain tools to convert.
+
+    Returns:
+        A FastMCP tool or list of FastMCP tools equivalent to the input.
+
+    Raises:
+        TypeError: If any tool's args_schema is not a BaseModel subclass.
+        NotImplementedError: If any tool has injected arguments.
+    """
+    if isinstance(tool, list):
+        return [_convert_single_tool_to_fastmcp(t) for t in tool]
+    return _convert_single_tool_to_fastmcp(tool)
