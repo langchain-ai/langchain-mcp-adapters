@@ -172,8 +172,13 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
+class StreamableHttpConnectionWithSigV4(StreamableHttpConnection):
+    region: str
+    """AWS region for SigV4 signing."""
+
+
 Connection = (
-    StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
+    StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection | StreamableHttpConnectionWithSigV4
 )
 
 
@@ -352,6 +357,64 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
+async def _create_streamable_http_with_sigv4_session(  # noqa: PLR0913
+    *,
+    url: str,
+    region: str,
+    headers: dict[str, Any] | None = None,
+    timeout: timedelta = DEFAULT_STREAMABLE_HTTP_TIMEOUT,
+    sse_read_timeout: timedelta = DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT,
+    terminate_on_close: bool = True,
+    session_kwargs: dict[str, Any] | None = None,
+    httpx_client_factory: McpHttpClientFactory | None = None,
+) -> AsyncIterator[ClientSession]:
+    """Create a new session to an MCP server using Streamable HTTP with SigV4 signing.
+
+    Args:
+        url: URL of the endpoint to connect to.
+        region: AWS region for SigV4 signing.
+        headers: HTTP headers to send to the endpoint.
+        timeout: HTTP timeout.
+        sse_read_timeout: How long the client will wait for a new event before
+            disconnecting.
+        terminate_on_close: Whether to terminate the session on close.
+        session_kwargs: Additional keyword arguments to pass to the ClientSession.
+        httpx_client_factory: Custom factory for httpx.AsyncClient (optional).
+
+    Yields:
+        An initialized ClientSession.
+    """
+    try:
+        import boto3
+        from langchain_mcp_adapters.streamable_http_sigv4 import streamablehttp_client_with_sigv4
+    except ImportError:
+        msg = (
+            "Could not import boto3 or streamablehttp_client_with_sigv4. "
+            "To use Streamable HTTP with SigV4 connections, please install the required dependency: "
+            "'pip install boto3'"
+        )
+        raise ImportError(msg) from None
+
+    aws_session = boto3.Session()
+    credentials = aws_session.get_credentials()
+    async with (
+        streamablehttp_client_with_sigv4(
+            url=url,
+            credentials=credentials,
+            service="bedrock-agentcore",
+            region=region,
+            headers=headers,
+            timeout=timeout,
+            sse_read_timeout=sse_read_timeout,
+            terminate_on_close=terminate_on_close,
+            httpx_client_factory=httpx_client_factory,
+        ) as (read_stream, write_stream, _),
+        ClientSession(read_stream, write_stream, **(session_kwargs or {})) as session,
+    ):
+        yield session
+
+
+@asynccontextmanager
 async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:  # noqa: C901
     """Create a new session to an MCP server.
 
@@ -387,8 +450,12 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
         if "url" not in params:
             msg = "'url' parameter is required for Streamable HTTP connection"
             raise ValueError(msg)
-        async with _create_streamable_http_session(**params) as session:
-            yield session
+        if "region" in params:
+            async with _create_streamable_http_with_sigv4_session(**params) as session:
+                yield session
+        else:
+            async with _create_streamable_http_session(**params) as session:
+                yield session
     elif transport == "stdio":
         if "command" not in params:
             msg = "'command' parameter is required for stdio connection"
