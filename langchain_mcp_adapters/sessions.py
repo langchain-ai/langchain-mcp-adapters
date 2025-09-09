@@ -140,10 +140,10 @@ class StreamableHttpConnection(TypedDict):
     headers: NotRequired[dict[str, Any] | None]
     """HTTP headers to send to the endpoint."""
 
-    timeout: NotRequired[timedelta]
+    timeout: NotRequired[float | timedelta]
     """HTTP timeout."""
 
-    sse_read_timeout: NotRequired[timedelta]
+    sse_read_timeout: NotRequired[float | timedelta]
     """How long (in seconds) the client will wait for a new event before disconnecting.
     All other HTTP operations are controlled by `timeout`."""
 

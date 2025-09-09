@@ -1,10 +1,12 @@
 from typing import Annotated
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
+from mcp.server import FastMCP
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
@@ -368,10 +370,8 @@ def _create_status_server():
 
 
 # Tests for httpx_client_factory functionality
-@pytest.mark.asyncio
 async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
     """Test load mcp tools with custom httpx client factory."""
-    import httpx
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -423,7 +423,17 @@ def _create_info_server():
     return server
 
 
-@pytest.mark.asyncio
+def _create_failing_server() -> FastMCP:
+    server = FastMCP(port=8184)
+
+    @server.tool()
+    def failing_tool(message: str) -> str:
+        """A tool that always fails with an exception"""
+        raise ValueError(f"Tool failed: {message}")
+
+    return server
+
+
 async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
     socket_enabled,
 ) -> None:
@@ -468,3 +478,28 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             # Expected to fail since server doesn't have SSE endpoint,
             # but the important thing is that httpx_client_factory was passed correctly
             pass
+
+
+async def test_mcp_tool_exception_handling(socket_enabled) -> None:
+    """Test that exceptions from MCP tools are properly handled on the client side."""
+    with run_streamable_http(_create_failing_server, 8184):
+        # Initialize client
+        client = MultiServerMCPClient(
+            {
+                "failing": {
+                    "url": "http://localhost:8184/mcp/",
+                    "transport": "streamable_http",
+                    "timeout": 5,
+                    "sse_read_timeout": 2,
+                }
+            },
+        )
+
+        # Get the failing tool
+        tools = await client.get_tools()
+        assert len(tools) == 1
+        tool = tools[0]
+        assert tool.name == "failing_tool"
+        await tool.ainvoke(
+            {"args": {"message": "test error"}, "id": "1", "type": "tool_call"}
+        )
