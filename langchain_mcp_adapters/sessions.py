@@ -6,7 +6,6 @@ MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -69,7 +68,17 @@ class StdioConnection(TypedDict):
     """Command line arguments to pass to the executable."""
 
     env: NotRequired[dict[str, str] | None]
-    """The environment to use when spawning the process."""
+    """The environment to use when spawning the process.
+
+    If not specified or set to None, a subset of the default environment
+    variables from the current process will be used.
+
+    Please refer to the MCP SDK documentation for details on which
+    environment variables are included by default. The behavior
+    varies by operating system.
+
+    https://github.com/modelcontextprotocol/python-sdk/blob/c47c767ff437ee88a19e6b9001e2472cb6f7d5ed/src/mcp/client/stdio/__init__.py#L51
+    """
 
     cwd: NotRequired[str | Path | None]
     """The working directory to use when spawning the process."""
@@ -196,6 +205,8 @@ async def _create_stdio_session(  # noqa: PLR0913
         command: Command to execute.
         args: Arguments for the command.
         env: Environment variables for the command.
+            If not specified, inherits a subset of the current environment.
+            The details are implemented in the MCP sdk.
         cwd: Working directory for the command.
         encoding: Character encoding.
         encoding_error_handler: How to handle encoding errors.
@@ -204,13 +215,6 @@ async def _create_stdio_session(  # noqa: PLR0913
     Yields:
         An initialized ClientSession.
     """
-    # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
-    # To address this, we automatically inject existing PATH envvar into the `env`,
-    # if it's not already set.
-    env = env or {}
-    if "PATH" not in env:
-        env["PATH"] = os.environ.get("PATH", "")
-
     server_params = StdioServerParameters(
         command=command,
         args=args,
