@@ -11,6 +11,7 @@ from mcp.types import (
     ImageContent,
     TextContent,
     TextResourceContents,
+    ToolAnnotations,
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
@@ -468,3 +469,71 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             # Expected to fail since server doesn't have SSE endpoint,
             # but the important thing is that httpx_client_factory was passed correctly
             pass
+
+
+@pytest.mark.asyncio
+async def test_convert_mcp_tool_metadata_variants():
+    """Verify metadata merging rules in convert_mcp_tool_to_langchain_tool."""
+    tool_input_schema = {
+        "properties": {},
+        "required": [],
+        "title": "EmptySchema",
+        "type": "object",
+    }
+
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")], isError=False
+    )
+
+    mcp_tool_none = MCPTool(
+        name="t_none",
+        description="",
+        inputSchema=tool_input_schema,
+    )
+    lc_tool_none = convert_mcp_tool_to_langchain_tool(session, mcp_tool_none)
+    assert lc_tool_none.metadata is None
+
+    mcp_tool_ann = MCPTool(
+        name="t_ann",
+        description="",
+        inputSchema=tool_input_schema,
+        annotations=ToolAnnotations(
+            title="Title", readOnlyHint=True, idempotentHint=False
+        ),
+    )
+    lc_tool_ann = convert_mcp_tool_to_langchain_tool(session, mcp_tool_ann)
+    assert lc_tool_ann.metadata == {
+        "title": "Title",
+        "readOnlyHint": True,
+        "idempotentHint": False,
+        "destructiveHint": None,
+        "openWorldHint": None,
+    }
+
+    mcp_tool_meta = MCPTool(
+        name="t_meta",
+        description="",
+        inputSchema=tool_input_schema,
+        meta={"source": "unit-test", "version": 1},
+    )
+    lc_tool_meta = convert_mcp_tool_to_langchain_tool(session, mcp_tool_meta)
+    assert lc_tool_meta.metadata == {"_meta": {"source": "unit-test", "version": 1}}
+
+    mcp_tool_both = MCPTool(
+        name="t_both",
+        description="",
+        inputSchema=tool_input_schema,
+        annotations=ToolAnnotations(title="Both"),
+        meta={"flag": True},
+    )
+
+    lc_tool_both = convert_mcp_tool_to_langchain_tool(session, mcp_tool_both)
+    assert lc_tool_both.metadata == {
+        "title": "Both",
+        "readOnlyHint": None,
+        "idempotentHint": None,
+        "destructiveHint": None,
+        "openWorldHint": None,
+        "_meta": {"flag": True},
+    }
