@@ -581,12 +581,5 @@ def test_convert_with_structured_content_only():
     
     content, artifact = _convert_call_tool_result(result)
     
-<<<<<<< HEAD
-    assert content_blocks == [{"type": "json", "structured": structured_data}]
-    assert artifact["structuredContent"] == structured_data
-=======
-    # Empty text content returns empty string
     assert content == ""
-    # Structured data goes in artifact
     assert artifact["structuredContent"] == structured_data
->>>>>>> 81f6de3 (fix: ensure consistent output for structured content in tool conversion)
