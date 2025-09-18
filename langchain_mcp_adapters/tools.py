@@ -126,21 +126,8 @@ def convert_mcp_tool_to_langchain_tool(
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         if session is None:
             # If a session is not provided, we will create one on the fly
-            async with create_session(connection) as (get_session_id, tool_session):
-                raise ValueError('here')
-                # # Let's check if the server is stateful
-                # server_is_stateful = connection.get("is_stateful", True) if connection else True
-                # # Let's check if an MCP Session ID was provided in the header
-                # headers = connection.get("headers", {}) if connection else {}
-                # for key, value in headers.items():
-                #     if key.lower() == "mcp-session-id".lower() and isinstance(value, str):
-                #         mcp_session_id: str | None = value
-                #         break
-                # else:
-                #     mcp_session_id = None
-                # if mcp_session_id is None and server_is_stateful:
-                #     await tool_session.initialize()
-                #     mcp_session_id = get_session_id()
+            async with create_session(connection) as tool_session:
+                await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
                     tool.name,
                     arguments,
@@ -187,27 +174,10 @@ async def load_mcp_tools(
         raise ValueError(msg)
 
     if session is None:
-        # Let's check if an MCP Session ID was provided in the header
-        headers = connection.get("headers", {}) if connection else {}
-
-        for key, value in headers.items():
-            if key.lower() == "mcp-session-id".lower() and isinstance(value, str):
-                mcp_session_id: str | None = value
-                break
-        else:
-            mcp_session_id = None
-
-        # This is a bad default as many servers should be stateless for tool calls.
-        # Potentially changed. It's here for backwards compatibility
-        server_is_stateful = connection.get("is_stateful", True) if connection else True
         # If a session is not provided, we will create one on the fly
-        async with create_session(connection) as (get_session_id_callback, session):
-            # breakpoint()
-            # if mcp_session_id is None and server_is_stateful:
-            await session.initialize()
-                # # Get the session ID to pass it in the header for subsequent requests
-                # mcp_session_id = await get_session_id_callback()
-            tools = await _list_all_tools(session)
+        async with create_session(connection) as tool_session:
+            await tool_session.initialize()
+            tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
 

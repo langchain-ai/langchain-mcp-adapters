@@ -33,7 +33,7 @@ class MCPMiddleware(AgentMiddleware):
         for connection in connections.values():
             assert connection["transport"] == "streamable_http"
             # Check how it looks if we only support stateless connections
-            assert connection["is_stateful"] == False
+            # assert connection["is_stateful"] == False
         self._client = MultiServerMCPClient(connections)
         self._tools = None
 
