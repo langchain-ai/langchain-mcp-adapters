@@ -139,7 +139,7 @@ def convert_mcp_tool_to_langchain_tool(
         if call_tool_result is None:
             raise RuntimeError(
                 "The tool call did not return any content. This **may** have "
-                "happened due to a network error, a closed connection."
+                "happened due to a network error, a timeout, a closed connection etc"
             )
 
         return _convert_call_tool_result(call_tool_result)
