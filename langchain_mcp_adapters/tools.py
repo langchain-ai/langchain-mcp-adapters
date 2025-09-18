@@ -124,6 +124,7 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
+        call_tool_result = None
         if session is None:
             # If a session is not provided, we will create one on the fly
             async with create_session(connection) as tool_session:
@@ -134,6 +135,13 @@ def convert_mcp_tool_to_langchain_tool(
                 )
         else:
             call_tool_result = await session.call_tool(tool.name, arguments)
+
+        if call_tool_result is None:
+            raise RuntimeError(
+                "The tool call did not return any content. This **may** have "
+                "happened due to a network error, a closed connection."
+            )
+
         return _convert_call_tool_result(call_tool_result)
 
     meta = tool.meta if hasattr(tool, "meta") else None
