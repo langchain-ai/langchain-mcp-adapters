@@ -14,7 +14,9 @@ repository = "https://www.github.com/langchain-ai/langchain-mcp-adapters"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "langchain",
     "langchain-core>=0.3.36,<0.4",
+    "langchain-openai>=0.3.33",
     "mcp>=1.9.2",
     "typing-extensions>=4.14.0",
 ]
@@ -65,6 +67,9 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 check_untyped_defs = true
+
+[tool.uv.sources]
+langchain = { path = "../langchain/libs/langchain_v1" }
 
 [tool.ruff.lint.extend-per-file-ignores]
 "tests/**/*.py" = [

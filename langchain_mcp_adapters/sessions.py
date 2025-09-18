@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, Callable
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import httpx
+
+GetSessionIdCallback = Callable[[], str | None]
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -168,6 +170,9 @@ class StreamableHttpConnection(TypedDict):
     auth: NotRequired[httpx.Auth]
     """Optional authentication for the HTTP client."""
 
+    is_stateful: NotRequired[bool]
+    """Whether the server is known to be stateful or stateless."""
+
 
 class WebsocketConnection(TypedDict):
     """Configuration for WebSocket transport connections to MCP servers."""
@@ -181,7 +186,7 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
-Connection = (
+Connection: TypeAlias = (
     StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
 )
 
@@ -283,7 +288,7 @@ async def _create_streamable_http_session(  # noqa: PLR0913
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
     auth: httpx.Auth | None = None,
-) -> AsyncIterator[ClientSession]:
+) -> tuple[GetSessionIdCallback, AsyncIterator[ClientSession]]:
     """Create a new session to an MCP server using Streamable HTTP.
 
     Args:
@@ -314,10 +319,10 @@ async def _create_streamable_http_session(  # noqa: PLR0913
             terminate_on_close,
             auth=auth,
             **kwargs,
-        ) as (read, write, _),
+        ) as (read, write, get_session_id_callback),
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
-        yield session
+        yield get_session_id_callback, session
 
 
 @asynccontextmanager
@@ -356,7 +361,9 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
-async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:  # noqa: C901
+async def create_session(
+    connection: Connection,
+) -> tuple[GetSessionIdCallback, AsyncIterator[ClientSession]]:
     """Create a new session to an MCP server.
 
     Args:
@@ -391,8 +398,17 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
         if "url" not in params:
             msg = "'url' parameter is required for Streamable HTTP connection"
             raise ValueError(msg)
-        async with _create_streamable_http_session(**params) as session:
-            yield session
+        # Introduced by us
+        params = {
+            key: value
+            for key, value in params.items()
+            if key != "is_stateful"  # 'is_stateful' is not used for stdio
+        }
+        async with _create_streamable_http_session(**params) as (
+            session_id_callback,
+            session,
+        ):
+            yield session_id_callback, session
     elif transport == "stdio":
         if "command" not in params:
             msg = "'command' parameter is required for stdio connection"
