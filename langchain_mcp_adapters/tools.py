@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+from collections.abc import Callable
 from typing import Any, cast, get_args
 
 from langchain_core.tools import (
@@ -18,7 +19,7 @@ from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextContent
 from mcp.types import Tool as MCPTool
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, ValidationError, create_model
 
 from langchain_mcp_adapters.sessions import Connection, create_session
 
@@ -102,6 +103,10 @@ def convert_mcp_tool_to_langchain_tool(
     tool: MCPTool,
     *,
     connection: Connection | None = None,
+    handle_tool_error: bool | str | Callable[[ToolException], str] | None = False,
+    handle_validation_error: (
+        bool | str | Callable[[ValidationError], str] | None
+    ) = False,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -112,6 +117,8 @@ def convert_mcp_tool_to_langchain_tool(
         tool: MCP tool to convert
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
+        handle_tool_error: Optional error handler for tool execution errors.
+        handle_validation_error: Optional error handler for validation errors.
 
     Returns:
         a LangChain tool
@@ -158,6 +165,8 @@ def convert_mcp_tool_to_langchain_tool(
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
+        handle_tool_error=handle_tool_error,
+        handle_validation_error=handle_validation_error,
     )
 
 
@@ -165,12 +174,18 @@ async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
+    handle_tool_error: bool | str | Callable[[ToolException], str] | None = False,
+    handle_validation_error: (
+        bool | str | Callable[[ValidationError], str] | None
+    ) = False,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
     Args:
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
+        handle_tool_error: Optional error handler for tool execution errors.
+        handle_validation_error: Optional error handler for validation errors.
 
     Returns:
         List of LangChain tools. Tool annotations are returned as part
@@ -192,7 +207,13 @@ async def load_mcp_tools(
         tools = await _list_all_tools(session)
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        convert_mcp_tool_to_langchain_tool(
+            session,
+            tool,
+            connection=connection,
+            handle_tool_error=handle_tool_error,
+            handle_validation_error=handle_validation_error,
+        )
         for tool in tools
     ]
 
