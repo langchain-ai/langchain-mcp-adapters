@@ -138,8 +138,10 @@ def convert_mcp_tool_to_langchain_tool(
 
         if call_tool_result is None:
             raise RuntimeError(
-                "The tool call did not return any content. This **may** have "
-                "happened due to a network error, a timeout, a closed connection etc"
+                "Tool call failed: no result returned from the underlying MCP SDK. "
+                "This may indicate that an exception was handled or suppressed "
+                "by the MCP SDK (e.g., client disconnection, network issue, "
+                "or other execution error)."
             )
 
         return _convert_call_tool_result(call_tool_result)
