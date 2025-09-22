@@ -24,12 +24,12 @@ async def test_multi_server_mcp_client(
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python",
+                "command": "python3",
                 "args": [math_server_path],
                 "transport": "stdio",
             },
             "weather": {
-                "command": "python",
+                "command": "python3",
                 "args": [weather_server_path],
                 "transport": "stdio",
             },
@@ -105,7 +105,7 @@ async def test_multi_server_connect_methods(
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python",
+                "command": "python3",
                 "args": [math_server_path],
                 "transport": "stdio",
             },
@@ -147,7 +147,7 @@ async def test_get_prompt():
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python",
+                "command": "python3",
                 "args": [math_server_path],
                 "transport": "stdio",
             }
