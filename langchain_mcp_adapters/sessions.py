@@ -141,7 +141,7 @@ class SSEConnection(TypedDict):
 class StreamableHttpConnection(TypedDict):
     """Connection configuration for Streamable HTTP transport."""
 
-    transport: Literal["streamable_http"]
+    transport: Literal["streamable_http", "streamable-http"]
 
     url: str
     """The URL of the endpoint to connect to."""
@@ -387,7 +387,7 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
             raise ValueError(msg)
         async with _create_sse_session(**params) as session:
             yield session
-    elif transport == "streamable_http":
+    elif transport in ("streamable_http", "streamable-http"):
         if "url" not in params:
             msg = "'url' parameter is required for Streamable HTTP connection"
             raise ValueError(msg)
@@ -411,6 +411,6 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
     else:
         msg = (
             f"Unsupported transport: {transport}. "
-            f"Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
+            f"Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http', 'streamable-http'"
         )
         raise ValueError(msg)
