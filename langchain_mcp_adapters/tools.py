@@ -4,8 +4,10 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+import asyncio
 from typing import Any, cast, get_args
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -20,10 +22,72 @@ from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextConten
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
+from langchain_mcp_adapters.interceptors import InterceptorConfig, ToolCallArgs, ToolCallResult
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | EmbeddedResource
 MAX_ITERATIONS = 1000
+
+
+async def _call_hook_if_async(hook, *args, **kwargs):
+    """Call a hook function and await it if it's async."""
+    result = hook(*args, **kwargs)
+    if asyncio.iscoroutine(result):
+        return await result
+    return result
+
+
+async def _apply_before_tool_call_hook(
+    interceptors: InterceptorConfig,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> ToolCallArgs:
+    """Apply before-tool-call hook if configured."""
+    tool_call: ToolCallArgs = {
+        "name": tool_name,
+        "arguments": arguments,
+    }
+
+    before_hook = interceptors.get("before_tool_call")
+    if before_hook:
+        tool_call = await _call_hook_if_async(before_hook, tool_call)
+
+    return tool_call
+
+
+async def _apply_after_tool_call_hook(
+    interceptors: InterceptorConfig,
+    tool_call: ToolCallArgs,
+    result: CallToolResult,
+) -> tuple[str | list[str], list[NonTextContent] | None]:
+    """Apply after-tool-call hook if configured and convert result."""
+    after_hook = interceptors.get("after_tool_call")
+
+    if after_hook:
+        # Apply the hook
+        transformed_result = await _call_hook_if_async(after_hook, tool_call, result)
+
+        # Handle different return formats
+        if isinstance(transformed_result, dict):
+            # ToolCallResult format
+            content = transformed_result.get("content", "")
+            artifacts = transformed_result.get("artifacts")
+            return content, artifacts
+        elif isinstance(transformed_result, (tuple, list)) and len(transformed_result) == 2:
+            # 2-tuple format: [content, artifacts]
+            return transformed_result[0], transformed_result[1]
+        elif isinstance(transformed_result, ToolMessage):
+            # ToolMessage format
+            return transformed_result.content, transformed_result.artifact if hasattr(transformed_result, 'artifact') else None
+        elif isinstance(transformed_result, str):
+            # String format
+            return transformed_result, None
+        else:
+            # Other formats - convert to string
+            return str(transformed_result), None
+
+    # No hook applied, use default conversion
+    return _convert_call_tool_result(result)
 
 
 def _convert_call_tool_result(
@@ -102,6 +166,7 @@ def convert_mcp_tool_to_langchain_tool(
     tool: MCPTool,
     *,
     connection: Connection | None = None,
+    interceptors: InterceptorConfig | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -112,6 +177,7 @@ def convert_mcp_tool_to_langchain_tool(
         tool: MCP tool to convert
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
+        interceptors: Optional interceptor configuration for tool call hooks
 
     Returns:
         a LangChain tool
@@ -124,6 +190,18 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
+        # Apply before-tool-call hook if configured
+        if interceptors:
+            tool_call = await _apply_before_tool_call_hook(interceptors, tool.name, arguments)
+            # Use modified arguments and headers from the hook
+            modified_arguments = tool_call["arguments"]
+            headers = tool_call.get("headers")
+            # Note: headers support would need to be added to the MCP SDK call_tool method
+            # For now, we just use the modified arguments
+        else:
+            modified_arguments = arguments
+            tool_call = ToolCallArgs(name=tool.name, arguments=arguments)
+
         call_tool_result = None
         if session is None:
             # If a session is not provided, we will create one on the fly
@@ -131,10 +209,10 @@ def convert_mcp_tool_to_langchain_tool(
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
                     tool.name,
-                    arguments,
+                    modified_arguments,
                 )
         else:
-            call_tool_result = await session.call_tool(tool.name, arguments)
+            call_tool_result = await session.call_tool(tool.name, modified_arguments)
 
         if call_tool_result is None:
             raise RuntimeError(
@@ -144,7 +222,11 @@ def convert_mcp_tool_to_langchain_tool(
                 "or other execution error)."
             )
 
-        return _convert_call_tool_result(call_tool_result)
+        # Apply after-tool-call hook if configured
+        if interceptors:
+            return await _apply_after_tool_call_hook(interceptors, tool_call, call_tool_result)
+        else:
+            return _convert_call_tool_result(call_tool_result)
 
     meta = tool.meta if hasattr(tool, "meta") else None
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
@@ -165,12 +247,14 @@ async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
+    interceptors: InterceptorConfig | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
     Args:
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
+        interceptors: Optional interceptor configuration for tool call hooks.
 
     Returns:
         List of LangChain tools. Tool annotations are returned as part
@@ -192,7 +276,7 @@ async def load_mcp_tools(
         tools = await _list_all_tools(session)
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection, interceptors=interceptors)
         for tool in tools
     ]
 

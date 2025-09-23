@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
 
+from langchain_mcp_adapters.interceptors import InterceptorConfig
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
@@ -46,12 +47,18 @@ class MultiServerMCPClient:
     Loads LangChain-compatible tools, prompts and resources from MCP servers.
     """
 
-    def __init__(self, connections: dict[str, Connection] | None = None) -> None:
+    def __init__(
+        self,
+        connections: dict[str, Connection] | None = None,
+        *,
+        interceptors: InterceptorConfig | None = None,
+    ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
         Args:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
+            interceptors: Optional interceptor configuration for tool call hooks and callbacks.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -77,6 +84,32 @@ class MultiServerMCPClient:
         all_tools = await client.get_tools()
         ```
 
+        Example: with interceptors
+
+        ```python
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+
+        def before_tool_call(tool_call):
+            # Add authentication or modify arguments
+            tool_call["arguments"]["user_id"] = "123"
+            tool_call["headers"] = {"Authorization": "Bearer token"}
+            return tool_call
+
+        def after_tool_call(tool_call, result):
+            # Transform or log the result
+            return {"content": f"Result: {result.content[0].text}", "artifacts": []}
+
+        client = MultiServerMCPClient(
+            connections={...},
+            interceptors={
+                "before_tool_call": before_tool_call,
+                "after_tool_call": after_tool_call,
+                "on_message": lambda msg: print(f"Server message: {msg}"),
+                "on_progress": lambda progress: print(f"Progress: {progress}"),
+            }
+        )
+        ```
+
         Example: explicitly starting a session
 
         ```python
@@ -92,6 +125,7 @@ class MultiServerMCPClient:
         self.connections: dict[str, Connection] = (
             connections if connections is not None else {}
         )
+        self.interceptors: InterceptorConfig = interceptors or {}
 
     @asynccontextmanager
     async def session(
@@ -145,13 +179,15 @@ class MultiServerMCPClient:
                     f"expected one of '{list(self.connections.keys())}'"
                 )
                 raise ValueError(msg)
-            return await load_mcp_tools(None, connection=self.connections[server_name])
+            return await load_mcp_tools(
+                None, connection=self.connections[server_name], interceptors=self.interceptors
+            )
 
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
         for connection in self.connections.values():
             load_mcp_tool_task = asyncio.create_task(
-                load_mcp_tools(None, connection=connection)
+                load_mcp_tools(None, connection=connection, interceptors=self.interceptors)
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
