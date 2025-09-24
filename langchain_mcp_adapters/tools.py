@@ -137,12 +137,13 @@ def convert_mcp_tool_to_langchain_tool(
             call_tool_result = await session.call_tool(tool.name, arguments)
 
         if call_tool_result is None:
-            raise RuntimeError(
+            msg = (
                 "Tool call failed: no result returned from the underlying MCP SDK. "
                 "This may indicate that an exception was handled or suppressed "
                 "by the MCP SDK (e.g., client disconnection, network issue, "
                 "or other execution error)."
             )
+            raise RuntimeError(msg)
 
         return _convert_call_tool_result(call_tool_result)
 

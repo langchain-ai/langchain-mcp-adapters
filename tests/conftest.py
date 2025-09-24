@@ -4,6 +4,7 @@ import time
 from collections.abc import Generator
 
 import pytest
+import pytest_socket
 
 from tests.utils import run_server
 
@@ -55,8 +56,6 @@ def websocket_server(websocket_server_port: int) -> Generator[None, None, None]:
 def socket_enabled():
     """Temporarily enable socket connections for websocket tests."""
     try:
-        import pytest_socket
-
         pytest_socket.enable_socket()
         previous_state = pytest_socket.socket_allow_hosts()
         # Only allow connections to localhost

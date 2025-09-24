@@ -1,10 +1,12 @@
 from typing import Annotated
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
+from mcp.server import FastMCP
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
@@ -223,9 +225,6 @@ async def test_load_mcp_tools():
 
 
 def _create_annotations_server():
-    from mcp.server import FastMCP
-    from mcp.types import ToolAnnotations
-
     server = FastMCP(port=8181)
 
     @server.tool(
@@ -356,8 +355,6 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
 
 
 def _create_status_server():
-    from mcp.server import FastMCP
-
     server = FastMCP(port=8182)
 
     @server.tool()
@@ -372,7 +369,6 @@ def _create_status_server():
 @pytest.mark.asyncio
 async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
     """Test load mcp tools with custom httpx client factory."""
-    import httpx
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -412,8 +408,6 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
 
 def _create_info_server():
-    from mcp.server import FastMCP
-
     server = FastMCP(port=8183)
 
     @server.tool()
@@ -429,7 +423,6 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
     socket_enabled,
 ) -> None:
     """Test load mcp tools with custom httpx client factory using SSE transport."""
-    import httpx
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
