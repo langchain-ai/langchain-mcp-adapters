@@ -15,10 +15,12 @@ from mcp.types import (
     Tool as MCPTool,
 )
 
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.lifecycle import (
+from langchain_mcp_adapters.callbacks import (
     CallbackContext,
     Callbacks,
+)
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.hooks import (
     Hooks,
 )
 

@@ -1,10 +1,10 @@
 """Test hooks and callbacks functionality."""
 
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.lifecycle import (
+from langchain_mcp_adapters.callbacks import (
     Callbacks,
-    Hooks,
 )
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.hooks import Hooks
 
 
 class TestMultiServerMCPClientIntegration:

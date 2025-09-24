@@ -16,11 +16,8 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession
 from mcp.types import LoggingMessageNotification, ProgressNotification
 
-from langchain_mcp_adapters.callbacks import CallbackContext
-from langchain_mcp_adapters.lifecycle import (
-    Callbacks,
-    Hooks,
-)
+from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
+from langchain_mcp_adapters.hooks import Hooks
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
