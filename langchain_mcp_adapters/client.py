@@ -14,7 +14,13 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
+from mcp.types import LoggingMessageNotification, ProgressNotification
 
+from langchain_mcp_adapters.callbacks import CallbackContext
+from langchain_mcp_adapters.lifecycle import (
+    Callbacks,
+    Hooks,
+)
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
@@ -46,12 +52,20 @@ class MultiServerMCPClient:
     Loads LangChain-compatible tools, prompts and resources from MCP servers.
     """
 
-    def __init__(self, connections: dict[str, Connection] | None = None) -> None:
+    def __init__(
+        self,
+        connections: dict[str, Connection] | None = None,
+        *,
+        callbacks: Callbacks | None = None,
+        hooks: Hooks | None = None,
+    ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
         Args:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
+            callbacks: Optional callbacks for handling notifications and events.
+            hooks: Optional hooks for intercepting and modifying tool calls.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -88,10 +102,60 @@ class MultiServerMCPClient:
             tools = await load_mcp_tools(session)
         ```
 
+        Example: with hooks and callbacks
+
+        ```python
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+        from langchain_mcp_adapters.lifecycle import Callbacks, Hooks
+
+        def on_logging_message(notification, context):
+            print(f"Log: {notification.params.message}")
+
+        def before_tool_call(request, context):
+            print(f"Calling tool: {request.params.name}")
+            return None  # No modifications
+
+        client = MultiServerMCPClient(
+            connections={...},
+            callbacks=Callbacks(on_logging_message=on_logging_message),
+            hooks=Hooks(before_tool_call=before_tool_call),
+        )
+        ```
+
         """
         self.connections: dict[str, Connection] = (
             connections if connections is not None else {}
         )
+        self.callbacks = callbacks or Callbacks()
+        self.hooks = hooks or Hooks()
+
+    async def handle_logging_message(
+        self,
+        notification: LoggingMessageNotification,
+        context: CallbackContext,
+    ) -> None:
+        """Handle logging message notification.
+
+        Args:
+            notification: The logging message notification
+            context: Callback context
+        """
+        if self.callbacks.on_logging_message:
+            await self.callbacks.on_logging_message(notification, context)
+
+    async def handle_progress_notification(
+        self,
+        notification: ProgressNotification,
+        context: CallbackContext,
+    ) -> None:
+        """Handle progress notification.
+
+        Args:
+            notification: The progress notification
+            context: Callback context
+        """
+        if self.callbacks.on_progress_notification:
+            await self.callbacks.on_progress_notification(notification, context)
 
     @asynccontextmanager
     async def session(
@@ -145,13 +209,23 @@ class MultiServerMCPClient:
                     f"expected one of '{list(self.connections.keys())}'"
                 )
                 raise ValueError(msg)
-            return await load_mcp_tools(None, connection=self.connections[server_name])
+            return await load_mcp_tools(
+                None,
+                connection=self.connections[server_name],
+                hooks=self.hooks,
+                server_name=server_name,
+            )
 
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
-        for connection in self.connections.values():
+        for name, connection in self.connections.items():
             load_mcp_tool_task = asyncio.create_task(
-                load_mcp_tools(None, connection=connection)
+                load_mcp_tools(
+                    None,
+                    connection=connection,
+                    hooks=self.hooks,
+                    server_name=name,
+                )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
@@ -218,6 +292,8 @@ class MultiServerMCPClient:
 
 
 __all__ = [
+    "Callbacks",
+    "Hooks",
     "McpHttpClientFactory",
     "MultiServerMCPClient",
     "SSEConnection",

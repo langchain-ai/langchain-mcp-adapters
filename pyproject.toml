@@ -52,6 +52,7 @@ target-version = "py310"
 select = [ "ALL",]
 ignore = [
   "COM812", # conflict with formatter
+  "C901", # Too complex
 ]
 
 

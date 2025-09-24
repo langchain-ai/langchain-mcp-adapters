@@ -6,6 +6,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 
 from typing import Any, cast, get_args
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -16,13 +17,23 @@ from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
-from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextContent
+from mcp.types import (
+    AudioContent,
+    CallToolRequest,
+    CallToolRequestParams,
+    CallToolResult,
+    EmbeddedResource,
+    ImageContent,
+    ResourceLink,
+    TextContent,
+)
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
+from langchain_mcp_adapters.hooks import HookContext, Hooks
 from langchain_mcp_adapters.sessions import Connection, create_session
 
-NonTextContent = ImageContent | EmbeddedResource
+NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
 MAX_ITERATIONS = 1000
 
 
@@ -102,6 +113,8 @@ def convert_mcp_tool_to_langchain_tool(
     tool: MCPTool,
     *,
     connection: Connection | None = None,
+    hooks: Hooks | None = None,
+    server_name: str | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -112,6 +125,9 @@ def convert_mcp_tool_to_langchain_tool(
         tool: MCP tool to convert
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
+        callbacks: Optional callbacks for handling notifications and events
+        hooks: Optional hooks for intercepting and modifying tool calls
+        server_name: Name of the server this tool belongs to
 
     Returns:
         a LangChain tool
@@ -121,20 +137,54 @@ def convert_mcp_tool_to_langchain_tool(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
-    async def call_tool(
+    async def call_tool(  # noqa: PLR0912
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
+        hook_context = HookContext(
+            server_name=server_name or "unknown",
+            state={"tool_name": tool.name, "arguments": arguments},
+            runnable_config={},
+            runtime={},
+        )
+
+        # Create the original request for hooks
+        original_request = CallToolRequest(
+            method="tools/call",
+            params=CallToolRequestParams(name=tool.name, arguments=arguments),
+        )
+
+        # Execute before_tool_call hook if available
+        modified_request = original_request
+        if hooks and hooks.before_tool_call:
+            hook_result = await hooks.before_tool_call(original_request, hook_context)
+            if hook_result:
+                # Apply modifications from hook
+                if "name" in hook_result:
+                    modified_request.params.name = hook_result["name"]
+                if (
+                    "args" in hook_result
+                    and modified_request.params.arguments is not None
+                ):
+                    modified_request.params.arguments.update(hook_result["args"])
+                # Headers would be used in the actual session call if supported
+
+        # Execute the tool call
         call_tool_result = None
         if session is None:
             # If a session is not provided, we will create one on the fly
+            if connection is None:
+                msg = "Either session or connection must be provided"
+                raise ValueError(msg)
             async with create_session(connection) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
-                    tool.name,
-                    arguments,
+                    modified_request.params.name,
+                    modified_request.params.arguments,
                 )
         else:
-            call_tool_result = await session.call_tool(tool.name, arguments)
+            call_tool_result = await session.call_tool(
+                modified_request.params.name, modified_request.params.arguments
+            )
 
         if call_tool_result is None:
             msg = (
@@ -145,12 +195,43 @@ def convert_mcp_tool_to_langchain_tool(
             )
             raise RuntimeError(msg)
 
-        return _convert_call_tool_result(call_tool_result)
+        # Execute after_tool_call hook if available
+        final_result = call_tool_result
+        if hooks and hooks.after_tool_call:
+            after_hook_result = await hooks.after_tool_call(
+                call_tool_result, hook_context
+            )
+            if after_hook_result is not None:
+                # Handle different return types from the hook
+                if isinstance(after_hook_result, ToolMessage):
+                    # Return the tool message content directly
+                    return after_hook_result.content, None
+                if isinstance(after_hook_result, str):
+                    # Return as text content
+                    return after_hook_result, None
+                if isinstance(after_hook_result, list):
+                    # Return as list content - convert each item to string
+                    return [str(item) for item in after_hook_result], None
+                if isinstance(after_hook_result, dict):
+                    # Return dict as string representation
+                    return str(after_hook_result), None
+                # Otherwise use original result
 
-    meta = tool.meta if hasattr(tool, "meta") else None
+        return _convert_call_tool_result(final_result)
+
+    # Get meta from the tool - it might be in __pydantic_extra__ or as direct attribute
+    meta = getattr(tool, "meta", None)
+    if (
+        meta is None
+        and hasattr(tool, "__pydantic_extra__")
+        and tool.__pydantic_extra__ is not None
+    ):
+        meta = tool.__pydantic_extra__.get("meta")
+
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
-    meta = {"_meta": meta} if meta is not None else {}
-    metadata = {**base, **meta} or None
+    meta_dict = {"_meta": meta} if meta is not None else {}
+    merged_metadata = {**base, **meta_dict}
+    metadata = merged_metadata if merged_metadata else None
 
     return StructuredTool(
         name=tool.name,
@@ -166,12 +247,17 @@ async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
+    hooks: Hooks | None = None,
+    server_name: str | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
     Args:
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
+        callbacks: Optional callbacks for handling notifications and events.
+        hooks: Optional hooks for intercepting and modifying tool calls.
+        server_name: Name of the server these tools belong to.
 
     Returns:
         List of LangChain tools. Tool annotations are returned as part
@@ -186,6 +272,9 @@ async def load_mcp_tools(
 
     if session is None:
         # If a session is not provided, we will create one on the fly
+        if connection is None:
+            msg = "Either session or connection must be provided"
+            raise ValueError(msg)
         async with create_session(connection) as tool_session:
             await tool_session.initialize()
             tools = await _list_all_tools(tool_session)
@@ -193,7 +282,13 @@ async def load_mcp_tools(
         tools = await _list_all_tools(session)
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        convert_mcp_tool_to_langchain_tool(
+            session,
+            tool,
+            connection=connection,
+            hooks=hooks,
+            server_name=server_name,
+        )
         for tool in tools
     ]
 

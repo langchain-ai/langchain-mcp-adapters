@@ -356,7 +356,7 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
-async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:  # noqa: C901
+async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
