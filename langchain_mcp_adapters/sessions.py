@@ -339,7 +339,7 @@ async def _create_websocket_session(
         ImportError: If websockets package is not installed.
     """
     try:
-        from mcp.client.websocket import websocket_client
+        from mcp.client.websocket import websocket_client  # noqa: PLC0415
     except ImportError:
         msg = (
             "Could not import websocket_client. "
