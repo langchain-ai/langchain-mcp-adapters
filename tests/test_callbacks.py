@@ -3,7 +3,6 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from mcp.types import CallToolResult, LoggingMessageNotificationParams, TextContent
 from mcp.types import Tool as MCPTool
 
@@ -20,7 +19,6 @@ from langchain_mcp_adapters.tools import (
 )
 
 
-@pytest.mark.asyncio
 async def test_to_mcp_format_with_callbacks() -> None:
     """Test converting to MCP format with callbacks."""
     logging_callback = AsyncMock(spec=LoggingMessageCallback)
@@ -49,7 +47,6 @@ async def test_to_mcp_format_with_callbacks() -> None:
     progress_callback.assert_called_once_with(0.75, 1.0, "Almost done...", context)
 
 
-@pytest.mark.asyncio
 async def test_progress_callback_execution() -> None:
     """Test progress callback execution with various values."""
     progress_calls = []
@@ -78,7 +75,6 @@ async def test_progress_callback_execution() -> None:
     assert progress_calls[2] == (1.0, 1.0, "Complete!", "test_server")
 
 
-@pytest.mark.asyncio
 async def test_logging_callback_execution() -> None:
     """Test logging callback execution with different levels."""
     logging_calls = []
@@ -112,7 +108,6 @@ async def test_logging_callback_execution() -> None:
     )
 
 
-@pytest.mark.asyncio
 async def test_callbacks_with_mcp_tool_execution() -> None:
     """Test callbacks integration during MCP tool execution."""
     progress_calls = []
@@ -168,7 +163,6 @@ async def test_callbacks_with_mcp_tool_execution() -> None:
     assert progress_calls[1] == (1.0, "Complete!", "test_tool")
 
 
-@pytest.mark.asyncio
 async def test_callbacks_with_load_mcp_tools() -> None:
     """Test callbacks integration with load_mcp_tools."""
     progress_calls = []
