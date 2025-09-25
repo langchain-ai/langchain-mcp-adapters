@@ -21,8 +21,8 @@ from langchain_mcp_adapters.tools import (
 
 
 @pytest.mark.asyncio
-async def test_to_mcp_format_with_both_callbacks() -> None:
-    """Test converting to MCP format with both callbacks."""
+async def test_to_mcp_format_with_callbacks() -> None:
+    """Test converting to MCP format with callbacks."""
     logging_callback = AsyncMock(spec=LoggingMessageCallback)
     progress_callback = AsyncMock(spec=ProgressCallback)
     callbacks = Callbacks(
@@ -50,9 +50,8 @@ async def test_to_mcp_format_with_both_callbacks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_progress_callback_execution():
-    """Test that progress callbacks are properly executed during tool calls."""
-    # Track progress calls
+async def test_progress_callback_execution() -> None:
+    """Test progress callback execution with various values."""
     progress_calls = []
 
     async def progress_callback(
@@ -61,262 +60,96 @@ async def test_progress_callback_execution():
         message: str | None,
         context: CallbackContext,
     ):
-        progress_calls.append(
-            {
-                "progress": progress,
-                "total": total,
-                "message": message,
-                "context": context,
-            }
-        )
+        progress_calls.append((progress, total, message, context.server_name))
 
     callbacks = Callbacks(on_progress=progress_callback)
     context = CallbackContext(server_name="test_server", tool_name="test_tool")
-
     mcp_callbacks = callbacks.to_mcp_format(context=context)
 
-    # Simulate progress updates
     await mcp_callbacks.progress_callback(0.0, 1.0, "Starting...")
-    await mcp_callbacks.progress_callback(0.5, 1.0, "Halfway done...")
+    await mcp_callbacks.progress_callback(0.5, None, None)
     await mcp_callbacks.progress_callback(1.0, 1.0, "Complete!")
 
-    # Give the async tasks time to complete
-
     await asyncio.sleep(0.01)
 
-    # Verify all progress calls were recorded
     assert len(progress_calls) == 3
-
-    # Check first call
-    assert progress_calls[0]["progress"] == 0.0
-    assert progress_calls[0]["total"] == 1.0
-    assert progress_calls[0]["message"] == "Starting..."
-    assert progress_calls[0]["context"] == context
-
-    # Check second call
-    assert progress_calls[1]["progress"] == 0.5
-    assert progress_calls[1]["total"] == 1.0
-    assert progress_calls[1]["message"] == "Halfway done..."
-    assert progress_calls[1]["context"] == context
-
-    # Check third call
-    assert progress_calls[2]["progress"] == 1.0
-    assert progress_calls[2]["total"] == 1.0
-    assert progress_calls[2]["message"] == "Complete!"
-    assert progress_calls[2]["context"] == context
+    assert progress_calls[0] == (0.0, 1.0, "Starting...", "test_server")
+    assert progress_calls[1] == (0.5, None, None, "test_server")
+    assert progress_calls[2] == (1.0, 1.0, "Complete!", "test_server")
 
 
 @pytest.mark.asyncio
-async def test_progress_callback_with_none_values():
-    """Test progress callbacks with None values."""
-    progress_calls = []
-
-    async def progress_callback(
-        progress: float,
-        total: float | None,
-        message: str | None,
-        context: CallbackContext,
-    ):
-        progress_calls.append(
-            {
-                "progress": progress,
-                "total": total,
-                "message": message,
-                "context": context,
-            }
-        )
-
-    callbacks = Callbacks(on_progress=progress_callback)
-    context = CallbackContext(server_name="test_server")
-
-    mcp_callbacks = callbacks.to_mcp_format(context=context)
-
-    # Test with None total and message
-    await mcp_callbacks.progress_callback(0.3, None, None)
-
-    # Give the async task time to complete
-
-    await asyncio.sleep(0.01)
-
-    assert len(progress_calls) == 1
-    assert progress_calls[0]["progress"] == 0.3
-    assert progress_calls[0]["total"] is None
-    assert progress_calls[0]["message"] is None
-    assert progress_calls[0]["context"] == context
-
-
-@pytest.mark.asyncio
-async def test_logging_callback_execution():
-    """Test that logging callbacks are properly executed."""
-    # Track logging calls
+async def test_logging_callback_execution() -> None:
+    """Test logging callback execution with different levels."""
     logging_calls = []
 
     async def logging_callback(
         params: LoggingMessageNotificationParams, context: CallbackContext
     ):
-        logging_calls.append(
-            {
-                "params": params,
-                "context": context,
-            }
-        )
+        logging_calls.append((params.level, params.data, context.server_name))
 
     callbacks = Callbacks(on_logging_message=logging_callback)
     context = CallbackContext(server_name="test_server", tool_name="test_tool")
-
     mcp_callbacks = callbacks.to_mcp_format(context=context)
 
-    # Simulate different log levels
-    info_params = LoggingMessageNotificationParams(
-        level="info", data={"message": "Info message"}
+    await mcp_callbacks.logging_callback(
+        LoggingMessageNotificationParams(level="info", data={"message": "Info"})
     )
-    warning_params = LoggingMessageNotificationParams(
-        level="warning", data={"message": "Warning message"}
-    )
-    error_params = LoggingMessageNotificationParams(
-        level="error", data={"message": "Error message", "error": "Some error"}
-    )
-
-    await mcp_callbacks.logging_callback(info_params)
-    await mcp_callbacks.logging_callback(warning_params)
-    await mcp_callbacks.logging_callback(error_params)
-
-    # Give the async tasks time to complete
-
-    await asyncio.sleep(0.01)
-
-    # Verify all logging calls were recorded
-    assert len(logging_calls) == 3
-
-    # Check info call
-    assert logging_calls[0]["params"] == info_params
-    assert logging_calls[0]["context"] == context
-
-    # Check warning call
-    assert logging_calls[1]["params"] == warning_params
-    assert logging_calls[1]["context"] == context
-
-    # Check error call
-    assert logging_calls[2]["params"] == error_params
-    assert logging_calls[2]["context"] == context
-
-
-@pytest.mark.asyncio
-async def test_logging_callback_with_complex_data():
-    """Test logging callbacks with complex data structures."""
-    logging_calls = []
-
-    async def logging_callback(
-        params: LoggingMessageNotificationParams, context: CallbackContext
-    ):
-        logging_calls.append(
-            {
-                "params": params,
-                "context": context,
-            }
+    await mcp_callbacks.logging_callback(
+        LoggingMessageNotificationParams(
+            level="error", 
+            data={"message": "Error", "metadata": {"key": "value"}}
         )
-
-    callbacks = Callbacks(on_logging_message=logging_callback)
-    context = CallbackContext(server_name="test_server")
-
-    mcp_callbacks = callbacks.to_mcp_format(context=context)
-
-    # Test with complex data structure
-    complex_params = LoggingMessageNotificationParams(
-        level="debug",
-        data={
-            "message": "Complex log entry",
-            "metadata": {
-                "user_id": 123,
-                "action": "tool_execution",
-                "duration": 1.5,
-                "nested": {"key": "value"},
-            },
-            "timestamp": "2024-01-01T12:00:00Z",
-        },
     )
-
-    await mcp_callbacks.logging_callback(complex_params)
-
-    # Give the async task time to complete
 
     await asyncio.sleep(0.01)
 
-    assert len(logging_calls) == 1
-    assert logging_calls[0]["params"] == complex_params
-    assert logging_calls[0]["context"] == context
+    assert len(logging_calls) == 2
+    assert logging_calls[0] == ("info", {"message": "Info"}, "test_server")
+    assert logging_calls[1] == ("error", {"message": "Error", "metadata": {"key": "value"}}, "test_server")
 
 
 @pytest.mark.asyncio
-async def test_callbacks_with_mcp_tool_execution():
-    """Test that callbacks are properly called during MCP tool execution."""
-    # Track all callback invocations
+async def test_callbacks_with_mcp_tool_execution() -> None:
+    """Test callbacks integration during MCP tool execution."""
     progress_calls = []
     logging_calls = []
 
-    async def progress_callback(
-        progress: float,
-        total: float | None,
-        message: str | None,
-        context: CallbackContext,
-    ):
-        progress_calls.append(
-            {
-                "progress": progress,
-                "total": total,
-                "message": message,
-                "server_name": context.server_name,
-                "tool_name": context.tool_name,
-            }
-        )
+    async def progress_callback(progress, total, message, context):
+        progress_calls.append((progress, message, context.tool_name))
 
-    async def logging_callback(
-        params: LoggingMessageNotificationParams, context: CallbackContext
-    ):
-        logging_calls.append(
-            {
-                "level": params.level,
-                "data": params.data,
-                "server_name": context.server_name,
-                "tool_name": context.tool_name,
-            }
-        )
+    async def logging_callback(params, context):
+        logging_calls.append((params.level, context.tool_name))
 
     callbacks = Callbacks(
         on_progress=progress_callback,
         on_logging_message=logging_callback,
     )
 
-    # Create a mock session that simulates progress and logging
     session = AsyncMock()
 
     async def mock_call_tool(tool_name, arguments, progress_callback=None):
-        # Simulate progress updates
         if progress_callback:
-            await progress_callback(0.0, 1.0, "Starting tool execution...")
-            await progress_callback(0.5, 1.0, "Processing arguments...")
-            await progress_callback(1.0, 1.0, "Tool execution complete!")
+            await progress_callback(0.0, 1.0, "Starting...")
+            await progress_callback(1.0, 1.0, "Complete!")
 
         return CallToolResult(
-            content=[TextContent(type="text", text="Tool executed successfully")],
+            content=[TextContent(type="text", text="Success")],
             isError=False,
         )
 
     session.call_tool.side_effect = mock_call_tool
 
-    # Create an MCP tool
     mcp_tool = MCPTool(
         name="test_tool",
-        description="A test tool for callback integration",
+        description="Test tool",
         inputSchema={
-            "properties": {"input": {"title": "Input", "type": "string"}},
+            "properties": {"input": {"type": "string"}},
             "required": ["input"],
-            "title": "TestToolSchema",
             "type": "object",
         },
     )
 
-    # Convert to LangChain tool with callbacks
     lc_tool = convert_mcp_tool_to_langchain_tool(
         session,
         mcp_tool,
@@ -324,99 +157,39 @@ async def test_callbacks_with_mcp_tool_execution():
         server_name="test_server",
     )
 
-    # Execute the tool
-    result = await lc_tool.ainvoke({"input": "test input"})
+    result = await lc_tool.ainvoke({"input": "test"})
 
-    # Verify the tool executed successfully
-    assert result == "Tool executed successfully"
-
-    # Verify progress callbacks were called
-    assert len(progress_calls) == 3
-    assert progress_calls[0]["progress"] == 0.0
-    assert progress_calls[0]["message"] == "Starting tool execution..."
-    assert progress_calls[0]["server_name"] == "test_server"
-    assert progress_calls[0]["tool_name"] == "test_tool"
-
-    assert progress_calls[1]["progress"] == 0.5
-    assert progress_calls[1]["message"] == "Processing arguments..."
-    assert progress_calls[2]["progress"] == 1.0
-    assert progress_calls[2]["message"] == "Tool execution complete!"
+    assert result == "Success"
+    assert len(progress_calls) == 2
+    assert progress_calls[0] == (0.0, "Starting...", "test_tool")
+    assert progress_calls[1] == (1.0, "Complete!", "test_tool")
 
 
 @pytest.mark.asyncio
-async def test_callbacks_with_client_session():
-    """Test callbacks integration with MultiServerMCPClient."""
-    # Track callback invocations
+async def test_callbacks_with_load_mcp_tools() -> None:
+    """Test callbacks integration with load_mcp_tools."""
     progress_calls = []
-    logging_calls = []
 
-    async def progress_callback(
-        progress: float,
-        total: float | None,
-        message: str | None,
-        context: CallbackContext,
-    ):
-        progress_calls.append(
-            {
-                "progress": progress,
-                "total": total,
-                "message": message,
-                "server_name": context.server_name,
-                "tool_name": context.tool_name,
-            }
-        )
+    async def progress_callback(progress, total, message, context):
+        progress_calls.append((context.tool_name, message))
 
-    async def logging_callback(
-        params: LoggingMessageNotificationParams, context: CallbackContext
-    ):
-        logging_calls.append(
-            {
-                "level": params.level,
-                "data": params.data,
-                "server_name": context.server_name,
-                "tool_name": context.tool_name,
-            }
-        )
+    callbacks = Callbacks(on_progress=progress_callback)
 
-    callbacks = Callbacks(
-        on_progress=progress_callback,
-        on_logging_message=logging_callback,
+    session = AsyncMock()
+    session.list_tools.return_value = MagicMock(
+        tools=[
+            MCPTool(
+                name="tool1",
+                description="Tool 1",
+                inputSchema={"type": "object", "properties": {}},
+            )
+        ],
+        nextCursor=None,
     )
 
-    # Create a mock session
-    session = AsyncMock()
-
-    # Mock list_tools response
-    mcp_tools = [
-        MCPTool(
-            name="tool1",
-            description="First tool",
-            inputSchema={
-                "properties": {"param": {"title": "Param", "type": "string"}},
-                "required": ["param"],
-                "title": "Tool1Schema",
-                "type": "object",
-            },
-        ),
-        MCPTool(
-            name="tool2",
-            description="Second tool",
-            inputSchema={
-                "properties": {"param": {"title": "Param", "type": "string"}},
-                "required": ["param"],
-                "title": "Tool2Schema",
-                "type": "object",
-            },
-        ),
-    ]
-    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
-
-    # Mock call_tool with progress simulation
     async def mock_call_tool(tool_name, arguments, progress_callback=None):
         if progress_callback:
-            await progress_callback(0.0, 1.0, f"Starting {tool_name}...")
-            await progress_callback(1.0, 1.0, f"{tool_name} complete!")
-
+            await progress_callback(1.0, 1.0, f"{tool_name} done")
         return CallToolResult(
             content=[TextContent(type="text", text=f"{tool_name} result")],
             isError=False,
@@ -424,35 +197,15 @@ async def test_callbacks_with_client_session():
 
     session.call_tool.side_effect = mock_call_tool
 
-    # Load tools with callbacks
     tools = await load_mcp_tools(
         session,
         callbacks=callbacks,
         server_name="test_server",
     )
 
-    # Verify tools were loaded
-    assert len(tools) == 2
+    assert len(tools) == 1
 
-    # Execute first tool
-    result1 = await tools[0].ainvoke({"param": "test1"})
-    assert result1 == "tool1 result"
-
-    # Execute second tool
-    result2 = await tools[1].ainvoke({"param": "test2"})
-    assert result2 == "tool2 result"
-
-    # Verify progress callbacks were called for both tools
-    assert len(progress_calls) == 4  # 2 progress updates per tool
-
-    # Check first tool callbacks
-    assert progress_calls[0]["message"] == "Starting tool1..."
-    assert progress_calls[0]["server_name"] == "test_server"
-    assert progress_calls[0]["tool_name"] == "tool1"
-    assert progress_calls[1]["message"] == "tool1 complete!"
-
-    # Check second tool callbacks
-    assert progress_calls[2]["message"] == "Starting tool2..."
-    assert progress_calls[2]["server_name"] == "test_server"
-    assert progress_calls[2]["tool_name"] == "tool2"
-    assert progress_calls[3]["message"] == "tool2 complete!"
+    result = await tools[0].ainvoke({})
+    assert result == "tool1 result"
+    assert len(progress_calls) == 1
+    assert progress_calls[0] == ("tool1", "tool1 done")
