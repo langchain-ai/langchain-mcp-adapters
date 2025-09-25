@@ -14,7 +14,6 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
-from mcp.types import LoggingMessageNotification, ProgressNotification
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.hooks import Hooks
@@ -98,61 +97,10 @@ class MultiServerMCPClient:
         async with client.session("math") as session:
             tools = await load_mcp_tools(session)
         ```
-
-        Example: with hooks and callbacks
-
-        ```python
-        from langchain_mcp_adapters.client import MultiServerMCPClient
-        from langchain_mcp_adapters.lifecycle import Callbacks, Hooks
-
-        def on_logging_message(notification, context):
-            print(f"Log: {notification.params.message}")
-
-        def before_tool_call(request, context):
-            print(f"Calling tool: {request.params.name}")
-            return None  # No modifications
-
-        client = MultiServerMCPClient(
-            connections={...},
-            callbacks=Callbacks(on_logging_message=on_logging_message),
-            hooks=Hooks(before_tool_call=before_tool_call),
-        )
-        ```
-
         """
-        self.connections: dict[str, Connection] = (
-            connections if connections is not None else {}
-        )
+        self.connections: dict[str, Connection] = connections if connections is not None else {}
         self.callbacks = callbacks or Callbacks()
         self.hooks = hooks or Hooks()
-
-    async def handle_logging_message(
-        self,
-        notification: LoggingMessageNotification,
-        context: CallbackContext,
-    ) -> None:
-        """Handle logging message notification.
-
-        Args:
-            notification: The logging message notification
-            context: Callback context
-        """
-        if self.callbacks.on_logging_message:
-            await self.callbacks.on_logging_message(notification, context)
-
-    async def handle_progress_notification(
-        self,
-        notification: ProgressNotification,
-        context: CallbackContext,
-    ) -> None:
-        """Handle progress notification.
-
-        Args:
-            notification: The progress notification
-            context: Callback context
-        """
-        if self.callbacks.on_progress_notification:
-            await self.callbacks.on_progress_notification(notification, context)
 
     @asynccontextmanager
     async def session(
@@ -181,7 +129,13 @@ class MultiServerMCPClient:
             )
             raise ValueError(msg)
 
-        async with create_session(self.connections[server_name]) as session:
+        mcp_callbacks = self.callbacks.to_mcp_format(
+            context=CallbackContext(server_name=server_name)
+        )
+
+        async with create_session(
+            self.connections[server_name], mcp_callbacks=mcp_callbacks
+        ) as session:
             if auto_initialize:
                 await session.initialize()
             yield session
@@ -209,6 +163,7 @@ class MultiServerMCPClient:
             return await load_mcp_tools(
                 None,
                 connection=self.connections[server_name],
+                callbacks=self.callbacks,
                 hooks=self.hooks,
                 server_name=server_name,
             )
@@ -220,6 +175,7 @@ class MultiServerMCPClient:
                 load_mcp_tools(
                     None,
                     connection=connection,
+                    callbacks=self.callbacks,
                     hooks=self.hooks,
                     server_name=name,
                 )

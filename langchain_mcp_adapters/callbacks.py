@@ -1,63 +1,83 @@
-"""Callback interfaces and types for MCP client lifecycle management.
+"""Types for callbacks."""
 
-This module provides callback interfaces for handling notifications
-from MCP servers during client operation.
-"""
+from dataclasses import dataclass
+from typing import Protocol
 
-from dataclasses import dataclass, field
-from typing import Any, Protocol
-
-from mcp.types import LoggingMessageNotification, ProgressNotification
+from mcp.client.session import LoggingFnT
+from mcp.shared.session import ProgressFnT
+from mcp.types import LoggingMessageNotificationParams
 
 
 @dataclass
 class CallbackContext:
-    """Context object passed to callbacks containing state information."""
+    """LangChain MCP client callback context."""
 
     server_name: str
-    state: dict[str, Any] = field(default_factory=dict)
-    runnable_config: dict[str, Any] = field(default_factory=dict)
-    runtime: dict[str, Any] = field(default_factory=dict)
+    tool_name: str | None = None
 
 
-class OnLoggingMessageCallback(Protocol):
-    """Protocol for logging message callback functions."""
+class LoggingMessageCallback(Protocol):
+    """Light wrapper around the mcp.client.session.LoggingFnT that injects callback context."""
 
     async def __call__(
         self,
-        notification: LoggingMessageNotification,
+        params: LoggingMessageNotificationParams,
         context: CallbackContext,
     ) -> None:
-        """Handle logging message notification."""
+        """Execute callback on logging message notification."""
         ...
 
 
-class OnProgressNotificationCallback(Protocol):
-    """Protocol for progress notification callback functions."""
+class ProgressCallback(Protocol):
+    """Light wrapper around the mcp.shared.session.ProgressFnT that injects callback context."""
 
     async def __call__(
         self,
-        notification: ProgressNotification,
+        progress: float,
+        total: float | None,
+        message: str | None,
         context: CallbackContext,
     ) -> None:
-        """Handle progress notification."""
+        """Execute callback on progress notification."""
         ...
 
 
+class _MCPCallbacks:
+    """Callbacks compatible with the MCP SDK. For internal use only."""
+
+    logging_callback: LoggingFnT | None = None
+    progress_callback: ProgressFnT | None = None
+
+
+@dataclass
 class Callbacks:
-    """Container for MCP client callback functions."""
+    """Callbacks for the LangChain MCP client."""
 
-    def __init__(
-        self,
-        *,
-        on_logging_message: OnLoggingMessageCallback | None = None,
-        on_progress_notification: OnProgressNotificationCallback | None = None,
-    ) -> None:
-        """Initialize callbacks.
+    on_logging_message: LoggingMessageCallback | None = None
+    on_progress: ProgressCallback | None = None
 
-        Args:
-            on_logging_message: Callback for logging message notifications
-            on_progress_notification: Callback for progress notifications
+    def to_mcp_format(self, *, context: CallbackContext) -> _MCPCallbacks:
+        """Convert the LangChain MCP client callbacks to MCP SDK callbacks.
+
+        Injects the LangChain CallbackContext as the last argument.
         """
-        self.on_logging_message = on_logging_message
-        self.on_progress_notification = on_progress_notification
+        if (on_logging_message := self.on_logging_message) is not None:
+
+            def mcp_logging_callback(params: LoggingMessageNotificationParams) -> None:
+                on_logging_message(params, context)
+        else:
+            mcp_logging_callback = None
+
+        if (on_progress := self.on_progress) is not None:
+
+            def mcp_progress_callback(
+                progress: float, total: float | None, message: str | None
+            ) -> None:
+                on_progress(progress, total, message, context)
+        else:
+            mcp_progress_callback = None
+
+        return _MCPCallbacks(
+            logging_callback=mcp_logging_callback,
+            progress_callback=mcp_progress_callback,
+        )

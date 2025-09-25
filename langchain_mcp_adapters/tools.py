@@ -6,7 +6,6 @@ tools, handle tool execution, and manage tool conversion between the two formats
 
 from typing import Any, cast, get_args
 
-from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -30,6 +29,7 @@ from mcp.types import (
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
+from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.hooks import HookContext, Hooks
 from langchain_mcp_adapters.sessions import Connection, create_session
 
@@ -113,6 +113,7 @@ def convert_mcp_tool_to_langchain_tool(
     tool: MCPTool,
     *,
     connection: Connection | None = None,
+    callbacks: Callbacks | None = None,
     hooks: Hooks | None = None,
     server_name: str | None = None,
 ) -> BaseTool:
@@ -137,7 +138,7 @@ def convert_mcp_tool_to_langchain_tool(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
-    async def call_tool(  # noqa: PLR0912
+    async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         hook_context = HookContext(
@@ -153,20 +154,9 @@ def convert_mcp_tool_to_langchain_tool(
             params=CallToolRequestParams(name=tool.name, arguments=arguments),
         )
 
-        # Execute before_tool_call hook if available
-        modified_request = original_request
-        if hooks and hooks.before_tool_call:
-            hook_result = await hooks.before_tool_call(original_request, hook_context)
-            if hook_result:
-                # Apply modifications from hook
-                if "name" in hook_result:
-                    modified_request.params.name = hook_result["name"]
-                if (
-                    "args" in hook_result
-                    and modified_request.params.arguments is not None
-                ):
-                    modified_request.params.arguments.update(hook_result["args"])
-                # Headers would be used in the actual session call if supported
+        mcp_callbacks = callbacks.to_mcp_format(
+            context=CallbackContext(server_name=server_name, tool_name=tool.name)
+        )
 
         # Execute the tool call
         call_tool_result = None
@@ -175,15 +165,19 @@ def convert_mcp_tool_to_langchain_tool(
             if connection is None:
                 msg = "Either session or connection must be provided"
                 raise ValueError(msg)
-            async with create_session(connection) as tool_session:
+
+            async with create_session(connection, mcp_callbacks=mcp_callbacks) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
-                    modified_request.params.name,
-                    modified_request.params.arguments,
+                    original_request.params.name,
+                    original_request.params.arguments,
+                    progress_callback=mcp_callbacks.progress_callback,
                 )
         else:
             call_tool_result = await session.call_tool(
-                modified_request.params.name, modified_request.params.arguments
+                original_request.params.name,
+                original_request.params.arguments,
+                progress_callback=mcp_callbacks.progress_callback,
             )
 
         if call_tool_result is None:
@@ -195,37 +189,11 @@ def convert_mcp_tool_to_langchain_tool(
             )
             raise RuntimeError(msg)
 
-        # Execute after_tool_call hook if available
-        final_result = call_tool_result
-        if hooks and hooks.after_tool_call:
-            after_hook_result = await hooks.after_tool_call(
-                call_tool_result, hook_context
-            )
-            if after_hook_result is not None:
-                # Handle different return types from the hook
-                if isinstance(after_hook_result, ToolMessage):
-                    # Return the tool message content directly
-                    return after_hook_result.content, None
-                if isinstance(after_hook_result, str):
-                    # Return as text content
-                    return after_hook_result, None
-                if isinstance(after_hook_result, list):
-                    # Return as list content - convert each item to string
-                    return [str(item) for item in after_hook_result], None
-                if isinstance(after_hook_result, dict):
-                    # Return dict as string representation
-                    return str(after_hook_result), None
-                # Otherwise use original result
-
-        return _convert_call_tool_result(final_result)
+        return _convert_call_tool_result(call_tool_result)
 
     # Get meta from the tool - it might be in __pydantic_extra__ or as direct attribute
     meta = getattr(tool, "meta", None)
-    if (
-        meta is None
-        and hasattr(tool, "__pydantic_extra__")
-        and tool.__pydantic_extra__ is not None
-    ):
+    if meta is None and hasattr(tool, "__pydantic_extra__") and tool.__pydantic_extra__ is not None:
         meta = tool.__pydantic_extra__.get("meta")
 
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
@@ -247,6 +215,7 @@ async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
+    callbacks: Callbacks | None = None,
     hooks: Hooks | None = None,
     server_name: str | None = None,
 ) -> list[BaseTool]:
@@ -287,6 +256,7 @@ async def load_mcp_tools(
             tool,
             connection=connection,
             hooks=hooks,
+            callbacks=callbacks,
             server_name=server_name,
         )
         for tool in tools
@@ -342,9 +312,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         field: (field_info.annotation, field_info)
         for field, field_info in tool.tool_call_schema.model_fields.items()
     }
-    arg_model = create_model(
-        f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase
-    )
+    arg_model = create_model(f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase)
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
     # We'll use an Any type for the function return type.

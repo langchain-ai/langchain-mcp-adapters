@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
     import httpx
 
+    from langchain_mcp_adapters.callbacks import _MCPCallbacks
+
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
 DEFAULT_ENCODING = "utf-8"
@@ -181,22 +183,18 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
-Connection = (
-    StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
-)
+Connection = StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
 
 
 @asynccontextmanager
-async def _create_stdio_session(  # noqa: PLR0913
+async def _create_stdio_session(
     *,
     command: str,
     args: list[str],
     env: dict[str, str] | None = None,
     cwd: str | Path | None = None,
     encoding: str = DEFAULT_ENCODING,
-    encoding_error_handler: Literal[
-        "strict", "ignore", "replace"
-    ] = DEFAULT_ENCODING_ERROR_HANDLER,
+    encoding_error_handler: Literal["strict", "ignore", "replace"] = DEFAULT_ENCODING_ERROR_HANDLER,
     session_kwargs: dict[str, Any] | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using stdio.
@@ -233,7 +231,7 @@ async def _create_stdio_session(  # noqa: PLR0913
 
 
 @asynccontextmanager
-async def _create_sse_session(  # noqa: PLR0913
+async def _create_sse_session(
     *,
     url: str,
     headers: dict[str, Any] | None = None,
@@ -273,7 +271,7 @@ async def _create_sse_session(  # noqa: PLR0913
 
 
 @asynccontextmanager
-async def _create_streamable_http_session(  # noqa: PLR0913
+async def _create_streamable_http_session(
     *,
     url: str,
     headers: dict[str, Any] | None = None,
@@ -356,11 +354,14 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
-async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:
+async def create_session(
+    connection: Connection, *, mcp_callbacks: _MCPCallbacks
+) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
+        mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
 
     Raises:
         ValueError: If transport is not recognized
@@ -380,6 +381,12 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
 
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
+
+    params["session_kwargs"] = params.get("session_kwargs", {})
+    # right now the only callback supported on the ClientSession is the logging callback
+    # long term we'll also want to support sampling, elicitation, list roots, etc.
+    if mcp_callbacks.logging_callback is not None:
+        params["session_kwargs"]["logging_callback"] = mcp_callbacks.logging_callback
 
     if transport == "sse":
         if "url" not in params:

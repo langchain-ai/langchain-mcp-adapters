@@ -66,12 +66,8 @@ async def test_load_mcp_prompt():
     session.get_prompt = AsyncMock(
         return_value=AsyncMock(
             messages=[
-                PromptMessage(
-                    role="user", content=TextContent(type="text", text="Hello")
-                ),
-                PromptMessage(
-                    role="assistant", content=TextContent(type="text", text="Hi")
-                ),
+                PromptMessage(role="user", content=TextContent(type="text", text="Hello")),
+                PromptMessage(role="assistant", content=TextContent(type="text", text="Hi")),
             ],
         ),
     )

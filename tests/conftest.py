@@ -47,9 +47,7 @@ def websocket_server(websocket_server_port: int) -> Generator[None, None, None]:
     proc.kill()
     proc.join(timeout=2)
     if proc.is_alive():
-        raise RuntimeError(
-            "Server process is still alive after attempting to terminate it"
-        )
+        raise RuntimeError("Server process is still alive after attempting to terminate it")
 
 
 @pytest.fixture
@@ -59,9 +57,7 @@ def socket_enabled():
         pytest_socket.enable_socket()
         previous_state = pytest_socket.socket_allow_hosts()
         # Only allow connections to localhost
-        pytest_socket.socket_allow_hosts(
-            ["127.0.0.1", "localhost"], allow_unix_socket=True
-        )
+        pytest_socket.socket_allow_hosts(["127.0.0.1", "localhost"], allow_unix_socket=True)
         yield
     finally:
         # Restore previous state

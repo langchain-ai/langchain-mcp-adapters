@@ -53,6 +53,5 @@ async def load_mcp_prompt(
     """
     response = await session.get_prompt(name, arguments)
     return [
-        convert_mcp_prompt_message_to_langchain_message(message)
-        for message in response.messages
+        convert_mcp_prompt_message_to_langchain_message(message) for message in response.messages
     ]
