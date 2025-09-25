@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
 
+from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
@@ -46,12 +47,18 @@ class MultiServerMCPClient:
     Loads LangChain-compatible tools, prompts and resources from MCP servers.
     """
 
-    def __init__(self, connections: dict[str, Connection] | None = None) -> None:
+    def __init__(
+        self,
+        connections: dict[str, Connection] | None = None,
+        *,
+        callbacks: Callbacks | None = None,
+    ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
         Args:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
+            callbacks: Optional callbacks for handling notifications and events.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -87,11 +94,11 @@ class MultiServerMCPClient:
         async with client.session("math") as session:
             tools = await load_mcp_tools(session)
         ```
-
         """
         self.connections: dict[str, Connection] = (
             connections if connections is not None else {}
         )
+        self.callbacks = callbacks or Callbacks()
 
     @asynccontextmanager
     async def session(
@@ -120,7 +127,13 @@ class MultiServerMCPClient:
             )
             raise ValueError(msg)
 
-        async with create_session(self.connections[server_name]) as session:
+        mcp_callbacks = self.callbacks.to_mcp_format(
+            context=CallbackContext(server_name=server_name)
+        )
+
+        async with create_session(
+            self.connections[server_name], mcp_callbacks=mcp_callbacks
+        ) as session:
             if auto_initialize:
                 await session.initialize()
             yield session
@@ -145,13 +158,23 @@ class MultiServerMCPClient:
                     f"expected one of '{list(self.connections.keys())}'"
                 )
                 raise ValueError(msg)
-            return await load_mcp_tools(None, connection=self.connections[server_name])
+            return await load_mcp_tools(
+                None,
+                connection=self.connections[server_name],
+                callbacks=self.callbacks,
+                server_name=server_name,
+            )
 
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
-        for connection in self.connections.values():
+        for name, connection in self.connections.items():
             load_mcp_tool_task = asyncio.create_task(
-                load_mcp_tools(None, connection=connection)
+                load_mcp_tools(
+                    None,
+                    connection=connection,
+                    callbacks=self.callbacks,
+                    server_name=name,
+                )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
@@ -218,6 +241,7 @@ class MultiServerMCPClient:
 
 
 __all__ = [
+    "Callbacks",
     "McpHttpClientFactory",
     "MultiServerMCPClient",
     "SSEConnection",

@@ -103,7 +103,6 @@ def test_convert_with_error():
     assert str(exc_info.value) == "error message"
 
 
-@pytest.mark.asyncio
 async def test_convert_mcp_tool_to_langchain_tool():
     tool_input_schema = {
         "properties": {
@@ -142,7 +141,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
     )
 
     # Verify result
@@ -151,7 +150,6 @@ async def test_convert_mcp_tool_to_langchain_tool():
     )
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
@@ -179,7 +177,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
@@ -239,7 +237,6 @@ def _create_annotations_server():
     return server
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
     """Test load mcp tools with annotations."""
     with run_streamable_http(_create_annotations_server, 8181):
@@ -366,7 +363,8 @@ def _create_status_server():
 
 
 # Tests for httpx_client_factory functionality
-@pytest.mark.asyncio
+
+
 async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
     """Test load mcp tools with custom httpx client factory."""
 
@@ -418,7 +416,6 @@ def _create_info_server():
     return server
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
     socket_enabled,
 ) -> None:
@@ -464,7 +461,6 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             pass
 
 
-@pytest.mark.asyncio
 async def test_convert_mcp_tool_metadata_variants():
     """Verify metadata merging rules in convert_mcp_tool_to_langchain_tool."""
     tool_input_schema = {
