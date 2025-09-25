@@ -48,6 +48,7 @@ class ProgressCallback(Protocol):
         ...
 
 
+@dataclass
 class _MCPCallbacks:
     """Callbacks compatible with the MCP SDK. For internal use only."""
 

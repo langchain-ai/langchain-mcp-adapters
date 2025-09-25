@@ -54,6 +54,7 @@ ignore = [
   "COM812", # conflict with formatter
   "C901", # Too complex
   "PLR0913", # Too many arguments in function definition
+  "PLR0912", # Too many branches
 ]
 
 

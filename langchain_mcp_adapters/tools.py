@@ -27,7 +27,7 @@ from mcp.types import (
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
-from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
+from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
@@ -136,8 +136,12 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
-        mcp_callbacks = callbacks.to_mcp_format(
-            context=CallbackContext(server_name=server_name, tool_name=tool.name)
+        mcp_callbacks = (
+            callbacks.to_mcp_format(
+                context=CallbackContext(server_name=server_name, tool_name=tool.name)
+            )
+            if callbacks is not None
+            else _MCPCallbacks()
         )
 
         # Execute the tool call
@@ -225,12 +229,20 @@ async def load_mcp_tools(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
+    mcp_callbacks = (
+        callbacks.to_mcp_format(context=CallbackContext(server_name=server_name))
+        if callbacks is not None
+        else _MCPCallbacks()
+    )
+
     if session is None:
         # If a session is not provided, we will create one on the fly
         if connection is None:
             msg = "Either session or connection must be provided"
             raise ValueError(msg)
-        async with create_session(connection) as tool_session:
+        async with create_session(
+            connection, mcp_callbacks=mcp_callbacks
+        ) as tool_session:
             await tool_session.initialize()
             tools = await _list_all_tools(tool_session)
     else:

@@ -359,7 +359,7 @@ async def _create_websocket_session(
 
 @asynccontextmanager
 async def create_session(
-    connection: Connection, *, mcp_callbacks: _MCPCallbacks
+    connection: Connection, *, mcp_callbacks: _MCPCallbacks | None = None
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
@@ -386,11 +386,15 @@ async def create_session(
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
 
-    params["session_kwargs"] = params.get("session_kwargs", {})
-    # right now the only callback supported on the ClientSession is the logging callback
-    # long term we'll also want to support sampling, elicitation, list roots, etc.
-    if mcp_callbacks.logging_callback is not None:
-        params["session_kwargs"]["logging_callback"] = mcp_callbacks.logging_callback
+    if mcp_callbacks is not None:
+        params["session_kwargs"] = params.get("session_kwargs", {})
+        # right now the only callback supported on the ClientSession
+        # is the logging callback, but long term we'll also want to
+        # support sampling, elicitation, list roots, etc.
+        if mcp_callbacks.logging_callback is not None:
+            params["session_kwargs"]["logging_callback"] = (
+                mcp_callbacks.logging_callback
+            )
 
     if transport == "sse":
         if "url" not in params:
