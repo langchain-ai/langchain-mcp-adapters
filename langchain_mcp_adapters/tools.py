@@ -179,19 +179,11 @@ def convert_mcp_tool_to_langchain_tool(
 
         return _convert_call_tool_result(call_tool_result)
 
-    # Get meta from the tool - it might be in __pydantic_extra__ or as direct attribute
-    meta = getattr(tool, "meta", None)
-    if (
-        meta is None
-        and hasattr(tool, "__pydantic_extra__")
-        and tool.__pydantic_extra__ is not None
-    ):
-        meta = tool.__pydantic_extra__.get("meta")
+    meta = tool.meta if hasattr(tool, "meta") else None
 
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
-    meta_dict = {"_meta": meta} if meta is not None else {}
-    merged_metadata = {**base, **meta_dict}
-    metadata = merged_metadata if merged_metadata else None
+    meta = {"_meta": meta} if meta is not None else {}
+    metadata = {**base, **meta} or None
 
     return StructuredTool(
         name=tool.name,
