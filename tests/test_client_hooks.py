@@ -48,7 +48,9 @@ class TestClientHooksIntegration:
         hooks = Hooks(before_tool_call=before_hook)
 
         # Mock the MCP session and its methods
-        with patch("langchain_mcp_adapters.tools.create_session") as mock_create_session:
+        with patch(
+            "langchain_mcp_adapters.tools.create_session"
+        ) as mock_create_session:
             mock_session = AsyncMock()
             mock_session.initialize = AsyncMock()
             mock_session.call_tool = AsyncMock()
@@ -70,7 +72,9 @@ class TestClientHooksIntegration:
                 },
             )
 
-            with patch("langchain_mcp_adapters.tools._list_all_tools") as mock_list_tools:
+            with patch(
+                "langchain_mcp_adapters.tools._list_all_tools"
+            ) as mock_list_tools:
                 mock_list_tools.return_value = [test_tool]
 
                 mock_create_session.return_value.__aenter__.return_value = mock_session
@@ -78,7 +82,9 @@ class TestClientHooksIntegration:
 
                 # Create client with hooks
                 client = MultiServerMCPClient(
-                    connections={"test_server": {"command": "echo", "transport": "stdio"}},
+                    connections={
+                        "test_server": {"command": "echo", "transport": "stdio"}
+                    },
                     hooks=hooks,
                 )
 
@@ -94,7 +100,9 @@ class TestClientHooksIntegration:
                     assert len(hook_calls) == 1
                     assert hook_calls[0]["tool_name"] == "test_tool"
                     assert hook_calls[0]["server_name"] == "test_server"
-                    assert hook_calls[0]["original_args"] == {"param1": "original_value"}
+                    assert hook_calls[0]["original_args"] == {
+                        "param1": "original_value"
+                    }
 
                     # Verify the tool was called with modified arguments
                     mock_session.call_tool.assert_called_once()
@@ -114,7 +122,9 @@ class TestClientHooksIntegration:
             hook_calls.append(
                 {
                     "server_name": context.server_name,
-                    "original_content": [c.text for c in result.content if hasattr(c, "text")],
+                    "original_content": [
+                        c.text for c in result.content if hasattr(c, "text")
+                    ],
                 }
             )
             # Return modified result
@@ -123,7 +133,9 @@ class TestClientHooksIntegration:
         hooks = Hooks(after_tool_call=after_hook)
 
         # Mock the MCP session and its methods
-        with patch("langchain_mcp_adapters.tools.create_session") as mock_create_session:
+        with patch(
+            "langchain_mcp_adapters.tools.create_session"
+        ) as mock_create_session:
             mock_session = AsyncMock()
             mock_session.initialize = AsyncMock()
             mock_session.call_tool = AsyncMock()
@@ -147,7 +159,9 @@ class TestClientHooksIntegration:
                 },
             )
 
-            with patch("langchain_mcp_adapters.tools._list_all_tools") as mock_list_tools:
+            with patch(
+                "langchain_mcp_adapters.tools._list_all_tools"
+            ) as mock_list_tools:
                 mock_list_tools.return_value = [test_tool]
 
                 mock_create_session.return_value.__aenter__.return_value = mock_session
@@ -155,7 +169,9 @@ class TestClientHooksIntegration:
 
                 # Create client with hooks
                 client = MultiServerMCPClient(
-                    connections={"test_server": {"command": "echo", "transport": "stdio"}},
+                    connections={
+                        "test_server": {"command": "echo", "transport": "stdio"}
+                    },
                     hooks=hooks,
                 )
 

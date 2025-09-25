@@ -98,7 +98,9 @@ class MultiServerMCPClient:
             tools = await load_mcp_tools(session)
         ```
         """
-        self.connections: dict[str, Connection] = connections if connections is not None else {}
+        self.connections: dict[str, Connection] = (
+            connections if connections is not None else {}
+        )
         self.callbacks = callbacks or Callbacks()
         self.hooks = hooks or Hooks()
 

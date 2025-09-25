@@ -16,8 +16,12 @@ def make_server_app() -> Starlette:
     server = time_mcp._mcp_server
 
     async def handle_ws(websocket):
-        async with websocket_server(websocket.scope, websocket.receive, websocket.send) as streams:
-            await server.run(streams[0], streams[1], server.create_initialization_options())
+        async with websocket_server(
+            websocket.scope, websocket.receive, websocket.send
+        ) as streams:
+            await server.run(
+                streams[0], streams[1], server.create_initialization_options()
+            )
 
     app = Starlette(routes=[WebSocketRoute("/ws", endpoint=handle_ws)])
 
@@ -27,7 +31,9 @@ def make_server_app() -> Starlette:
 def run_server(server_port: int) -> None:
     app = make_server_app()
     server = uvicorn.Server(
-        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error"),
+        config=uvicorn.Config(
+            app=app, host="127.0.0.1", port=server_port, log_level="error"
+        ),
     )
     server.run()
 
@@ -41,13 +47,17 @@ def run_streamable_http_server(server_factory, server_port: int) -> None:
     server = server_factory()
     app = server.streamable_http_app()
     uvicorn_server = uvicorn.Server(
-        config=uvicorn.Config(app=app, host="127.0.0.1", port=server_port, log_level="error"),
+        config=uvicorn.Config(
+            app=app, host="127.0.0.1", port=server_port, log_level="error"
+        ),
     )
     uvicorn_server.run()
 
 
 @contextlib.contextmanager
-def run_streamable_http(server_factory, server_port: int) -> Generator[None, None, None]:
+def run_streamable_http(
+    server_factory, server_port: int
+) -> Generator[None, None, None]:
     """Run the server in a separate process exposing a streamable HTTP endpoint.
 
     The endpoint will be available at `http://localhost:{server_port}/mcp/`.
@@ -81,4 +91,6 @@ def run_streamable_http(server_factory, server_port: int) -> Generator[None, Non
         proc.kill()
         proc.join(timeout=2)
         if proc.is_alive():
-            raise RuntimeError("Server process is still alive after attempting to terminate it")
+            raise RuntimeError(
+                "Server process is still alive after attempting to terminate it"
+            )

@@ -166,7 +166,9 @@ def convert_mcp_tool_to_langchain_tool(
                 msg = "Either session or connection must be provided"
                 raise ValueError(msg)
 
-            async with create_session(connection, mcp_callbacks=mcp_callbacks) as tool_session:
+            async with create_session(
+                connection, mcp_callbacks=mcp_callbacks
+            ) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
                     original_request.params.name,
@@ -193,7 +195,11 @@ def convert_mcp_tool_to_langchain_tool(
 
     # Get meta from the tool - it might be in __pydantic_extra__ or as direct attribute
     meta = getattr(tool, "meta", None)
-    if meta is None and hasattr(tool, "__pydantic_extra__") and tool.__pydantic_extra__ is not None:
+    if (
+        meta is None
+        and hasattr(tool, "__pydantic_extra__")
+        and tool.__pydantic_extra__ is not None
+    ):
         meta = tool.__pydantic_extra__.get("meta")
 
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
@@ -312,7 +318,9 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         field: (field_info.annotation, field_info)
         for field, field_info in tool.tool_call_schema.model_fields.items()
     }
-    arg_model = create_model(f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase)
+    arg_model = create_model(
+        f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase
+    )
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
     # We'll use an Any type for the function return type.
