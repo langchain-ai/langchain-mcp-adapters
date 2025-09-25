@@ -97,8 +97,7 @@ async def test_logging_callback_execution() -> None:
     )
     await mcp_callbacks.logging_callback(
         LoggingMessageNotificationParams(
-            level="error", 
-            data={"message": "Error", "metadata": {"key": "value"}}
+            level="error", data={"message": "Error", "metadata": {"key": "value"}}
         )
     )
 
@@ -106,7 +105,11 @@ async def test_logging_callback_execution() -> None:
 
     assert len(logging_calls) == 2
     assert logging_calls[0] == ("info", {"message": "Info"}, "test_server")
-    assert logging_calls[1] == ("error", {"message": "Error", "metadata": {"key": "value"}}, "test_server")
+    assert logging_calls[1] == (
+        "error",
+        {"message": "Error", "metadata": {"key": "value"}},
+        "test_server",
+    )
 
 
 @pytest.mark.asyncio
