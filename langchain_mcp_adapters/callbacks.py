@@ -70,17 +70,19 @@ class Callbacks:
         """
         if (on_logging_message := self.on_logging_message) is not None:
 
-            def mcp_logging_callback(params: LoggingMessageNotificationParams) -> None:
-                on_logging_message(params, context)
+            async def mcp_logging_callback(
+                params: LoggingMessageNotificationParams,
+            ) -> None:
+                await on_logging_message(params, context)
         else:
             mcp_logging_callback = None
 
         if (on_progress := self.on_progress) is not None:
 
-            def mcp_progress_callback(
+            async def mcp_progress_callback(
                 progress: float, total: float | None, message: str | None
             ) -> None:
-                on_progress(progress, total, message, context)
+                await on_progress(progress, total, message, context)
         else:
             mcp_progress_callback = None
 
