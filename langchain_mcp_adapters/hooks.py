@@ -12,11 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from mcp.types import CallToolResult as MCPCallToolResult
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
-    from mcp.types import CallToolResult
+
+# Type aliases to avoid direct MCP type dependencies
+CallToolResult = MCPCallToolResult
 
 
 @dataclass

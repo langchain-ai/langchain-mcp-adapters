@@ -3,9 +3,16 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from mcp.client.session import LoggingFnT
-from mcp.shared.session import ProgressFnT
-from mcp.types import LoggingMessageNotificationParams
+from mcp.client.session import LoggingFnT as MCPLoggingFnT
+from mcp.shared.session import ProgressFnT as MCPProgressFnT
+from mcp.types import (
+    LoggingMessageNotificationParams as MCPLoggingMessageNotificationParams,
+)
+
+# Type aliases to avoid direct MCP type dependencies
+LoggingFnT = MCPLoggingFnT
+ProgressFnT = MCPProgressFnT
+LoggingMessageNotificationParams = MCPLoggingMessageNotificationParams
 
 
 @dataclass
