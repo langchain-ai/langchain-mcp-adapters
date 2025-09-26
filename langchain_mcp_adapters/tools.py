@@ -4,11 +4,13 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Any, cast, get_args
+from typing import Annotated, Any, cast, get_args
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
+    InjectedToolCallId,
     StructuredTool,
     ToolException,
 )
@@ -28,6 +30,7 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
+from langchain_mcp_adapters.hooks import CallToolRequestSpec, Hooks, ToolHookContext
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
@@ -111,6 +114,7 @@ def convert_mcp_tool_to_langchain_tool(
     *,
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
+    hooks: Hooks | None = None,
     server_name: str | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
@@ -123,6 +127,7 @@ def convert_mcp_tool_to_langchain_tool(
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
         callbacks: Optional callbacks for handling notifications and events
+        hooks: Optional hooks for before/after tool call processing
         server_name: Name of the server this tool belongs to
 
     Returns:
@@ -134,6 +139,8 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
+        *,
+        tool_call_id: Annotated[str, InjectedToolCallId],
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         mcp_callbacks = (
@@ -144,8 +151,32 @@ def convert_mcp_tool_to_langchain_tool(
             else _MCPCallbacks()
         )
 
+        tool_name = tool.name
+        tool_args = arguments
+
+        # Prepare hook context
+        hook_context = ToolHookContext(
+            server_name=server_name or "unknown",
+            tool_name=tool.name,
+            tool_call_id=tool_call_id,
+        )
+
+        if hooks and hooks.before_tool_call:
+            tool_request_spec = CallToolRequestSpec(
+                name=tool.name,
+                args=arguments,
+            )
+
+            modified_request = await hooks.before_tool_call(
+                tool_request_spec, hook_context
+            )
+            if modified_request is not None:
+                tool_name = modified_request.get("name") or tool_name
+                tool_args = modified_request.get("args") or tool_args
+
         # Execute the tool call
         call_tool_result = None
+
         if session is None:
             # If a session is not provided, we will create one on the fly
             if connection is None:
@@ -157,14 +188,14 @@ def convert_mcp_tool_to_langchain_tool(
             ) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
-                    tool.name,
-                    arguments,
+                    tool_name,
+                    tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
                 )
         else:
             call_tool_result = await session.call_tool(
-                tool.name,
-                arguments,
+                tool_name,
+                tool_args,
                 progress_callback=mcp_callbacks.progress_callback,
             )
 
@@ -176,6 +207,16 @@ def convert_mcp_tool_to_langchain_tool(
                 "or other execution error)."
             )
             raise RuntimeError(msg)
+
+        if hooks and hooks.after_tool_call:
+            hook_result = await hooks.after_tool_call(call_tool_result, hook_context)
+            if isinstance(hook_result, ToolMessage):
+                # we auto-assign tool call id under the hood for the case when
+                # the dev hasn't done this
+                if not hook_result.tool_call_id:
+                    hook_result.tool_call_id = tool_call_id
+                return hook_result
+            # otherwise, return value is None, so we will use the original result
 
         return _convert_call_tool_result(call_tool_result)
 
@@ -200,6 +241,7 @@ async def load_mcp_tools(
     *,
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
+    hooks: Hooks | None = None,
     server_name: str | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
@@ -208,6 +250,7 @@ async def load_mcp_tools(
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
         callbacks: Optional callbacks for handling notifications and events.
+        hooks: Optional hooks for before/after tool call processing.
         server_name: Name of the server these tools belong to.
 
     Returns:
@@ -246,6 +289,7 @@ async def load_mcp_tools(
             tool,
             connection=connection,
             callbacks=callbacks,
+            hooks=hooks,
             server_name=server_name,
         )
         for tool in tools
