@@ -4,13 +4,11 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Annotated, Any, cast, get_args
+from typing import Any, cast, get_args
 
-from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
-    InjectedToolCallId,
     StructuredTool,
     ToolException,
 )
@@ -139,8 +137,6 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
-        *,
-        tool_call_id: Annotated[str, InjectedToolCallId],
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         mcp_callbacks = (
@@ -153,12 +149,12 @@ def convert_mcp_tool_to_langchain_tool(
 
         tool_name = tool.name
         tool_args = arguments
+        effective_connection = connection
 
         # Prepare hook context
         hook_context = ToolHookContext(
             server_name=server_name or "unknown",
             tool_name=tool.name,
-            tool_call_id=tool_call_id,
         )
 
         if hooks and hooks.before_tool_call:
@@ -174,17 +170,30 @@ def convert_mcp_tool_to_langchain_tool(
                 tool_name = modified_request.get("name") or tool_name
                 tool_args = modified_request.get("args") or tool_args
 
+                # If headers were modified, create a new connection with updated headers
+                modified_headers = modified_request.get("headers")
+                if modified_headers is not None and connection is not None:
+                    # Create a new connection config with updated headers
+                    updated_connection = dict(connection)
+                    if connection["transport"] in ("sse", "streamable_http"):
+                        existing_headers = connection.get("headers", {})
+                        updated_connection["headers"] = {
+                            **existing_headers,
+                            **modified_headers,
+                        }
+                        effective_connection = updated_connection
+
         # Execute the tool call
         call_tool_result = None
 
         if session is None:
             # If a session is not provided, we will create one on the fly
-            if connection is None:
+            if effective_connection is None:
                 msg = "Either session or connection must be provided"
                 raise ValueError(msg)
 
             async with create_session(
-                connection, mcp_callbacks=mcp_callbacks
+                effective_connection, mcp_callbacks=mcp_callbacks
             ) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
@@ -210,13 +219,8 @@ def convert_mcp_tool_to_langchain_tool(
 
         if hooks and hooks.after_tool_call:
             hook_result = await hooks.after_tool_call(call_tool_result, hook_context)
-            if isinstance(hook_result, ToolMessage):
-                # we auto-assign tool call id under the hood for the case when
-                # the dev hasn't done this
-                if not hook_result.tool_call_id:
-                    hook_result.tool_call_id = tool_call_id
-                return hook_result
-            # otherwise, return value is None, so we will use the original result
+            if hook_result is not None:
+                call_tool_result = hook_result
 
         return _convert_call_tool_result(call_tool_result)
 

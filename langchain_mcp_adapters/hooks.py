@@ -10,8 +10,6 @@ request / result lifecycle, for example to support elicitation.
 from dataclasses import dataclass  # , field
 from typing import Any, Protocol
 
-from langchain_core.messages import ToolMessage
-
 # from langchain_core.runnables import RunnableConfig
 from mcp.types import CallToolResult
 from typing_extensions import NotRequired, TypedDict
@@ -23,7 +21,6 @@ class ToolHookContext:
 
     server_name: str
     tool_name: str
-    tool_call_id: str = ""
 
     # state: dict[str, Any] = field(default_factory=dict)
     # runnable_config: RunnableConfig = field(default_factory=dict)
@@ -67,14 +64,14 @@ class AfterToolCallHook(Protocol):
 
     Allows modification of tool call results after execution.
     Return None to proceed with original result processing.
-    Return ToolMessage to skip result parsing and use the message directly.
+    Return CallToolResult to use the modified result.
     """
 
     async def __call__(
         self,
         result: CallToolResult,
         context: ToolHookContext,
-    ) -> ToolMessage | None:
+    ) -> CallToolResult | None:
         """Execute after tool call.
 
         Args:
@@ -82,7 +79,7 @@ class AfterToolCallHook(Protocol):
             context: Hook context with server/tool info and shared state
 
         Returns:
-            - ToolMessage to skip parsing and use the message directly
+            - CallToolResult to use the modified result
             - None to use original result
         """
         ...
