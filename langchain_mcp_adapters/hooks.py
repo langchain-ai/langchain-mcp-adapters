@@ -7,12 +7,16 @@ In the future, we might add more hooks for other parts of the
 request / result lifecycle, for example to support elicitation.
 """
 
-from dataclasses import dataclass  # , field
-from typing import Any, Protocol
+from __future__ import annotations
 
-# from langchain_core.runnables import RunnableConfig
-from mcp.types import CallToolResult
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
+
 from typing_extensions import NotRequired, TypedDict
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
+    from mcp.types import CallToolResult
 
 
 @dataclass
@@ -22,9 +26,9 @@ class ToolHookContext:
     server_name: str
     tool_name: str
 
-    # state: dict[str, Any] = field(default_factory=dict)
-    # runnable_config: RunnableConfig = field(default_factory=dict)
-    # runtime: object = None
+    state: object | None = None
+    config: RunnableConfig | None = None
+    runtime: object | None = None
 
 
 class CallToolRequestSpec(TypedDict, total=False):

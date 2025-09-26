@@ -31,6 +31,20 @@ from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCal
 from langchain_mcp_adapters.hooks import CallToolRequestSpec, Hooks, ToolHookContext
 from langchain_mcp_adapters.sessions import Connection, create_session
 
+try:
+    from langgraph.config import get_config
+    from langgraph.runtime import get_runtime
+except ImportError:
+
+    def get_config() -> dict:
+        """no-op config getter."""
+        return {}
+
+    def get_runtime() -> None:
+        """no-op runtime getter."""
+        return
+
+
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
 MAX_ITERATIONS = 1000
 
@@ -151,10 +165,19 @@ def convert_mcp_tool_to_langchain_tool(
         tool_args = arguments
         effective_connection = connection
 
-        # Prepare hook context
+        # try to get config and runtime if we're in a langgraph context
+        try:
+            config = get_config()
+            runtime = get_runtime()
+        except Exception:  # noqa: BLE001
+            config = {}
+            runtime = None
+
         hook_context = ToolHookContext(
             server_name=server_name or "unknown",
             tool_name=tool.name,
+            config=config,
+            runtime=runtime,
         )
 
         if hooks and hooks.before_tool_call:
