@@ -349,3 +349,35 @@ fastmcp_tool = to_fastmcp(add)
 mcp = FastMCP("Math", tools=[fastmcp_tool])
 mcp.run(transport="stdio")
 ```
+
+## Compatible MCP Servers
+
+The LangChain MCP adapters work with any MCP-compatible server. Here are some production-ready servers you can use:
+
+### NCP (Natural Context Protocol)
+
+[NCP](https://github.com/portel-dev/ncp) is a production-ready MCP orchestrator that provides access to 100+ tools while optimizing for performance:
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+
+client = MultiServerMCPClient(
+    {
+        "ncp": {
+            "command": "npx",
+            "args": ["-y", "@portel/ncp"],
+            "transport": "stdio",
+        }
+    }
+)
+
+# NCP provides intelligent tool discovery and 94.8% token reduction
+tools = await client.get_tools()
+agent = create_react_agent("openai:gpt-4.1", tools)
+
+# Access hundreds of tools through NCP's optimized interface
+response = await agent.ainvoke({
+    "messages": "Use NCP to discover available tools and help me with a task"
+})
+```
