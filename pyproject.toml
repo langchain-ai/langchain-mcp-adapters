@@ -13,7 +13,7 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "langchain-core>=0.3.36,<0.4",
+    "langchain-core>=0.3.36,<2.0.0",
     "mcp>=1.9.2",
     "typing-extensions>=4.14.0",
 ]
@@ -53,12 +53,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = [ "ALL",]
 ignore = [
-  "COM812", # conflict with formatter
-  "C901", # Too complex
-  "PLR0913", # Too many arguments in function definition
-  "PLR0912", # Too many branches
-  "PLR0915", # Too many statements
-  "ERA001", # Commented out code should be removed
+    "COM812", # conflict with formatter
+    "C901", # Too complex
+    "PLR0913", # Too many arguments in function definition
+    "PLR0912", # Too many branches
+    "PLR0915", # Too many statements
+    "ERA001", # Commented out code should be removed
 ]
 
 
