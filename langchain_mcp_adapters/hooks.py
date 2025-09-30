@@ -29,7 +29,8 @@ class ToolHookContext:
     server_name: str
     tool_name: str
 
-    state: object | None = None
+    # we'll add state eventually when we have a context manager like get_state()
+    # state: object | None = None
     config: RunnableConfig | None = None
     runtime: object | None = None
 
