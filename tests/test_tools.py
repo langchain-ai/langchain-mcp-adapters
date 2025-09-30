@@ -244,7 +244,7 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         client = MultiServerMCPClient(
             {
                 "time": {
-                    "url": "http://localhost:8181/mcp/",
+                    "url": "http://localhost:8181/mcp",
                     "transport": "streamable_http",
                 }
             },
@@ -388,7 +388,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
         client = MultiServerMCPClient(
             {
                 "status": {
-                    "url": "http://localhost:8182/mcp/",
+                    "url": "http://localhost:8182/mcp",
                     "transport": "streamable_http",
                     "httpx_client_factory": custom_httpx_client_factory,
                 },
