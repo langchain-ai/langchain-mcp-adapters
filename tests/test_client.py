@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 
-import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
@@ -9,7 +8,6 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 
-@pytest.mark.asyncio
 async def test_multi_server_mcp_client(
     socket_enabled,
     websocket_server,
@@ -24,12 +22,12 @@ async def test_multi_server_mcp_client(
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python",
+                "command": "python3",
                 "args": [math_server_path],
                 "transport": "stdio",
             },
             "weather": {
-                "command": "python",
+                "command": "python3",
                 "args": [weather_server_path],
                 "transport": "stdio",
             },
@@ -90,7 +88,6 @@ async def test_multi_server_mcp_client(
     assert result == "5:20:00 PM EST"
 
 
-@pytest.mark.asyncio
 async def test_multi_server_connect_methods(
     socket_enabled,
     websocket_server,
@@ -105,7 +102,7 @@ async def test_multi_server_connect_methods(
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python",
+                "command": "python3",
                 "args": [math_server_path],
                 "transport": "stdio",
             },
@@ -137,7 +134,6 @@ async def test_multi_server_connect_methods(
     assert tool_names == {"add", "multiply", "get_time"}
 
 
-@pytest.mark.asyncio
 async def test_get_prompt():
     """Test retrieving prompts from MCP servers."""
     # Get the absolute path to the server scripts
@@ -147,7 +143,7 @@ async def test_get_prompt():
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python",
+                "command": "python3",
                 "args": [math_server_path],
                 "transport": "stdio",
             }

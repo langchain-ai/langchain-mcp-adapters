@@ -1,16 +1,19 @@
 from typing import Annotated
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
+from mcp.server import FastMCP
 from mcp.types import (
     CallToolResult,
     EmbeddedResource,
     ImageContent,
     TextContent,
     TextResourceContents,
+    ToolAnnotations,
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
@@ -100,7 +103,6 @@ def test_convert_with_error():
     assert str(exc_info.value) == "error message"
 
 
-@pytest.mark.asyncio
 async def test_convert_mcp_tool_to_langchain_tool():
     tool_input_schema = {
         "properties": {
@@ -139,7 +141,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
     )
 
     # Verify result
@@ -148,7 +150,6 @@ async def test_convert_mcp_tool_to_langchain_tool():
     )
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
@@ -176,7 +177,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
@@ -221,12 +222,7 @@ async def test_load_mcp_tools():
     )
 
 
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
-    """Test load mcp tools with annotations."""
-    from mcp.server import FastMCP
-    from mcp.types import ToolAnnotations
-
+def _create_annotations_server():
     server = FastMCP(port=8181)
 
     @server.tool(
@@ -238,7 +234,12 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         """Get current time"""
         return "5:20:00 PM EST"
 
-    with run_streamable_http(server):
+    return server
+
+
+async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
+    """Test load mcp tools with annotations."""
+    with run_streamable_http(_create_annotations_server, 8181):
         # Initialize client without initial connections
         client = MultiServerMCPClient(
             {
@@ -350,19 +351,22 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
         to_fastmcp(add_with_injection)
 
 
-# Tests for httpx_client_factory functionality
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
-    """Test load mcp tools with custom httpx client factory."""
-    import httpx
-    from mcp.server import FastMCP
-
+def _create_status_server():
     server = FastMCP(port=8182)
 
     @server.tool()
     def get_status() -> str:
         """Get server status"""
         return "Server is running"
+
+    return server
+
+
+# Tests for httpx_client_factory functionality
+
+
+async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
+    """Test load mcp tools with custom httpx client factory."""
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -379,7 +383,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
-    with run_streamable_http(server):
+    with run_streamable_http(_create_status_server, 8182):
         # Initialize client with custom httpx_client_factory
         client = MultiServerMCPClient(
             {
@@ -401,20 +405,21 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
         assert result.content == "Server is running"
 
 
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
-    socket_enabled,
-) -> None:
-    """Test load mcp tools with custom httpx client factory using SSE transport."""
-    import httpx
-    from mcp.server import FastMCP
-
+def _create_info_server():
     server = FastMCP(port=8183)
 
     @server.tool()
     def get_info() -> str:
         """Get server info"""
         return "SSE Server Info"
+
+    return server
+
+
+async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
+    socket_enabled,
+) -> None:
+    """Test load mcp tools with custom httpx client factory using SSE transport."""
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -431,7 +436,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             limits=httpx.Limits(max_keepalive_connections=3, max_connections=5),
         )
 
-    with run_streamable_http(server):
+    with run_streamable_http(_create_info_server, 8183):
         # Initialize client with custom httpx_client_factory for SSE
         client = MultiServerMCPClient(
             {
@@ -454,3 +459,70 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             # Expected to fail since server doesn't have SSE endpoint,
             # but the important thing is that httpx_client_factory was passed correctly
             pass
+
+
+async def test_convert_mcp_tool_metadata_variants():
+    """Verify metadata merging rules in convert_mcp_tool_to_langchain_tool."""
+    tool_input_schema = {
+        "properties": {},
+        "required": [],
+        "title": "EmptySchema",
+        "type": "object",
+    }
+
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")], isError=False
+    )
+
+    mcp_tool_none = MCPTool(
+        name="t_none",
+        description="",
+        inputSchema=tool_input_schema,
+    )
+    lc_tool_none = convert_mcp_tool_to_langchain_tool(session, mcp_tool_none)
+    assert lc_tool_none.metadata is None
+
+    mcp_tool_ann = MCPTool(
+        name="t_ann",
+        description="",
+        inputSchema=tool_input_schema,
+        annotations=ToolAnnotations(
+            title="Title", readOnlyHint=True, idempotentHint=False
+        ),
+    )
+    lc_tool_ann = convert_mcp_tool_to_langchain_tool(session, mcp_tool_ann)
+    assert lc_tool_ann.metadata == {
+        "title": "Title",
+        "readOnlyHint": True,
+        "idempotentHint": False,
+        "destructiveHint": None,
+        "openWorldHint": None,
+    }
+
+    mcp_tool_meta = MCPTool(
+        name="t_meta",
+        description="",
+        inputSchema=tool_input_schema,
+        meta={"source": "unit-test", "version": 1},
+    )
+    lc_tool_meta = convert_mcp_tool_to_langchain_tool(session, mcp_tool_meta)
+    assert lc_tool_meta.metadata == {"_meta": {"source": "unit-test", "version": 1}}
+
+    mcp_tool_both = MCPTool(
+        name="t_both",
+        description="",
+        inputSchema=tool_input_schema,
+        annotations=ToolAnnotations(title="Both"),
+        meta={"flag": True},
+    )
+
+    lc_tool_both = convert_mcp_tool_to_langchain_tool(session, mcp_tool_both)
+    assert lc_tool_both.metadata == {
+        "title": "Both",
+        "readOnlyHint": None,
+        "idempotentHint": None,
+        "destructiveHint": None,
+        "openWorldHint": None,
+        "_meta": {"flag": True},
+    }

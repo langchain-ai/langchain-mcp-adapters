@@ -4,6 +4,9 @@ This library provides a lightweight wrapper that makes [Anthropic Model Context 
 
 ![MCP](static/img/mcp.png)
 
+> [!note]
+> A JavaScript/TypeScript version of this library is also available at [langchainjs](https://github.com/langchain-ai/langchainjs/tree/main/libs/langchain-mcp-adapters/).
+
 ## Features
 
 - 🛠️ Convert MCP tools into [LangChain tools](https://python.langchain.com/docs/concepts/tools/) that can be used with [LangGraph](https://github.com/langchain-ai/langgraph) agents
@@ -143,7 +146,7 @@ weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?
 > client = MultiServerMCPClient({...})
 > async with client.session("math") as session:
 >     tools = await load_mcp_tools(session)
->    ```
+> ```
 
 ## Streamable HTTP
 

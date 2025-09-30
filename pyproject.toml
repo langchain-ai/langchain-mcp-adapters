@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "langchain-mcp-adapters"
-version = "0.1.9"
+version = "0.1.10"
 description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
 authors = [
     { name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com" },
@@ -52,6 +52,9 @@ target-version = "py310"
 select = [ "ALL",]
 ignore = [
   "COM812", # conflict with formatter
+  "C901", # Too complex
+  "PLR0913", # Too many arguments in function definition
+  "PLR0912", # Too many branches
 ]
 
 

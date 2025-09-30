@@ -16,13 +16,21 @@ from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
-from mcp.types import CallToolResult, EmbeddedResource, ImageContent, TextContent
+from mcp.types import (
+    AudioContent,
+    CallToolResult,
+    EmbeddedResource,
+    ImageContent,
+    ResourceLink,
+    TextContent,
+)
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
+from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.sessions import Connection, create_session
 
-NonTextContent = ImageContent | EmbeddedResource
+NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
 MAX_ITERATIONS = 1000
 
 
@@ -102,6 +110,8 @@ def convert_mcp_tool_to_langchain_tool(
     tool: MCPTool,
     *,
     connection: Connection | None = None,
+    callbacks: Callbacks | None = None,
+    server_name: str | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -112,6 +122,8 @@ def convert_mcp_tool_to_langchain_tool(
         tool: MCP tool to convert
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
+        callbacks: Optional callbacks for handling notifications and events
+        server_name: Name of the server this tool belongs to
 
     Returns:
         a LangChain tool
@@ -124,17 +136,54 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
+        mcp_callbacks = (
+            callbacks.to_mcp_format(
+                context=CallbackContext(server_name=server_name, tool_name=tool.name)
+            )
+            if callbacks is not None
+            else _MCPCallbacks()
+        )
+
+        # Execute the tool call
+        call_tool_result = None
         if session is None:
             # If a session is not provided, we will create one on the fly
-            async with create_session(connection) as tool_session:
+            if connection is None:
+                msg = "Either session or connection must be provided"
+                raise ValueError(msg)
+
+            async with create_session(
+                connection, mcp_callbacks=mcp_callbacks
+            ) as tool_session:
                 await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
                     tool.name,
                     arguments,
+                    progress_callback=mcp_callbacks.progress_callback,
                 )
         else:
-            call_tool_result = await session.call_tool(tool.name, arguments)
+            call_tool_result = await session.call_tool(
+                tool.name,
+                arguments,
+                progress_callback=mcp_callbacks.progress_callback,
+            )
+
+        if call_tool_result is None:
+            msg = (
+                "Tool call failed: no result returned from the underlying MCP SDK. "
+                "This may indicate that an exception was handled or suppressed "
+                "by the MCP SDK (e.g., client disconnection, network issue, "
+                "or other execution error)."
+            )
+            raise RuntimeError(msg)
+
         return _convert_call_tool_result(call_tool_result)
+
+    meta = tool.meta if hasattr(tool, "meta") else None
+
+    base = tool.annotations.model_dump() if tool.annotations is not None else {}
+    meta = {"_meta": meta} if meta is not None else {}
+    metadata = {**base, **meta} or None
 
     return StructuredTool(
         name=tool.name,
@@ -142,7 +191,7 @@ def convert_mcp_tool_to_langchain_tool(
         args_schema=tool.inputSchema,
         coroutine=call_tool,
         response_format="content_and_artifact",
-        metadata=tool.annotations.model_dump() if tool.annotations else None,
+        metadata=metadata,
     )
 
 
@@ -150,12 +199,16 @@ async def load_mcp_tools(
     session: ClientSession | None,
     *,
     connection: Connection | None = None,
+    callbacks: Callbacks | None = None,
+    server_name: str | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
     Args:
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
+        callbacks: Optional callbacks for handling notifications and events.
+        server_name: Name of the server these tools belong to.
 
     Returns:
         List of LangChain tools. Tool annotations are returned as part
@@ -168,16 +221,33 @@ async def load_mcp_tools(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
+    mcp_callbacks = (
+        callbacks.to_mcp_format(context=CallbackContext(server_name=server_name))
+        if callbacks is not None
+        else _MCPCallbacks()
+    )
+
     if session is None:
         # If a session is not provided, we will create one on the fly
-        async with create_session(connection) as tool_session:
+        if connection is None:
+            msg = "Either session or connection must be provided"
+            raise ValueError(msg)
+        async with create_session(
+            connection, mcp_callbacks=mcp_callbacks
+        ) as tool_session:
             await tool_session.initialize()
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
 
     return [
-        convert_mcp_tool_to_langchain_tool(session, tool, connection=connection)
+        convert_mcp_tool_to_langchain_tool(
+            session,
+            tool,
+            connection=connection,
+            callbacks=callbacks,
+            server_name=server_name,
+        )
         for tool in tools
     ]
 
