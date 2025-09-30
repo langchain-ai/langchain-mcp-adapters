@@ -244,7 +244,7 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         client = MultiServerMCPClient(
             {
                 "time": {
-                    "url": "http://localhost:8181/mcp/",
+                    "url": "http://localhost:8181/mcp",
                     "transport": "streamable_http",
                 }
             },
@@ -388,7 +388,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
         client = MultiServerMCPClient(
             {
                 "status": {
-                    "url": "http://localhost:8182/mcp/",
+                    "url": "http://localhost:8182/mcp",
                     "transport": "streamable_http",
                     "httpx_client_factory": custom_httpx_client_factory,
                 },
@@ -504,7 +504,7 @@ async def test_convert_mcp_tool_metadata_variants():
         name="t_meta",
         description="",
         inputSchema=tool_input_schema,
-        meta={"source": "unit-test", "version": 1},
+        _meta={"source": "unit-test", "version": 1},
     )
     lc_tool_meta = convert_mcp_tool_to_langchain_tool(session, mcp_tool_meta)
     assert lc_tool_meta.metadata == {"_meta": {"source": "unit-test", "version": 1}}
@@ -514,7 +514,7 @@ async def test_convert_mcp_tool_metadata_variants():
         description="",
         inputSchema=tool_input_schema,
         annotations=ToolAnnotations(title="Both"),
-        meta={"flag": True},
+        _meta={"flag": True},
     )
 
     lc_tool_both = convert_mcp_tool_to_langchain_tool(session, mcp_tool_both)

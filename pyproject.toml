@@ -55,6 +55,8 @@ ignore = [
   "C901", # Too complex
   "PLR0913", # Too many arguments in function definition
   "PLR0912", # Too many branches
+  "PLR0915", # Too many statements
+  "ERA001", # Commented out code should be removed
 ]
 
 

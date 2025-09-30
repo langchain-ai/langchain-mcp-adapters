@@ -60,7 +60,7 @@ def run_streamable_http(
 ) -> Generator[None, None, None]:
     """Run the server in a separate process exposing a streamable HTTP endpoint.
 
-    The endpoint will be available at `http://localhost:{server_port}/mcp/`.
+    The endpoint will be available at `http://localhost:{server_port}/mcp`.
     """
     proc = multiprocessing.Process(
         target=run_streamable_http_server,

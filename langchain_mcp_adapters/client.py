@@ -16,6 +16,7 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
+from langchain_mcp_adapters.hooks import Hooks
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
@@ -52,6 +53,7 @@ class MultiServerMCPClient:
         connections: dict[str, Connection] | None = None,
         *,
         callbacks: Callbacks | None = None,
+        hooks: Hooks | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -59,6 +61,7 @@ class MultiServerMCPClient:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
             callbacks: Optional callbacks for handling notifications and events.
+            hooks: Optional hooks for before/after tool call processing.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -99,6 +102,7 @@ class MultiServerMCPClient:
             connections if connections is not None else {}
         )
         self.callbacks = callbacks or Callbacks()
+        self.hooks = hooks
 
     @asynccontextmanager
     async def session(
@@ -163,6 +167,7 @@ class MultiServerMCPClient:
                 connection=self.connections[server_name],
                 callbacks=self.callbacks,
                 server_name=server_name,
+                hooks=self.hooks,
             )
 
         all_tools: list[BaseTool] = []
@@ -174,6 +179,7 @@ class MultiServerMCPClient:
                     connection=connection,
                     callbacks=self.callbacks,
                     server_name=name,
+                    hooks=self.hooks,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
