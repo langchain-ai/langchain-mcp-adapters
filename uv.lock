@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 
 [[package]]
@@ -304,7 +304,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "langchain-core", specifier = ">=0.3.36,<0.4" },
+    { name = "langchain-core", specifier = ">=0.3.36,<2.0.0" },
     { name = "mcp", specifier = ">=1.9.2" },
     { name = "typing-extensions", specifier = ">=4.14.0" },
 ]
