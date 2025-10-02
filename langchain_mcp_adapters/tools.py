@@ -3,7 +3,7 @@
 This module provides functionality to convert MCP tools into LangChain-compatible
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
-
+from copy import deepcopy
 from typing import Any, cast, get_args
 
 from langchain_core.tools import (
@@ -150,6 +150,17 @@ def convert_mcp_tool_to_langchain_tool(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
+    input_schema = None
+    if isinstance(tool.inputSchema, dict):
+        input_schema = deepcopy(tool.inputSchema)
+        if "properties" in input_schema:
+            for _, prop_schema in input_schema.get("properties", {}).items():
+                if "enum" in prop_schema and "type" not in prop_schema:
+                    prop_schema["type"] = "string"
+    else:
+        input_schema = tool.inputSchema
+
+
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
@@ -255,7 +266,7 @@ def convert_mcp_tool_to_langchain_tool(
     return StructuredTool(
         name=tool.name,
         description=tool.description or "",
-        args_schema=tool.inputSchema,
+        args_schema=input_schema,
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
