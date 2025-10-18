@@ -150,7 +150,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
     )
 
 
-async def test_convert_mcp_tool_with_empty_input_schema():
+async def test_convert_mcp_tool_with_input_schema_missing_properties():
     tool_input_schema = {
         "title": "ToolSchema",
         "type": "object",
