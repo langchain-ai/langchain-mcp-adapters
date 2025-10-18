@@ -251,6 +251,8 @@ def convert_mcp_tool_to_langchain_tool(
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
     meta = {"_meta": meta} if meta is not None else {}
     metadata = {**base, **meta} or None
+    if tool.inputSchema.get("type") == "object":
+        tool.inputSchema.setdefault("properties", {})
 
     return StructuredTool(
         name=tool.name,
