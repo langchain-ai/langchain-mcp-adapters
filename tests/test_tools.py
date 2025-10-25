@@ -141,7 +141,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None, meta=None
     )
 
     # Verify result
@@ -177,7 +177,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments, progress_callback=None):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None, meta=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
@@ -344,11 +344,6 @@ async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
 
     arguments = {"a": 1, "b": 2}
     assert await fastmcp_tool.run(arguments=arguments) == 3
-
-
-def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
-    with pytest.raises(NotImplementedError):
-        to_fastmcp(add_with_injection)
 
 
 def _create_status_server():
