@@ -164,11 +164,17 @@ def convert_mcp_tool_to_langchain_tool(
 
         if injected_args_schema:
             meta = {
-                META_KEY_INJECT_ARGS_VALUE: {
-                    arg_name: arg_value
-                    for arg_name, arg_value in arguments.items()
-                }
+                META_KEY_INJECT_ARGS_VALUE: {}
             }
+
+            for arg_name, arg_value in arguments.items():
+                if arg_name not in injected_args_schema:
+                    continue
+
+                meta[META_KEY_INJECT_ARGS_VALUE][arg_name] = arg_value
+
+            for arg_name in meta[META_KEY_INJECT_ARGS_VALUE].keys():
+                del arguments[arg_name]
 
         mcp_callbacks = (
             callbacks.to_mcp_format(
@@ -409,7 +415,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
     async def fn(context: Context, **arguments: dict[str, Any]) -> Any:  # noqa: ANN401
         if context is not None and context.request_context.meta is not None:
             injected_args_value = context.request_context.meta.model_dump().get(
-                'langchain/injectedArgsValues', {})
+                META_KEY_INJECT_ARGS_VALUE, {})
 
             for arg_name, arg_value in injected_args_value.items():
                 arguments[arg_name] = arg_value

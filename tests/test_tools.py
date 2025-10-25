@@ -14,6 +14,7 @@ from mcp.types import (
     TextContent,
     TextResourceContents,
     ToolAnnotations,
+    RequestParams
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
@@ -24,6 +25,8 @@ from langchain_mcp_adapters.tools import (
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
     to_fastmcp,
+    META_KEY_INJECT_ARGS_SCHEMA,
+    META_KEY_INJECT_ARGS_VALUE
 )
 from tests.utils import run_streamable_http
 
@@ -68,7 +71,8 @@ def test_convert_multiple_text_contents():
 
 def test_convert_with_non_text_content():
     # Test with non-text content
-    image_content = ImageContent(type="image", mimeType="image/png", data="base64data")
+    image_content = ImageContent(
+        type="image", mimeType="image/png", data="base64data")
     resource_content = EmbeddedResource(
         type="resource",
         resource=TextResourceContents(
@@ -174,19 +178,22 @@ async def test_load_mcp_tools():
             inputSchema=tool_input_schema,
         ),
     ]
-    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
+    session.list_tools.return_value = MagicMock(
+        tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
     async def mock_call_tool(tool_name, arguments, progress_callback=None, meta=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
-                    TextContent(type="text", text=f"tool1 result with {arguments}")
+                    TextContent(
+                        type="text", text=f"tool1 result with {arguments}")
                 ],
                 isError=False,
             )
         return CallToolResult(
-            content=[TextContent(type="text", text=f"tool2 result with {arguments}")],
+            content=[TextContent(
+                type="text", text=f"tool2 result with {arguments}")],
             isError=False,
         )
 
@@ -375,7 +382,8 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
             timeout=timeout or httpx.Timeout(30.0),
             auth=auth,
             # Custom configuration
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            limits=httpx.Limits(max_keepalive_connections=5,
+                                max_connections=10),
         )
 
     with run_streamable_http(_create_status_server, 8182):
@@ -428,7 +436,8 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             timeout=timeout or httpx.Timeout(30.0),
             auth=auth,
             # Custom configuration for SSE
-            limits=httpx.Limits(max_keepalive_connections=3, max_connections=5),
+            limits=httpx.Limits(
+                max_keepalive_connections=3, max_connections=5),
         )
 
     with run_streamable_http(_create_info_server, 8183):
@@ -502,7 +511,8 @@ async def test_convert_mcp_tool_metadata_variants():
         _meta={"source": "unit-test", "version": 1},
     )
     lc_tool_meta = convert_mcp_tool_to_langchain_tool(session, mcp_tool_meta)
-    assert lc_tool_meta.metadata == {"_meta": {"source": "unit-test", "version": 1}}
+    assert lc_tool_meta.metadata == {
+        "_meta": {"source": "unit-test", "version": 1}}
 
     mcp_tool_both = MCPTool(
         name="t_both",
@@ -521,3 +531,102 @@ async def test_convert_mcp_tool_metadata_variants():
         "openWorldHint": None,
         "_meta": {"flag": True},
     }
+
+
+async def test_injected_args_schema_extraction():
+    """
+    Tests that InjectedToolArg schema will be sent to the MCP server through _meta
+    """
+    mcp_tool = to_fastmcp(add_with_injection)
+
+    assert META_KEY_INJECT_ARGS_SCHEMA in mcp_tool.meta
+    assert mcp_tool.meta[META_KEY_INJECT_ARGS_SCHEMA] == {
+        'injected_arg': {'type': 'string'}}
+
+
+async def test_injected_args_value_are_sent():
+    """
+    Test that LangChain Tools send InjectedToolArg through MCP _meta
+    """
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+            "param2": {"title": "Param2", "type": "integer"},
+        },
+        "required": ["param1", "param2"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="",
+        inputSchema=tool_input_schema,
+        _meta={
+            META_KEY_INJECT_ARGS_SCHEMA: {
+                'injected_arg': {
+                    'type': 'string'
+                }
+            }
+        }
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session=session,
+        tool=mcp_tool
+    )
+
+    await lc_tool.ainvoke(
+        {
+            'param1': 'test',
+            'param2': 42,
+            'injected_arg': 'bar'
+        }
+    )
+
+    session.call_tool.assert_called_once_with(
+        "test_tool",
+        {
+            "param1": "test",
+            "param2": 42
+        },
+        progress_callback=None,
+        meta={
+            META_KEY_INJECT_ARGS_VALUE: {
+                'injected_arg': 'bar'
+            }
+        }
+    )
+
+
+async def test_injected_args_are_passed_to_lctool():
+    """
+    Asserts that when a MCPTool receiveis LangChain InjectedToolArg through _meta it is correctly passed to the underlying LC Tool
+    """
+    mcp_tool = to_fastmcp(add_with_injection)
+
+    mocked_context = AsyncMock()
+    mocked_context.request_context.meta = RequestParams.Meta(
+        **{
+            META_KEY_INJECT_ARGS_VALUE: {
+                'injected_arg': 'bar'
+            }
+        },
+        progressToken=None
+    )
+
+    result = await mcp_tool.run(
+        arguments={
+            'a': 1,
+            'b': 1
+        },
+        context=mocked_context
+    )
+
+    assert result == 2
