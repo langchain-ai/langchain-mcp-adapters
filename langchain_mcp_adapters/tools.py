@@ -153,28 +153,18 @@ def convert_mcp_tool_to_langchain_tool(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
-    injected_args_schema: dict[str, Any] | None = None
-    if tool.meta is not None and META_KEY_INJECT_ARGS_SCHEMA in tool.meta:
-        injected_args_schema = tool.meta.get(META_KEY_INJECT_ARGS_SCHEMA)
-
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
-        meta: dict[str, Any] | None = None
+        meta = _build_tool_calling_meta(
+            tool,
+            **arguments
+        )
 
-        if injected_args_schema:
-            meta = {
-                META_KEY_INJECT_ARGS_VALUE: {}
-            }
-
-            for arg_name, arg_value in arguments.items():
-                if arg_name not in injected_args_schema:
-                    continue
-
-                meta[META_KEY_INJECT_ARGS_VALUE][arg_name] = arg_value
-
-            for arg_name in meta[META_KEY_INJECT_ARGS_VALUE].keys():
-                del arguments[arg_name]
+        arguments = _clear_injected_tool_args_from_arguments(
+            meta,
+            **arguments
+        )
 
         mcp_callbacks = (
             callbacks.to_mcp_format(
@@ -390,13 +380,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         )
         raise TypeError(msg)
 
-    injected_args_schema = _get_injected_args_schema(tool)
-
-    meta: dict[str, Any] | None = None
-    if injected_args_schema:
-        meta = {
-            META_KEY_INJECT_ARGS_SCHEMA: injected_args_schema
-        }
+    meta = _build_fastmcp_tool_meta_from_injected_args_schema(tool)
 
     parameters = tool.tool_call_schema.model_json_schema()
     field_definitions = {
@@ -432,3 +416,52 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         context_kwarg='context',
         meta=meta
     )
+
+
+def _build_fastmcp_tool_meta_from_injected_args_schema(tool: BaseTool) -> dict[str, Any] | None:
+    injected_args_schema = _get_injected_args_schema(tool)
+
+    if injected_args_schema:
+        return {
+            META_KEY_INJECT_ARGS_SCHEMA: injected_args_schema
+        }
+
+
+def _build_tool_calling_meta(tool: MCPTool, **arguments: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Discovers InjectedToolArg from the remote MCP Tool and get their value from **arguments
+
+    Such values will be sent to the remote tool through MCP's _meta[META_KEY_INJECT_ARGS_SCHEMA]
+    """
+    injected_args_schema: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = None
+
+    if tool.meta is not None and META_KEY_INJECT_ARGS_SCHEMA in tool.meta:
+        injected_args_schema = tool.meta.get(META_KEY_INJECT_ARGS_SCHEMA)
+
+    if injected_args_schema:
+        meta = {
+            META_KEY_INJECT_ARGS_VALUE: {}
+        }
+
+        for arg_name, arg_value in arguments.items():
+            if arg_name not in injected_args_schema:
+                continue
+
+            meta[META_KEY_INJECT_ARGS_VALUE][arg_name] = arg_value
+
+    return meta
+
+
+def _clear_injected_tool_args_from_arguments(meta: dict[str, Any] | None, **arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    Clean **arguments from args that will be sent through MCP's _meta[META_KEY_INJECT_ARGS_SCHEMA]
+    """
+    if meta is None or META_KEY_INJECT_ARGS_VALUE not in meta:
+        return arguments
+
+    return {
+        arg_name: arg_value
+        for arg_name, arg_value in arguments.items()
+        if arg_name not in meta[META_KEY_INJECT_ARGS_VALUE]
+    }
