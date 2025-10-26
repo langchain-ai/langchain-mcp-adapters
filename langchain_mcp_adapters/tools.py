@@ -15,6 +15,7 @@ from langchain_core.tools import (
 from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
 from mcp.server.fastmcp.tools import Tool as FastMCPTool
+from mcp.server.fastmcp.server import Context
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
@@ -25,7 +26,7 @@ from mcp.types import (
     TextContent,
 )
 from mcp.types import Tool as MCPTool
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, create_model, TypeAdapter
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.hooks import CallToolRequestSpec, Hooks, ToolHookContext
@@ -44,6 +45,8 @@ except ImportError:
         """no-op runtime getter."""
         return
 
+META_KEY_INJECT_ARGS_VALUE = 'langchain/injectedArgsValue'
+META_KEY_INJECT_ARGS_SCHEMA = 'langchain/injectedArgsSchema'
 
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
 MAX_ITERATIONS = 1000
@@ -153,9 +156,20 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
+        meta = _build_tool_calling_meta(
+            tool,
+            **arguments
+        )
+
+        arguments = _clear_injected_tool_args_from_arguments(
+            meta,
+            **arguments
+        )
+
         mcp_callbacks = (
             callbacks.to_mcp_format(
-                context=CallbackContext(server_name=server_name, tool_name=tool.name)
+                context=CallbackContext(
+                    server_name=server_name, tool_name=tool.name)
             )
             if callbacks is not None
             else _MCPCallbacks()
@@ -223,12 +237,14 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
+                    meta=meta
                 )
         else:
             call_tool_result = await session.call_tool(
                 tool_name,
                 tool_args,
                 progress_callback=mcp_callbacks.progress_callback,
+                meta=meta
             )
 
         if call_tool_result is None:
@@ -291,7 +307,8 @@ async def load_mcp_tools(
         raise ValueError(msg)
 
     mcp_callbacks = (
-        callbacks.to_mcp_format(context=CallbackContext(server_name=server_name))
+        callbacks.to_mcp_format(
+            context=CallbackContext(server_name=server_name))
         if callbacks is not None
         else _MCPCallbacks()
     )
@@ -322,15 +339,8 @@ async def load_mcp_tools(
     ]
 
 
-def _get_injected_args(tool: BaseTool) -> list[str]:
-    """Get the list of injected argument names from a LangChain tool.
-
-    Args:
-        tool: The LangChain tool to inspect.
-
-    Returns:
-        A list of injected argument names.
-    """
+def _get_injected_args_schema(tool: BaseTool) -> dict[str, dict[str, str]]:
+    schemas: dict[str, dict[str, str]] = {}
 
     def _is_injected_arg_type(type_: type) -> bool:
         return any(
@@ -339,11 +349,15 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
             for arg in get_args(type_)[1:]
         )
 
-    return [
-        field
-        for field, field_info in get_all_basemodel_annotations(tool.args_schema).items()
-        if _is_injected_arg_type(field_info)
-    ]
+    for field_name, field_info in get_all_basemodel_annotations(tool.args_schema).items():
+        if not _is_injected_arg_type(field_info):
+            continue
+
+        field_type = get_args(field_info)[0]
+
+        schemas[field_name] = TypeAdapter(field_type).json_schema()
+
+    return schemas
 
 
 def to_fastmcp(tool: BaseTool) -> FastMCPTool:
@@ -366,11 +380,14 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         )
         raise TypeError(msg)
 
+    meta = _build_fastmcp_tool_meta_from_injected_args_schema(tool)
+
     parameters = tool.tool_call_schema.model_json_schema()
     field_definitions = {
         field: (field_info.annotation, field_info)
         for field, field_info in tool.tool_call_schema.model_fields.items()
     }
+
     arg_model = create_model(
         f"{tool.name}Arguments", **field_definitions, __base__=ArgModelBase
     )
@@ -378,13 +395,16 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
 
     # We'll use an Any type for the function return type.
     # We're providing the parameters separately
-    async def fn(**arguments: dict[str, Any]) -> Any:  # noqa: ANN401
-        return await tool.ainvoke(arguments)
 
-    injected_args = _get_injected_args(tool)
-    if len(injected_args) > 0:
-        msg = "LangChain tools with injected arguments are not supported"
-        raise NotImplementedError(msg)
+    async def fn(context: Context, **arguments: dict[str, Any]) -> Any:  # noqa: ANN401
+        if context is not None and context.request_context.meta is not None:
+            injected_args_value = context.request_context.meta.model_dump().get(
+                META_KEY_INJECT_ARGS_VALUE, {})
+
+            for arg_name, arg_value in injected_args_value.items():
+                arguments[arg_name] = arg_value
+
+        return await tool.ainvoke(arguments)
 
     return FastMCPTool(
         fn=fn,
@@ -393,4 +413,55 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         parameters=parameters,
         fn_metadata=fn_metadata,
         is_async=True,
+        context_kwarg='context',
+        meta=meta
     )
+
+
+def _build_fastmcp_tool_meta_from_injected_args_schema(tool: BaseTool) -> dict[str, Any] | None:
+    injected_args_schema = _get_injected_args_schema(tool)
+
+    if injected_args_schema:
+        return {
+            META_KEY_INJECT_ARGS_SCHEMA: injected_args_schema
+        }
+
+
+def _build_tool_calling_meta(tool: MCPTool, **arguments: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Discovers InjectedToolArg from the remote MCP Tool and get their value from **arguments
+
+    Such values will be sent to the remote tool through MCP's _meta[META_KEY_INJECT_ARGS_SCHEMA]
+    """
+    injected_args_schema: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = None
+
+    if tool.meta is not None and META_KEY_INJECT_ARGS_SCHEMA in tool.meta:
+        injected_args_schema = tool.meta.get(META_KEY_INJECT_ARGS_SCHEMA)
+
+    if injected_args_schema:
+        meta = {
+            META_KEY_INJECT_ARGS_VALUE: {}
+        }
+
+        for arg_name, arg_value in arguments.items():
+            if arg_name not in injected_args_schema:
+                continue
+
+            meta[META_KEY_INJECT_ARGS_VALUE][arg_name] = arg_value
+
+    return meta
+
+
+def _clear_injected_tool_args_from_arguments(meta: dict[str, Any] | None, **arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    Clean **arguments from args that will be sent through MCP's _meta[META_KEY_INJECT_ARGS_SCHEMA]
+    """
+    if meta is None or META_KEY_INJECT_ARGS_VALUE not in meta:
+        return arguments
+
+    return {
+        arg_name: arg_value
+        for arg_name, arg_value in arguments.items()
+        if arg_name not in meta[META_KEY_INJECT_ARGS_VALUE]
+    }

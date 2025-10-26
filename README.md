@@ -349,3 +349,45 @@ fastmcp_tool = to_fastmcp(add)
 mcp = FastMCP("Math", tools=[fastmcp_tool])
 mcp.run(transport="stdio")
 ```
+
+## Passing InjectedToolArg to an MCP Tool
+
+By using the LangChain MCP Adapter on both the server and client sides, you can use `InjectedToolArg` to hide certain parameters from the LLM.
+
+```python
+# server.py
+from langchain_core.tools import tool
+
+data = {
+    'user_0': 'Spike'
+}
+
+@tool
+async def get_user_pet_name(user_id: Annotated[str, InjectedToolArg]) -> str:
+    """Returns the user's pet name"""
+
+    return data[user_id]
+
+fastmcp_tool = to_fastmcp(add)
+mcp = FastMCP("Math", tools=[fastmcp_tool])
+mcp.run(transport="stdio")
+```
+
+And the user ID can be passed as part of the input, without the LLM knowledge:
+
+```python
+# client.py
+
+client = MultiServerMCPClient(
+    ...
+)
+
+tools = await client.get_tools()
+agent = create_react_agent("openai:gpt-4.1", tools)
+response = await agent.ainvoke(
+    {
+        "messages": "What is my dog's name?",
+        "user_id": "user_0"
+    }
+)
+```
