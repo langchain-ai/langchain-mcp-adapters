@@ -311,21 +311,18 @@ async def convert_to_mcp_result(
     if action == "accept":
         # Accept with data
         return ElicitResult(
-            _meta={},
             action="accept",
             content=response["data"] or {},
         )
     elif action == "decline":
         # Explicit decline
         return ElicitResult(
-            _meta={},
             action="decline",
             content=None,
         )
     elif action == "cancel":
         # User cancelled (dismissed dialog, etc.)
         return ElicitResult(
-            _meta={},
             action="cancel",
             content=None,
         )
