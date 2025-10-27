@@ -147,9 +147,9 @@ class MultiServerMCPClient:
             server_name=server_name,
         ) as session:
             if auto_initialize:
-                # Use custom initialization with capabilities if elicitation is enabled
-                from langchain_mcp_adapters.sessions import _initialize_with_capabilities
-                await _initialize_with_capabilities(session, self.elicitation_handler)
+                # Elicitation capability is automatically declared based on the
+                # presence of elicitation_callback in the ClientSession
+                await session.initialize()
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:

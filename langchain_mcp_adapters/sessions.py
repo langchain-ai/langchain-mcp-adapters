@@ -14,7 +14,6 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
-from mcp.types import ClientCapabilities, ElicitationCapability
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -356,27 +355,6 @@ async def _create_websocket_session(
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
         yield session
-
-
-async def _initialize_with_capabilities(
-    session: ClientSession,
-    elicitation_handler: Any | None = None,
-) -> None:
-    """Initialize a session with appropriate client capabilities.
-
-    Args:
-        session: The ClientSession to initialize
-        elicitation_handler: Optional elicitation handler
-    """
-    # Build capabilities based on what handlers are provided
-    capabilities = None
-    if elicitation_handler is not None:
-        capabilities = ClientCapabilities(
-            elicitation=ElicitationCapability()
-        )
-
-    # Initialize with capabilities
-    await session.initialize(capabilities=capabilities)
 
 
 @asynccontextmanager

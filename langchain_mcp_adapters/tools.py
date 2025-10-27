@@ -222,9 +222,9 @@ def convert_mcp_tool_to_langchain_tool(
                 elicitation_handler=elicitation_handler,
                 server_name=server_name,
             ) as tool_session:
-                # Use custom initialization with capabilities if elicitation is enabled
-                from langchain_mcp_adapters.sessions import _initialize_with_capabilities
-                await _initialize_with_capabilities(tool_session, elicitation_handler)
+                # Elicitation capability is automatically declared based on the
+                # presence of elicitation_callback in the ClientSession
+                await tool_session.initialize()
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
                     tool_name,
                     tool_args,
@@ -315,9 +315,9 @@ async def load_mcp_tools(
             elicitation_handler=elicitation_handler,
             server_name=server_name,
         ) as tool_session:
-            # Use custom initialization with capabilities if elicitation is enabled
-            from langchain_mcp_adapters.sessions import _initialize_with_capabilities
-            await _initialize_with_capabilities(tool_session, elicitation_handler)
+            # Elicitation capability is automatically declared based on the
+            # presence of elicitation_callback in the ClientSession
+            await tool_session.initialize()
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
