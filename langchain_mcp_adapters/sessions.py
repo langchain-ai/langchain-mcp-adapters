@@ -14,6 +14,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import ClientCapabilities, ElicitationCapability
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -357,15 +358,42 @@ async def _create_websocket_session(
         yield session
 
 
+async def _initialize_with_capabilities(
+    session: ClientSession,
+    elicitation_handler: Any | None = None,
+) -> None:
+    """Initialize a session with appropriate client capabilities.
+
+    Args:
+        session: The ClientSession to initialize
+        elicitation_handler: Optional elicitation handler
+    """
+    # Build capabilities based on what handlers are provided
+    capabilities = None
+    if elicitation_handler is not None:
+        capabilities = ClientCapabilities(
+            elicitation=ElicitationCapability()
+        )
+
+    # Initialize with capabilities
+    await session.initialize(capabilities=capabilities)
+
+
 @asynccontextmanager
 async def create_session(
-    connection: Connection, *, mcp_callbacks: _MCPCallbacks | None = None
+    connection: Connection,
+    *,
+    mcp_callbacks: _MCPCallbacks | None = None,
+    elicitation_handler: Any | None = None,  # ElicitationHandler
+    server_name: str | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
         mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
+        elicitation_handler: Optional handler for elicitation requests
+        server_name: Optional name of the server for context
 
     Raises:
         ValueError: If transport is not recognized
@@ -386,15 +414,22 @@ async def create_session(
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
 
+    # Set up session kwargs with callbacks
+    params["session_kwargs"] = params.get("session_kwargs", {})
+
     if mcp_callbacks is not None:
-        params["session_kwargs"] = params.get("session_kwargs", {})
-        # right now the only callback supported on the ClientSession
-        # is the logging callback, but long term we'll also want to
-        # support sampling, elicitation, list roots, etc.
         if mcp_callbacks.logging_callback is not None:
             params["session_kwargs"]["logging_callback"] = (
                 mcp_callbacks.logging_callback
             )
+
+    # Add elicitation callback if handler is provided
+    if elicitation_handler is not None:
+        from langchain_mcp_adapters.elicitation import create_mcp_elicitation_callback
+
+        params["session_kwargs"]["elicitation_callback"] = (
+            await create_mcp_elicitation_callback(elicitation_handler, server_name)
+        )
 
     if transport == "sse":
         if "url" not in params:

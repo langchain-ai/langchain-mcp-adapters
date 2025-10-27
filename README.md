@@ -235,6 +235,90 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 
 > Only `sse` and `streamable_http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
+## Handling Elicitation Requests
+
+[Elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation) allows MCP servers to request structured user input during interactions. When a server needs additional information (like configuration settings, preferences, or form data), it can send an elicitation request with a JSON schema defining the expected response structure.
+
+The `langchain-mcp-adapters` library provides several built-in handlers for managing elicitation requests:
+
+### Auto-accepting with Default Values
+
+The `DefaultElicitationHandler` automatically accepts elicitation requests using default values from the schema:
+
+```python
+from langchain_mcp_adapters import MultiServerMCPClient, DefaultElicitationHandler
+
+client = MultiServerMCPClient(
+    connections={
+        "my_server": {
+            "command": "python",
+            "args": ["server.py"],
+            "transport": "stdio",
+        }
+    },
+    elicitation_handler=DefaultElicitationHandler(auto_accept=True)
+)
+
+tools = await client.get_tools()
+# Server can now request user input, which will be auto-filled with defaults
+```
+
+### Declining All Requests
+
+For non-interactive environments, use `DeclineElicitationHandler`:
+
+```python
+from langchain_mcp_adapters import DeclineElicitationHandler
+
+client = MultiServerMCPClient(
+    connections={...},
+    elicitation_handler=DeclineElicitationHandler(
+        reason="User input not available in batch mode"
+    )
+)
+```
+
+### Custom Handler for Interactive Prompts
+
+Implement custom logic with `FunctionElicitationHandler`:
+
+```python
+from langchain_mcp_adapters import FunctionElicitationHandler
+
+async def prompt_user_for_input(message: str, schema: dict, server_name: str | None):
+    """Custom handler that prompts user for input."""
+    print(f"Server '{server_name}' requests: {message}")
+    print(f"Expected schema: {schema}")
+
+    # Collect input based on schema properties
+    user_data = {}
+    for field, field_schema in schema.get("properties", {}).items():
+        value = input(f"Enter {field} ({field_schema.get('type')}): ")
+        user_data[field] = value
+
+    return {
+        "action": "accept",  # or "decline" or "cancel"
+        "data": user_data,
+        "reason": None
+    }
+
+client = MultiServerMCPClient(
+    connections={...},
+    elicitation_handler=FunctionElicitationHandler(prompt_user_for_input)
+)
+```
+
+### Security Considerations
+
+Per the MCP specification:
+
+- Servers **MUST NOT** request sensitive information (passwords, API keys, etc.) via elicitation
+- Clients **SHOULD** display which server is requesting data
+- Clients **SHOULD** allow users to review/modify data before sending
+- Clients **SHOULD** implement rate limiting on elicitation requests
+
+When implementing custom handlers, always validate that the requested data is appropriate and secure before accepting.
+
 ## Using with LangGraph StateGraph
 
 ```python

@@ -128,6 +128,7 @@ def convert_mcp_tool_to_langchain_tool(
     callbacks: Callbacks | None = None,
     hooks: Hooks | None = None,
     server_name: str | None = None,
+    elicitation_handler: Any | None = None,  # ElicitationHandler
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -216,9 +217,14 @@ def convert_mcp_tool_to_langchain_tool(
                 raise ValueError(msg)
 
             async with create_session(
-                effective_connection, mcp_callbacks=mcp_callbacks
+                effective_connection,
+                mcp_callbacks=mcp_callbacks,
+                elicitation_handler=elicitation_handler,
+                server_name=server_name,
             ) as tool_session:
-                await tool_session.initialize()
+                # Use custom initialization with capabilities if elicitation is enabled
+                from langchain_mcp_adapters.sessions import _initialize_with_capabilities
+                await _initialize_with_capabilities(tool_session, elicitation_handler)
                 call_tool_result = await cast("ClientSession", tool_session).call_tool(
                     tool_name,
                     tool_args,
@@ -269,6 +275,7 @@ async def load_mcp_tools(
     callbacks: Callbacks | None = None,
     hooks: Hooks | None = None,
     server_name: str | None = None,
+    elicitation_handler: Any | None = None,  # ElicitationHandler
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
 
@@ -278,6 +285,7 @@ async def load_mcp_tools(
         callbacks: Optional callbacks for handling notifications and events.
         hooks: Optional hooks for before/after tool call processing.
         server_name: Name of the server these tools belong to.
+        elicitation_handler: Optional handler for elicitation requests.
 
     Returns:
         List of LangChain tools. Tool annotations are returned as part
@@ -302,9 +310,14 @@ async def load_mcp_tools(
             msg = "Either session or connection must be provided"
             raise ValueError(msg)
         async with create_session(
-            connection, mcp_callbacks=mcp_callbacks
+            connection,
+            mcp_callbacks=mcp_callbacks,
+            elicitation_handler=elicitation_handler,
+            server_name=server_name,
         ) as tool_session:
-            await tool_session.initialize()
+            # Use custom initialization with capabilities if elicitation is enabled
+            from langchain_mcp_adapters.sessions import _initialize_with_capabilities
+            await _initialize_with_capabilities(tool_session, elicitation_handler)
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
@@ -317,6 +330,7 @@ async def load_mcp_tools(
             callbacks=callbacks,
             hooks=hooks,
             server_name=server_name,
+            elicitation_handler=elicitation_handler,
         )
         for tool in tools
     ]

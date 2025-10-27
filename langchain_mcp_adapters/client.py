@@ -16,6 +16,7 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
+from langchain_mcp_adapters.elicitation import ElicitationHandler
 from langchain_mcp_adapters.hooks import Hooks
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
@@ -54,6 +55,7 @@ class MultiServerMCPClient:
         *,
         callbacks: Callbacks | None = None,
         hooks: Hooks | None = None,
+        elicitation_handler: ElicitationHandler | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -62,6 +64,8 @@ class MultiServerMCPClient:
                 If None, no initial connections are established.
             callbacks: Optional callbacks for handling notifications and events.
             hooks: Optional hooks for before/after tool call processing.
+            elicitation_handler: Optional handler for elicitation requests from servers.
+                If provided, enables the elicitation capability.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -103,6 +107,7 @@ class MultiServerMCPClient:
         )
         self.callbacks = callbacks or Callbacks()
         self.hooks = hooks
+        self.elicitation_handler = elicitation_handler
 
     @asynccontextmanager
     async def session(
@@ -136,10 +141,15 @@ class MultiServerMCPClient:
         )
 
         async with create_session(
-            self.connections[server_name], mcp_callbacks=mcp_callbacks
+            self.connections[server_name],
+            mcp_callbacks=mcp_callbacks,
+            elicitation_handler=self.elicitation_handler,
+            server_name=server_name,
         ) as session:
             if auto_initialize:
-                await session.initialize()
+                # Use custom initialization with capabilities if elicitation is enabled
+                from langchain_mcp_adapters.sessions import _initialize_with_capabilities
+                await _initialize_with_capabilities(session, self.elicitation_handler)
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
@@ -168,6 +178,7 @@ class MultiServerMCPClient:
                 callbacks=self.callbacks,
                 server_name=server_name,
                 hooks=self.hooks,
+                elicitation_handler=self.elicitation_handler,
             )
 
         all_tools: list[BaseTool] = []
@@ -180,6 +191,7 @@ class MultiServerMCPClient:
                     callbacks=self.callbacks,
                     server_name=name,
                     hooks=self.hooks,
+                    elicitation_handler=self.elicitation_handler,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
