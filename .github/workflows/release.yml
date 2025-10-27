@@ -100,7 +100,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: dist
           path: ${{ inputs.working-directory }}/dist/
@@ -136,7 +136,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: dist
           path: ${{ inputs.working-directory }}/dist/
