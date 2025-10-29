@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any, cast, get_args
 
 from langchain_core.tools import (
@@ -85,6 +86,40 @@ def _convert_call_tool_result(
         raise ToolException(tool_content)
 
     return tool_content, non_text_contents or None
+
+
+def _build_interceptor_chain(
+    base_handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]],
+    interceptors: Interceptors | None,
+    context: ToolInterceptorContext,
+) -> Callable[[ToolCallRequest], Awaitable[CallToolResult]]:
+    """Build composed handler chain with interceptors in onion pattern.
+
+    Args:
+        base_handler: Innermost handler executing the actual tool call.
+        interceptors: Optional interceptors to wrap the handler.
+        context: Context passed to each interceptor.
+
+    Returns:
+        Composed handler with all interceptors applied. First interceptor
+        in list becomes outermost layer.
+    """
+    handler = base_handler
+
+    if interceptors and interceptors.tools:
+        for interceptor in reversed(interceptors.tools):
+            current_handler = handler
+
+            async def wrapped_handler(
+                req: ToolCallRequest,
+                _interceptor=interceptor,
+                _handler=current_handler,
+            ) -> CallToolResult:
+                return await _interceptor(req, context, _handler)
+
+            handler = wrapped_handler
+
+    return handler
 
 
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
@@ -257,27 +292,8 @@ def convert_mcp_tool_to_langchain_tool(
 
             return call_tool_result
 
-        # Build the handler chain by composing interceptors
-        # Start with the innermost handler (actual execution)
-        handler = execute_tool
-
-        # Wrap with each interceptor in reverse order so first in list is outermost
-        if interceptors and interceptors.tools:
-            for interceptor in reversed(interceptors.tools):
-                # Capture the current handler in a closure
-                current_handler = handler
-
-                # Create a new handler that wraps the current one with this interceptor
-                async def wrapped_handler(
-                    req: ToolCallRequest,
-                    _interceptor=interceptor,
-                    _handler=current_handler,
-                ) -> CallToolResult:
-                    return await _interceptor(req, interceptor_context, _handler)
-
-                handler = wrapped_handler
-
-        # Execute the composed handler chain
+        # Build and execute the interceptor chain
+        handler = _build_interceptor_chain(execute_tool, interceptors, interceptor_context)
         request = ToolCallRequest(name=tool.name, args=arguments)
         call_tool_result = await handler(request)
 
