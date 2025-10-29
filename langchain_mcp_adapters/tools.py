@@ -38,13 +38,8 @@ from langchain_mcp_adapters.interceptors import (
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 try:
-    from langgraph.config import get_config
     from langgraph.runtime import get_runtime
 except ImportError:
-
-    def get_config() -> dict:
-        """no-op config getter."""
-        return {}
 
     def get_runtime() -> None:
         """no-op runtime getter."""
@@ -114,7 +109,9 @@ def _build_interceptor_chain(
             async def wrapped_handler(
                 req: ToolCallRequest,
                 _interceptor: ToolCallInterceptor = interceptor,
-                _handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]] = current_handler,
+                _handler: Callable[
+                    [ToolCallRequest], Awaitable[CallToolResult]
+                ] = current_handler,
             ) -> CallToolResult:
                 return await _interceptor(req, context, _handler)
 
@@ -209,18 +206,15 @@ def convert_mcp_tool_to_langchain_tool(
             else _MCPCallbacks()
         )
 
-        # try to get config and runtime if we're in a langgraph context
+        # try to get runtime if we're in a langgraph context
         try:
-            config = get_config()
             runtime = get_runtime()
         except Exception:  # noqa: BLE001
-            config = {}
             runtime = None
 
         interceptor_context = ToolInterceptorContext(
             server_name=server_name or "unknown",
             tool_name=tool.name,
-            config=config,
             runtime=runtime,
         )
 
