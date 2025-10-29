@@ -395,11 +395,10 @@ async def create_session(
     # Set up session kwargs with callbacks
     params["session_kwargs"] = params.get("session_kwargs", {})
 
-    if mcp_callbacks is not None:
-        if mcp_callbacks.logging_callback is not None:
-            params["session_kwargs"]["logging_callback"] = (
-                mcp_callbacks.logging_callback
-            )
+    if mcp_callbacks is not None and mcp_callbacks.logging_callback is not None:
+        params["session_kwargs"]["logging_callback"] = (
+            mcp_callbacks.logging_callback
+        )
 
     # Add elicitation callback if handler is provided
     if elicitation_handler is not None:

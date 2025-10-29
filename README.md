@@ -283,41 +283,86 @@ client = MultiServerMCPClient(
 Implement custom logic with `FunctionElicitationHandler`:
 
 ```python
-from langchain_mcp_adapters import FunctionElicitationHandler
+from langchain_mcp_adapters import MultiServerMCPClient, FunctionElicitationHandler
 
-async def prompt_user_for_input(message: str, schema: dict, server_name: str | None):
-    """Custom handler that prompts user for input."""
+async def handle_elicitation(message: str, schema: dict, server_name: str | None):
+    """Handle elicitation requests from MCP servers."""
     print(f"Server '{server_name}' requests: {message}")
-    print(f"Expected schema: {schema}")
 
-    # Collect input based on schema properties
-    user_data = {}
-    for field, field_schema in schema.get("properties", {}).items():
-        value = input(f"Enter {field} ({field_schema.get('type')}): ")
-        user_data[field] = value
+    # Your application logic here (e.g., show UI prompt to user)
+    # This example just returns mock data
+    user_approved = True  # Get actual user approval from your UI
 
-    return {
-        "action": "accept",  # or "decline" or "cancel"
-        "data": user_data,
-        "reason": None
-    }
+    if user_approved:
+        return {
+            "action": "accept",
+            "data": {"field": "value"},  # User-provided data matching schema
+            "reason": None
+        }
+    else:
+        return {
+            "action": "decline",
+            "data": None,
+            "reason": "User declined"
+        }
 
+# Create client with elicitation handler
 client = MultiServerMCPClient(
-    connections={...},
-    elicitation_handler=FunctionElicitationHandler(prompt_user_for_input)
+    connections={"server": {"url": "http://localhost:8080", "transport": "sse"}},
+    elicitation_handler=FunctionElicitationHandler(handle_elicitation)
 )
 ```
 
 ### Security Considerations
 
-Per the MCP specification:
+Per the MCP specification, this library implements the following security requirements:
 
-- Servers **MUST NOT** request sensitive information (passwords, API keys, etc.) via elicitation
-- Clients **SHOULD** display which server is requesting data
-- Clients **SHOULD** allow users to review/modify data before sending
-- Clients **SHOULD** implement rate limiting on elicitation requests
+#### 1. Schema Validation ✅
+**Requirement:** "Both parties SHOULD validate elicitation content against the provided schema"
 
-When implementing custom handlers, always validate that the requested data is appropriate and secure before accepting.
+All elicitation handlers automatically validate user-provided data against the schema using the jsonschema library. Invalid data is rejected.
+
+#### 2. Rate Limiting ✅
+**Requirement:** "Clients SHOULD implement rate limiting"
+
+Use `RateLimitedElicitationHandler` to enforce rate limits:
+
+```python
+from langchain_mcp_adapters import RateLimitedElicitationHandler, DefaultElicitationHandler
+
+handler = RateLimitedElicitationHandler(
+    DefaultElicitationHandler(),
+    max_requests=10,  # Maximum requests
+    time_window=60.0  # Per time window (seconds)
+)
+```
+
+#### 3. Server Attribution ✅
+**Requirement:** "Clients SHOULD display which server is requesting data"
+
+The `server_name` parameter is passed to all handlers, allowing you to show users which server is making the request.
+
+#### 4. User Approval & Decline ✅
+**Requirements:**
+- "Clients SHOULD implement user approval controls"
+- "Clients SHOULD allow users to decline elicitation requests at any time"
+
+Return `"decline"` or `"cancel"` in your handler's action field. Use `DeclineElicitationHandler` to automatically decline all requests.
+
+#### 5. Clear Presentation
+**Requirement:** "Clients SHOULD present elicitation requests in a way that makes it clear what information is being requested and why"
+
+The `message` parameter contains the human-readable explanation from the server. Your application should display this clearly to users along with the requested schema.
+
+#### 6. Server Responsibilities
+**Requirement:** "Servers MUST NOT request sensitive information through elicitation"
+
+This is a server-side responsibility. When implementing custom handlers, validate that requested data is appropriate before accepting.
+
+**Additional Security Notes:**
+- Schema size is limited to 100KB by default to prevent DoS attacks
+- Property count is limited to 100 per object by default
+- All limits are configurable via handler initialization parameters
 
 ## Using with LangGraph StateGraph
 

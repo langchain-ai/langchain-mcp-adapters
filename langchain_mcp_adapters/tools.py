@@ -142,6 +142,7 @@ def convert_mcp_tool_to_langchain_tool(
         callbacks: Optional callbacks for handling notifications and events
         hooks: Optional hooks for before/after tool call processing
         server_name: Name of the server this tool belongs to
+        elicitation_handler: Optional handler for elicitation requests from servers
 
     Returns:
         a LangChain tool

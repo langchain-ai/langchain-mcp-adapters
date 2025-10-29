@@ -13,14 +13,16 @@ from langchain_mcp_adapters.elicitation import (
     ElicitationHandler,
     ElicitationResponse,
     FunctionElicitationHandler,
+    RateLimitedElicitationHandler,
 )
 
 __all__ = [
-    "MultiServerMCPClient",
+    "BaseElicitationHandler",
+    "DeclineElicitationHandler",
+    "DefaultElicitationHandler",
     "ElicitationHandler",
     "ElicitationResponse",
-    "BaseElicitationHandler",
-    "DefaultElicitationHandler",
-    "DeclineElicitationHandler",
     "FunctionElicitationHandler",
+    "MultiServerMCPClient",
+    "RateLimitedElicitationHandler",
 ]
