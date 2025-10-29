@@ -18,8 +18,6 @@ from typing_extensions import NotRequired, TypedDict
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from langchain_core.runnables import RunnableConfig
-
 # Type aliases to avoid direct MCP type dependencies
 CallToolResult = MCPCallToolResult
 
@@ -31,16 +29,13 @@ class ToolInterceptorContext:
     Attributes:
         server_name: Name of the MCP server handling the tool.
         tool_name: Name of the tool being executed.
-        config: LangGraph runnable config if available.
         runtime: LangGraph runtime instance if available.
     """
 
     server_name: str
     tool_name: str
-
-    # we'll add state eventually when we have a context manager like get_state()
-    # state: object | None = None
-    config: RunnableConfig | None = None
+    # note: langgraph state is not yet available as part of the context.
+    # it needs to be plumbed through.
     runtime: object | None = None
 
 
