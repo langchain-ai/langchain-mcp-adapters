@@ -235,6 +235,135 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 
 > Only `sse` and `streamable_http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
+## Handling Elicitation Requests
+
+[Elicitation](https://modelcontextprotocol.io/specification/draft/client/elicitation) allows MCP servers to request structured user input during interactions. When a server needs additional information (like configuration settings, preferences, or form data), it can send an elicitation request with a JSON schema defining the expected response structure.
+
+The `langchain-mcp-adapters` library provides several built-in handlers for managing elicitation requests:
+
+### Auto-accepting with Default Values
+
+The `DefaultElicitationHandler` automatically accepts elicitation requests using default values from the schema:
+
+```python
+from langchain_mcp_adapters import MultiServerMCPClient, DefaultElicitationHandler
+
+client = MultiServerMCPClient(
+    connections={
+        "my_server": {
+            "command": "python",
+            "args": ["server.py"],
+            "transport": "stdio",
+        }
+    },
+    elicitation_handler=DefaultElicitationHandler(auto_accept=True)
+)
+
+tools = await client.get_tools()
+# Server can now request user input, which will be auto-filled with defaults
+```
+
+### Declining All Requests
+
+For non-interactive environments, use `DeclineElicitationHandler`:
+
+```python
+from langchain_mcp_adapters import DeclineElicitationHandler
+
+client = MultiServerMCPClient(
+    connections={...},
+    elicitation_handler=DeclineElicitationHandler(
+        reason="User input not available in batch mode"
+    )
+)
+```
+
+### Custom Handler for Interactive Prompts
+
+Implement custom logic with `FunctionElicitationHandler`:
+
+```python
+from langchain_mcp_adapters import MultiServerMCPClient, FunctionElicitationHandler
+
+async def handle_elicitation(message: str, schema: dict, server_name: str | None):
+    """Handle elicitation requests from MCP servers."""
+    print(f"Server '{server_name}' requests: {message}")
+
+    # Your application logic here (e.g., show UI prompt to user)
+    # This example just returns mock data
+    user_approved = True  # Get actual user approval from your UI
+
+    if user_approved:
+        return {
+            "action": "accept",
+            "data": {"field": "value"},  # User-provided data matching schema
+            "reason": None
+        }
+    else:
+        return {
+            "action": "decline",
+            "data": None,
+            "reason": "User declined"
+        }
+
+# Create client with elicitation handler
+client = MultiServerMCPClient(
+    connections={"server": {"url": "http://localhost:8080", "transport": "sse"}},
+    elicitation_handler=FunctionElicitationHandler(handle_elicitation)
+)
+```
+
+### Security Considerations
+
+Per the MCP specification, this library implements the following security requirements:
+
+#### 1. Schema Validation ✅
+**Requirement:** "Both parties SHOULD validate elicitation content against the provided schema"
+
+All elicitation handlers automatically validate user-provided data against the schema using the jsonschema library. Invalid data is rejected.
+
+#### 2. Rate Limiting ✅
+**Requirement:** "Clients SHOULD implement rate limiting"
+
+Use `RateLimitedElicitationHandler` to enforce rate limits:
+
+```python
+from langchain_mcp_adapters import RateLimitedElicitationHandler, DefaultElicitationHandler
+
+handler = RateLimitedElicitationHandler(
+    DefaultElicitationHandler(),
+    max_requests=10,  # Maximum requests
+    time_window=60.0  # Per time window (seconds)
+)
+```
+
+#### 3. Server Attribution ✅
+**Requirement:** "Clients SHOULD display which server is requesting data"
+
+The `server_name` parameter is passed to all handlers, allowing you to show users which server is making the request.
+
+#### 4. User Approval & Decline ✅
+**Requirements:**
+- "Clients SHOULD implement user approval controls"
+- "Clients SHOULD allow users to decline elicitation requests at any time"
+
+Return `"decline"` or `"cancel"` in your handler's action field. Use `DeclineElicitationHandler` to automatically decline all requests.
+
+#### 5. Clear Presentation
+**Requirement:** "Clients SHOULD present elicitation requests in a way that makes it clear what information is being requested and why"
+
+The `message` parameter contains the human-readable explanation from the server. Your application should display this clearly to users along with the requested schema.
+
+#### 6. Server Responsibilities
+**Requirement:** "Servers MUST NOT request sensitive information through elicitation"
+
+This is a server-side responsibility. When implementing custom handlers, validate that requested data is appropriate before accepting.
+
+**Additional Security Notes:**
+- The jsonschema library safely handles complex schemas and validates data
+- Rate limiting prevents abuse through excessive elicitation requests
+- All handler parameters are configurable for application-specific needs
+
 ## Using with LangGraph StateGraph
 
 ```python

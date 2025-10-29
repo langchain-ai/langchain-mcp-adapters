@@ -359,13 +359,19 @@ async def _create_websocket_session(
 
 @asynccontextmanager
 async def create_session(
-    connection: Connection, *, mcp_callbacks: _MCPCallbacks | None = None
+    connection: Connection,
+    *,
+    mcp_callbacks: _MCPCallbacks | None = None,
+    elicitation_handler: Any | None = None,  # ElicitationHandler
+    server_name: str | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
         mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
+        elicitation_handler: Optional handler for elicitation requests
+        server_name: Optional name of the server for context
 
     Raises:
         ValueError: If transport is not recognized
@@ -386,15 +392,21 @@ async def create_session(
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
 
-    if mcp_callbacks is not None:
-        params["session_kwargs"] = params.get("session_kwargs", {})
-        # right now the only callback supported on the ClientSession
-        # is the logging callback, but long term we'll also want to
-        # support sampling, elicitation, list roots, etc.
-        if mcp_callbacks.logging_callback is not None:
-            params["session_kwargs"]["logging_callback"] = (
-                mcp_callbacks.logging_callback
-            )
+    # Set up session kwargs with callbacks
+    params["session_kwargs"] = params.get("session_kwargs", {})
+
+    if mcp_callbacks is not None and mcp_callbacks.logging_callback is not None:
+        params["session_kwargs"]["logging_callback"] = (
+            mcp_callbacks.logging_callback
+        )
+
+    # Add elicitation callback if handler is provided
+    if elicitation_handler is not None:
+        from langchain_mcp_adapters.elicitation import create_mcp_elicitation_callback
+
+        params["session_kwargs"]["elicitation_callback"] = (
+            await create_mcp_elicitation_callback(elicitation_handler, server_name)
+        )
 
     if transport == "sse":
         if "url" not in params:
