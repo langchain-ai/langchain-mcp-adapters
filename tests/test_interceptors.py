@@ -1,9 +1,7 @@
 """Tests for the interceptor system functionality."""
 
-import os
-from pathlib import Path
-
 import pytest
+from mcp.server import FastMCP
 from mcp.types import (
     CallToolResult,
     TextContent,
@@ -15,23 +13,30 @@ from langchain_mcp_adapters.interceptors import (
     ToolInterceptorContext,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
+from tests.utils import run_streamable_http
 
 
-def _get_math_server_config():
-    """Get configuration for math server."""
-    current_dir = Path(__file__).parent
-    math_server_path = os.path.join(current_dir, "servers/math_server.py")
-    return {
-        "command": "python3",
-        "args": [math_server_path],
-        "transport": "stdio",
-    }
+def _create_math_server(port: int = 8200):
+    """Create a math server with add and multiply tools."""
+    server = FastMCP(port=port)
+
+    @server.tool()
+    def add(a: int, b: int) -> int:
+        """Add two numbers"""
+        return a + b
+
+    @server.tool()
+    def multiply(a: int, b: int) -> int:
+        """Multiply two numbers"""
+        return a * b
+
+    return server
 
 
 class TestInterceptorModifiesRequest:
     """Tests for interceptors that modify the request."""
 
-    async def test_interceptor_modifies_arguments(self):
+    async def test_interceptor_modifies_arguments(self, socket_enabled):
         """Test that interceptor can modify tool arguments."""
 
         async def modify_args_interceptor(
@@ -50,18 +55,23 @@ class TestInterceptorModifiesRequest:
             return await handler(modified_request)
 
         interceptors = Interceptors(tools=[modify_args_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        # Original call would be 2 + 3 = 5, but interceptor doubles it to 4 + 6 = 10
-        result = await add_tool.ainvoke({"a": 2, "b": 3})
-        assert "10" in str(result)
+        with run_streamable_http(_create_math_server, 8200):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8200/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
 
-    async def test_interceptor_modifies_tool_name(self):
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            # Original call would be 2 + 3 = 5, but interceptor doubles it to 4 + 6 = 10
+            result = await add_tool.ainvoke({"a": 2, "b": 3})
+            assert "10" in str(result)
+
+    async def test_interceptor_modifies_tool_name(self, socket_enabled):
         """Test that interceptor can redirect to different tool."""
 
         async def redirect_tool_interceptor(
@@ -80,18 +90,23 @@ class TestInterceptorModifiesRequest:
             return await handler(request)
 
         interceptors = Interceptors(tools=[redirect_tool_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        # Call add but interceptor redirects to multiply: 5 * 2 = 10
-        result = await add_tool.ainvoke({"a": 5, "b": 2})
-        assert result == "10"
+        with run_streamable_http(_create_math_server, 8201):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8201/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
 
-    async def test_interceptor_modifies_headers(self):
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            # Call add but interceptor redirects to multiply: 5 * 2 = 10
+            result = await add_tool.ainvoke({"a": 5, "b": 2})
+            assert result == "10"
+
+    async def test_interceptor_modifies_headers(self, socket_enabled):
         """Test that interceptor can modify headers (for applicable transports)."""
 
         async def modify_headers_interceptor(
@@ -107,16 +122,20 @@ class TestInterceptorModifiesRequest:
             return await handler(modified_request)
 
         interceptors = Interceptors(tools=[modify_headers_interceptor])
-        # For stdio transport, headers won't apply, but interceptor should still work
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        result = await add_tool.ainvoke({"a": 2, "b": 3})
-        assert result == "5"
+        with run_streamable_http(_create_math_server, 8202):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8202/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 2, "b": 3})
+            assert result == "5"
 
 
 class TestInterceptorModifiesResponse:
