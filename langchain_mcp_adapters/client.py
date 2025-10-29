@@ -16,7 +16,7 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
-from langchain_mcp_adapters.hooks import Hooks
+from langchain_mcp_adapters.interceptors import Interceptors
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
@@ -53,7 +53,7 @@ class MultiServerMCPClient:
         connections: dict[str, Connection] | None = None,
         *,
         callbacks: Callbacks | None = None,
-        hooks: Hooks | None = None,
+        interceptors: Interceptors | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -61,7 +61,7 @@ class MultiServerMCPClient:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
             callbacks: Optional callbacks for handling notifications and events.
-            hooks: Optional hooks for before/after tool call processing.
+            interceptors: Optional interceptors for modifying requests and responses.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -102,7 +102,7 @@ class MultiServerMCPClient:
             connections if connections is not None else {}
         )
         self.callbacks = callbacks or Callbacks()
-        self.hooks = hooks
+        self.interceptors = interceptors or Interceptors()
 
     @asynccontextmanager
     async def session(
@@ -111,18 +111,17 @@ class MultiServerMCPClient:
         *,
         auto_initialize: bool = True,
     ) -> AsyncIterator[ClientSession]:
-        """Connect to an MCP server and initialize a session.
+        """Create an MCP client session context manager.
 
         Args:
-            server_name: Name to identify this server connection
-            auto_initialize: Whether to automatically initialize the session
-
-        Raises:
-            ValueError: If the server name is not found in the connections
+            server_name: Server connection identifier.
+            auto_initialize: Auto-initialize session (default: True).
 
         Yields:
-            An initialized ClientSession
+            Initialized ClientSession.
 
+        Raises:
+            ValueError: If server_name not in connections.
         """
         if server_name not in self.connections:
             msg = (
@@ -143,17 +142,20 @@ class MultiServerMCPClient:
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
-        """Get a list of all tools from all connected servers.
+        """Get tools from MCP servers.
+
+        Note: Creates new session per tool call. Tools from all servers
+        returned if server_name is None.
 
         Args:
-            server_name: Optional name of the server to get tools from.
-                If None, all tools from all servers will be returned (default).
-
-        NOTE: a new session will be created for each tool call
+            server_name: Optional server to fetch tools from. If None,
+                returns tools from all connected servers.
 
         Returns:
-            A list of LangChain tools
+            List of LangChain BaseTool instances.
 
+        Raises:
+            ValueError: If specified server_name not in connections.
         """
         if server_name is not None:
             if server_name not in self.connections:
@@ -167,7 +169,7 @@ class MultiServerMCPClient:
                 connection=self.connections[server_name],
                 callbacks=self.callbacks,
                 server_name=server_name,
-                hooks=self.hooks,
+                interceptors=self.interceptors,
             )
 
         all_tools: list[BaseTool] = []
@@ -179,7 +181,7 @@ class MultiServerMCPClient:
                     connection=connection,
                     callbacks=self.callbacks,
                     server_name=name,
-                    hooks=self.hooks,
+                    interceptors=self.interceptors,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
@@ -195,7 +197,19 @@ class MultiServerMCPClient:
         *,
         arguments: dict[str, Any] | None = None,
     ) -> list[HumanMessage | AIMessage]:
-        """Get a prompt from a given MCP server."""
+        """Get a prompt from an MCP server.
+
+        Args:
+            server_name: Name of the server to fetch prompt from.
+            prompt_name: Name of the prompt to load.
+            arguments: Optional prompt template arguments.
+
+        Returns:
+            List of LangChain messages (HumanMessage or AIMessage).
+
+        Raises:
+            ValueError: If server_name not found in connections.
+        """
         async with self.session(server_name) as session:
             return await load_mcp_prompt(session, prompt_name, arguments=arguments)
 
@@ -205,16 +219,17 @@ class MultiServerMCPClient:
         *,
         uris: str | list[str] | None = None,
     ) -> list[Blob]:
-        """Get resources from a given MCP server.
+        """Get resources from an MCP server.
 
         Args:
-            server_name: Name of the server to get resources from
-            uris: Optional resource URI or list of URIs to load. If not provided,
-                all resources will be loaded.
+            server_name: Server to fetch resources from.
+            uris: Optional URI(s) to load. If None, loads all resources.
 
         Returns:
-            A list of LangChain Blobs
+            List of LangChain Blob objects.
 
+        Raises:
+            ValueError: If server_name not in connections.
         """
         async with self.session(server_name) as session:
             return await load_mcp_resources(session, uris=uris)

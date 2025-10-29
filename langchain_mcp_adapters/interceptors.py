@@ -9,8 +9,9 @@ request / result lifecycle, for example to support elicitation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Protocol
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mcp.types import CallToolResult as MCPCallToolResult
 from typing_extensions import NotRequired, TypedDict
@@ -24,7 +25,14 @@ CallToolResult = MCPCallToolResult
 
 @dataclass
 class ToolInterceptorContext:
-    """Context object passed to interceptors containing state and server information."""
+    """Context passed to interceptors for tool execution.
+
+    Attributes:
+        server_name: Name of the MCP server handling the tool.
+        tool_name: Name of the tool being executed.
+        config: LangGraph runnable config if available.
+        runtime: LangGraph runtime instance if available.
+    """
 
     server_name: str
     tool_name: str
@@ -36,7 +44,15 @@ class ToolInterceptorContext:
 
 
 class ToolCallRequest(TypedDict, total=False):
-    """Tool call request that can be modified by interceptors."""
+    """TypedDict representing a modifiable tool call request.
+
+    All fields are optional to allow partial modifications by interceptors.
+
+    Attributes:
+        name: Tool name to invoke.
+        args: Tool arguments as key-value pairs.
+        headers: HTTP headers for applicable transports (SSE, HTTP).
+    """
 
     name: NotRequired[str]
     args: NotRequired[dict[str, Any]]
@@ -44,25 +60,14 @@ class ToolCallRequest(TypedDict, total=False):
 
 
 class ToolCallInterceptor(Protocol):
-    """Protocol for tool call interceptor functions.
+    """Protocol for tool call interceptors using handler callback pattern.
 
-    Interceptors wrap tool execution with a handler callback pattern, enabling:
-    - Request/response modification
-    - Retry logic
-    - Caching
-    - Rate limiting
-    - Circuit breaking
-    - Logging and monitoring
-    - Short-circuiting execution
+    Interceptors wrap tool execution to enable request/response modification,
+    retry logic, caching, rate limiting, and other cross-cutting concerns.
+    Multiple interceptors compose in "onion" pattern (first is outermost).
 
-    The handler callback executes the actual tool call. Interceptors can:
-    - Call handler once with original or modified request
-    - Call handler multiple times (e.g., for retry logic)
-    - Skip calling handler entirely (e.g., return cached result)
-    - Wrap handler call in try/catch for error handling
-
-    Multiple interceptors compose in an "onion" pattern where the first
-    interceptor in the list is the outermost layer.
+    The handler can be called multiple times (retry), skipped (caching/short-circuit),
+    or wrapped with error handling. Each handler call is independent.
     """
 
     async def __call__(
@@ -71,59 +76,62 @@ class ToolCallInterceptor(Protocol):
         context: ToolInterceptorContext,
         handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]],
     ) -> CallToolResult:
-        """Intercept and control tool execution via handler callback.
-
-        The handler callback executes the tool call and returns a CallToolResult.
-        Interceptors can call the handler multiple times for retry logic, skip
-        calling it to short-circuit, or modify the request/response. Multiple
-        interceptors compose with first in list as outermost layer.
+        """Intercept tool execution with control over handler invocation.
 
         Args:
-            request: Tool call request with name, args, and optional headers.
-            context: Interceptor context with server/tool info, config, and runtime.
-            handler: Async callable to execute the tool and return CallToolResult.
-                Can be called multiple times for retry logic. Can skip calling
-                it to short-circuit execution.
+            request: Tool call request (name, args, headers).
+            context: Execution context with server/tool info and LangGraph state.
+            handler: Async callable executing the tool. Can be called multiple
+                times, skipped, or wrapped for error handling.
 
         Returns:
-            CallToolResult (the final result).
-
-        The handler callable can be invoked multiple times for retry logic.
-        Each call to handler is independent and stateless.
+            Final CallToolResult from tool execution or interceptor logic.
 
         Examples:
-            Async retry on error:
-            ```python
-            async def __call__(self, request, context, handler):
-                for attempt in range(3):
-                    try:
-                        result = await handler(request)
-                        if not result.isError:
-                            return result
-                    except Exception:
-                        if attempt == 2:
-                            raise
-                return result
-            ```
+            Retry on error::
 
-            Caching:
-            ```python
-            async def __call__(self, request, context, handler):
-                cache_key = f"{request['name']}:{request['args']}"
-                if cached := await get_cache_async(cache_key):
-                    return cached
-                result = await handler(request)
-                await save_cache_async(cache_key, result)
-                return result
-            ```
+                async def __call__(self, request, context, handler):
+                    for attempt in range(3):
+                        try:
+                            result = await handler(request)
+                            if not result.isError:
+                                return result
+                        except Exception:
+                            if attempt == 2:
+                                raise
+                    return result
 
-            Request modification:
-            ```python
-            async def __call__(self, request, context, handler):
-                modified_request = request.copy()
-                modified_request["args"]["verbose"] = True
-                return await handler(modified_request)
-            ```
+            Caching::
+
+                async def __call__(self, request, context, handler):
+                    cache_key = f"{request['name']}:{request['args']}"
+                    if cached := await get_cache_async(cache_key):
+                        return cached
+                    result = await handler(request)
+                    await save_cache_async(cache_key, result)
+                    return result
+
+            Request modification::
+
+                async def __call__(self, request, context, handler):
+                    modified_request = request.copy()
+                    modified_request["args"]["verbose"] = True
+                    return await handler(modified_request)
         """
         ...
 
+
+@dataclass
+class Interceptors:
+    """Container for MCP client interceptors.
+
+    Interceptors compose in order with first as outermost layer.
+    For [A, B, C], execution order is A → B → C → tool_call.
+
+    Future: Will support resource_interceptors and prompt_interceptors.
+
+    Attributes:
+        tools: List of tool call interceptors applied in order.
+    """
+
+    tools: list[ToolCallInterceptor] = field(default_factory=list)
