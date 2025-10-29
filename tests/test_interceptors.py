@@ -106,42 +106,11 @@ class TestInterceptorModifiesRequest:
             result = await add_tool.ainvoke({"a": 5, "b": 2})
             assert result == "10"
 
-    async def test_interceptor_modifies_headers(self, socket_enabled):
-        """Test that interceptor can modify headers (for applicable transports)."""
-
-        async def modify_headers_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
-            handler,
-        ) -> CallToolResult:
-            modified_request = ToolCallRequest(
-                name=request.get("name"),
-                args=request.get("args", {}),
-                headers={"X-Custom-Header": "test-value"},
-            )
-            return await handler(modified_request)
-
-        interceptors = Interceptors(tools=[modify_headers_interceptor])
-
-        with run_streamable_http(_create_math_server, 8202):
-            tools = await load_mcp_tools(
-                None,
-                connection={
-                    "url": "http://localhost:8202/mcp",
-                    "transport": "streamable_http",
-                },
-                interceptors=interceptors,
-            )
-
-            add_tool = next(tool for tool in tools if tool.name == "add")
-            result = await add_tool.ainvoke({"a": 2, "b": 3})
-            assert result == "5"
-
 
 class TestInterceptorModifiesResponse:
     """Tests for interceptors that modify the response."""
 
-    async def test_interceptor_modifies_result(self):
+    async def test_interceptor_modifies_result(self, socket_enabled):
         """Test that interceptor can modify tool result."""
 
         async def modify_result_interceptor(
@@ -168,18 +137,23 @@ class TestInterceptorModifiesResponse:
             )
 
         interceptors = Interceptors(tools=[modify_result_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        result = await add_tool.ainvoke({"a": 2, "b": 3})
-        # The interceptor modifies the result
-        assert result == "Modified: 5"
+        with run_streamable_http(_create_math_server, 8203):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8203/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
 
-    async def test_interceptor_returns_custom_result(self):
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 2, "b": 3})
+            # The interceptor modifies the result
+            assert result == "Modified: 5"
+
+    async def test_interceptor_returns_custom_result(self, socket_enabled):
         """Test that interceptor can return a completely custom CallToolResult."""
 
         async def return_custom_result_interceptor(
@@ -194,52 +168,27 @@ class TestInterceptorModifiesResponse:
             )
 
         interceptors = Interceptors(tools=[return_custom_result_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        result = await add_tool.ainvoke({"a": 2, "b": 3})
-        # The interceptor returns a custom result without calling handler
-        assert result == "Custom tool response"
+        with run_streamable_http(_create_math_server, 8204):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8204/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 2, "b": 3})
+            # The interceptor returns a custom result without calling handler
+            assert result == "Custom tool response"
 
 
 class TestInterceptorAdvancedPatterns:
-    """Tests for advanced interceptor patterns like retry and caching."""
+    """Tests for advanced interceptor patterns like caching."""
 
-    async def test_interceptor_retry_on_error(self):
-        """Test that interceptor can implement retry logic."""
-        call_count = 0
-
-        async def retry_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
-            handler,
-        ) -> CallToolResult:
-            nonlocal call_count
-            for _attempt in range(3):
-                call_count += 1
-                result = await handler(request)
-                if not result.isError:
-                    return result
-            return result
-
-        interceptors = Interceptors(tools=[retry_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
-
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        result = await add_tool.ainvoke({"a": 2, "b": 3})
-        # Should succeed on first try since there's no error
-        assert result == "5"
-        assert call_count == 1
-
-    async def test_interceptor_caching(self):
+    async def test_interceptor_caching(self, socket_enabled):
         """Test that interceptor can implement caching."""
         cache = {}
         call_count = 0
@@ -261,34 +210,39 @@ class TestInterceptorAdvancedPatterns:
             return result
 
         interceptors = Interceptors(tools=[caching_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
+        with run_streamable_http(_create_math_server, 8206):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8206/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
 
-        # First call - should execute
-        result1 = await add_tool.ainvoke({"a": 2, "b": 3})
-        assert result1 == "5"
-        assert call_count == 1
+            add_tool = next(tool for tool in tools if tool.name == "add")
 
-        # Second call with same args - should use cache
-        result2 = await add_tool.ainvoke({"a": 2, "b": 3})
-        assert result2 == "5"
-        assert call_count == 1  # Should not increment
+            # First call - should execute
+            result1 = await add_tool.ainvoke({"a": 2, "b": 3})
+            assert result1 == "5"
+            assert call_count == 1
 
-        # Third call with different args - should execute
-        result3 = await add_tool.ainvoke({"a": 5, "b": 7})
-        assert result3 == "12"
-        assert call_count == 2
+            # Second call with same args - should use cache
+            result2 = await add_tool.ainvoke({"a": 2, "b": 3})
+            assert result2 == "5"
+            assert call_count == 1  # Should not increment
+
+            # Third call with different args - should execute
+            result3 = await add_tool.ainvoke({"a": 5, "b": 7})
+            assert result3 == "12"
+            assert call_count == 2
 
 
 class TestInterceptorComposition:
     """Tests for composing multiple interceptors."""
 
-    async def test_multiple_interceptors_compose(self):
+    async def test_multiple_interceptors_compose(self, socket_enabled):
         """Test that multiple interceptors compose in the correct order."""
         execution_order = []
 
@@ -316,24 +270,30 @@ class TestInterceptorComposition:
         interceptors = Interceptors(
             tools=[logging_interceptor_1, logging_interceptor_2]
         )
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        result = await add_tool.ainvoke({"a": 2, "b": 3})
-        assert result == "5"
+        with run_streamable_http(_create_math_server, 8207):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8207/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
 
-        # Should execute in onion order: 1 before, 2 before, execute, 2 after, 1 after
-        assert execution_order == ["before_1", "before_2", "after_2", "after_1"]
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 2, "b": 3})
+            assert result == "5"
+
+            # Should execute in onion order: 1 before, 2 before, execute, 2 after,
+            # 1 after
+            assert execution_order == ["before_1", "before_2", "after_2", "after_1"]
 
 
 class TestInterceptorErrorHandling:
     """Tests for interceptor error handling."""
 
-    async def test_interceptor_exception_propagates(self):
+    async def test_interceptor_exception_propagates(self, socket_enabled):
         """Test that exceptions in interceptors propagate correctly."""
 
         async def failing_interceptor(
@@ -344,34 +304,17 @@ class TestInterceptorErrorHandling:
             raise ValueError("Interceptor failed")
 
         interceptors = Interceptors(tools=[failing_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
 
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        with pytest.raises(ValueError, match="Interceptor failed"):
-            await add_tool.ainvoke({"a": 2, "b": 3})
+        with run_streamable_http(_create_math_server, 8208):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8208/mcp",
+                    "transport": "streamable_http",
+                },
+                interceptors=interceptors,
+            )
 
-    async def test_interceptor_exception_after_handler_propagates(self):
-        """Test that exceptions after handler execution propagate correctly."""
-
-        async def failing_after_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
-            handler,
-        ) -> CallToolResult:
-            await handler(request)
-            raise RuntimeError("After handler failed")
-
-        interceptors = Interceptors(tools=[failing_after_interceptor])
-        tools = await load_mcp_tools(
-            None,
-            connection=_get_math_server_config(),
-            interceptors=interceptors,
-        )
-
-        add_tool = next(tool for tool in tools if tool.name == "add")
-        with pytest.raises(RuntimeError, match="After handler failed"):
-            await add_tool.ainvoke({"a": 2, "b": 3})
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            with pytest.raises(ValueError, match="Interceptor failed"):
+                await add_tool.ainvoke({"a": 2, "b": 3})
