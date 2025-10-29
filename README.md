@@ -360,9 +360,9 @@ The `message` parameter contains the human-readable explanation from the server.
 This is a server-side responsibility. When implementing custom handlers, validate that requested data is appropriate before accepting.
 
 **Additional Security Notes:**
-- Schema size is limited to 100KB by default to prevent DoS attacks
-- Property count is limited to 100 per object by default
-- All limits are configurable via handler initialization parameters
+- The jsonschema library safely handles complex schemas and validates data
+- Rate limiting prevents abuse through excessive elicitation requests
+- All handler parameters are configurable for application-specific needs
 
 ## Using with LangGraph StateGraph
 

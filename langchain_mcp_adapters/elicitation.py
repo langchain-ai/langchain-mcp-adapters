@@ -6,7 +6,6 @@ to request structured user input during interactions.
 
 from __future__ import annotations
 
-import json
 import time
 from abc import ABC, abstractmethod
 from collections import deque
@@ -23,11 +22,6 @@ except ImportError:
 if TYPE_CHECKING:
     from mcp.shared.context import RequestContext
     from mcp.types import ElicitRequestParams
-
-
-# Security limits (configurable via handler __init__)
-DEFAULT_MAX_SCHEMA_SIZE = 100_000  # 100KB
-DEFAULT_MAX_PROPERTIES = 100
 
 
 class ElicitationResponse(TypedDict):
@@ -76,19 +70,13 @@ class BaseElicitationHandler(ABC):
     def __init__(
         self,
         *,
-        max_schema_size: int = DEFAULT_MAX_SCHEMA_SIZE,
-        max_properties: int = DEFAULT_MAX_PROPERTIES,
         use_jsonschema: bool = True,
     ) -> None:
-        """Initialize the base handler with security limits.
+        """Initialize the base handler.
 
         Args:
-            max_schema_size: Maximum schema size in characters
-            max_properties: Maximum number of properties per object
             use_jsonschema: Whether to use jsonschema library for validation
         """
-        self.max_schema_size = max_schema_size
-        self.max_properties = max_properties
         self.use_jsonschema = use_jsonschema and jsonschema is not None
         self._jsonschema_module = jsonschema if self.use_jsonschema else None
 
@@ -110,53 +98,6 @@ class BaseElicitationHandler(ABC):
             Response containing the action (accept/decline/cancel) and optional data
         """
         ...
-
-    def _check_schema_size(self, schema: dict[str, Any]) -> bool:
-        """Check if schema size is within limits.
-
-        Args:
-            schema: The schema to check
-
-        Returns:
-            True if within limits, False otherwise
-        """
-        schema_str = json.dumps(schema)
-        return len(schema_str) <= self.max_schema_size
-
-    def _check_property_count(self, schema: dict[str, Any]) -> bool:
-        """Check if property count is within limits.
-
-        Args:
-            schema: The schema to check
-
-        Returns:
-            True if within limits, False otherwise
-        """
-        if schema.get("type") != "object":
-            return True
-
-        properties = schema.get("properties", {})
-        return len(properties) <= self.max_properties
-
-    def validate_schema_limits(self, schema: dict[str, Any]) -> tuple[bool, str | None]:
-        """Validate that schema is within security limits.
-
-        Args:
-            schema: The schema to validate
-
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
-        if not self._check_schema_size(schema):
-            return False, f"Schema exceeds maximum size of {self.max_schema_size}"
-
-        if not self._check_property_count(schema):
-            return (
-                False,
-                f"Schema exceeds maximum properties of {self.max_properties}",
-            )
-
-        return True, None
 
     def validate_schema_response(
         self, data: dict[str, Any], schema: dict[str, Any]
@@ -266,15 +207,6 @@ class DefaultElicitationHandler(BaseElicitationHandler):
         Returns:
             Response with default values if auto_accept is True, otherwise decline
         """
-        # Validate schema limits
-        is_valid, error_msg = self.validate_schema_limits(schema)
-        if not is_valid:
-            return {
-                "action": "decline",
-                "data": None,
-                "reason": f"Schema validation failed: {error_msg}",
-            }
-
         if not self.auto_accept:
             return {
                 "action": "decline",
@@ -465,15 +397,6 @@ class FunctionElicitationHandler(BaseElicitationHandler):
         Returns:
             Response from the custom handler function
         """
-        # Validate schema limits before delegating
-        is_valid, error_msg = self.validate_schema_limits(schema)
-        if not is_valid:
-            return {
-                "action": "decline",
-                "data": None,
-                "reason": f"Schema validation failed: {error_msg}",
-            }
-
         # Call user's handler
         response = await self.handler_func(message, schema, server_name)
 
