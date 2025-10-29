@@ -31,6 +31,7 @@ from pydantic import BaseModel, create_model
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.interceptors import (
     Interceptors,
+    ToolCallInterceptor,
     ToolCallRequest,
     ToolInterceptorContext,
 )
@@ -112,8 +113,8 @@ def _build_interceptor_chain(
 
             async def wrapped_handler(
                 req: ToolCallRequest,
-                _interceptor=interceptor,
-                _handler=current_handler,
+                _interceptor: ToolCallInterceptor = interceptor,
+                _handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]] = current_handler,
             ) -> CallToolResult:
                 return await _interceptor(req, context, _handler)
 

@@ -1,28 +1,29 @@
 """Tests for callback functionality."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
 
-from mcp.types import CallToolResult, LoggingMessageNotificationParams, TextContent
-from mcp.types import Tool as MCPTool
+from mcp.server import FastMCP
+from mcp.types import LoggingMessageNotificationParams
 
 from langchain_mcp_adapters.callbacks import (
     CallbackContext,
     Callbacks,
-    LoggingMessageCallback,
-    ProgressCallback,
-    _MCPCallbacks,
 )
-from langchain_mcp_adapters.tools import (
-    convert_mcp_tool_to_langchain_tool,
-    load_mcp_tools,
-)
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from tests.utils import run_streamable_http
 
 
 async def test_to_mcp_format_with_callbacks() -> None:
     """Test converting to MCP format with callbacks."""
-    logging_callback = AsyncMock(spec=LoggingMessageCallback)
-    progress_callback = AsyncMock(spec=ProgressCallback)
+    logging_calls = []
+    progress_calls = []
+
+    async def logging_callback(params: LoggingMessageNotificationParams, context: CallbackContext):
+        logging_calls.append((params, context))
+
+    async def progress_callback(progress: float, total: float | None, message: str | None, context: CallbackContext):
+        progress_calls.append((progress, total, message, context))
+
     callbacks = Callbacks(
         on_logging_message=logging_callback,
         on_progress=progress_callback,
@@ -31,7 +32,6 @@ async def test_to_mcp_format_with_callbacks() -> None:
 
     mcp_callbacks = callbacks.to_mcp_format(context=context)
 
-    assert isinstance(mcp_callbacks, _MCPCallbacks)
     assert mcp_callbacks.logging_callback is not None
     assert mcp_callbacks.progress_callback is not None
 
@@ -40,11 +40,14 @@ async def test_to_mcp_format_with_callbacks() -> None:
         level="info", data={"message": "test log"}
     )
     await mcp_callbacks.logging_callback(params)
-    logging_callback.assert_called_once_with(params, context)
+    assert len(logging_calls) == 1
+    assert logging_calls[0][0] == params
+    assert logging_calls[0][1].server_name == "test_server"
 
     # Test progress callback
     await mcp_callbacks.progress_callback(0.75, 1.0, "Almost done...")
-    progress_callback.assert_called_once_with(0.75, 1.0, "Almost done...", context)
+    assert len(progress_calls) == 1
+    assert progress_calls[0] == (0.75, 1.0, "Almost done...", context)
 
 
 async def test_progress_callback_execution() -> None:
