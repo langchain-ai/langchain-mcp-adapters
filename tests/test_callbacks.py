@@ -122,8 +122,12 @@ async def test_callbacks_with_mcp_tool_execution(socket_enabled) -> None:
 
         # Verify both progress and logging callbacks were called
         await asyncio.sleep(0.05)  # Give time for callbacks to complete
-        assert len(progress_calls) >= 3, f"Expected at least 3 progress calls, got {len(progress_calls)}"
-        assert len(logging_calls) >= 2, f"Expected at least 2 logging calls, got {len(logging_calls)}"
+        assert len(progress_calls) >= 3, (
+            f"Expected at least 3 progress calls, got {len(progress_calls)}"
+        )
+        assert len(logging_calls) >= 2, (
+            f"Expected at least 2 logging calls, got {len(logging_calls)}"
+        )
 
         # Verify progress values
         progress_values = [call[0] for call in progress_calls]
