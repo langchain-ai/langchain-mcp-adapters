@@ -200,7 +200,7 @@ class TestInterceptorAdvancedPatterns:
             handler,
         ) -> CallToolResult:
             nonlocal call_count
-            for attempt in range(3):
+            for _attempt in range(3):
                 call_count += 1
                 result = await handler(request)
                 if not result.isError:
@@ -295,7 +295,7 @@ class TestInterceptorComposition:
 
         # First in list should be outermost layer
         interceptors = Interceptors(
-            interceptors=[logging_interceptor_1, logging_interceptor_2]
+            tools=[logging_interceptor_1, logging_interceptor_2]
         )
         tools = await load_mcp_tools(
             None,

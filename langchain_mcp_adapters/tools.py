@@ -293,7 +293,9 @@ def convert_mcp_tool_to_langchain_tool(
             return call_tool_result
 
         # Build and execute the interceptor chain
-        handler = _build_interceptor_chain(execute_tool, interceptors, interceptor_context)
+        handler = _build_interceptor_chain(
+            execute_tool, interceptors, interceptor_context
+        )
         request = ToolCallRequest(name=tool.name, args=arguments)
         call_tool_result = await handler(request)
 
