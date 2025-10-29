@@ -87,6 +87,7 @@ class ToolCallInterceptor(Protocol):
         Returns:
             Final CallToolResult from tool execution or interceptor logic.
         ...
+        """
 
 
 @dataclass
@@ -94,7 +95,7 @@ class Interceptors:
     """Container for MCP client interceptors.
 
     Interceptors compose in order with first as outermost layer.
-    For [A, B, C], execution order is A → B → C → tool_call.
+    For [A, B, C], execution order is A -> B -> C  tool_call.
 
     Future: Will support resource_interceptors and prompt_interceptors.
 
