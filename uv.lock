@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 
 [[package]]
@@ -282,7 +282,7 @@ wheels = [
 
 [[package]]
 name = "langchain-mcp-adapters"
-version = "0.1.10"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "langchain-core" },
@@ -304,7 +304,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "langchain-core", specifier = ">=0.3.36,<2.0.0" },
+    { name = "langchain-core", specifier = ">=0.3.36,<3.0.0" },
     { name = "mcp", specifier = ">=1.9.2" },
     { name = "typing-extensions", specifier = ">=4.14.0" },
 ]
