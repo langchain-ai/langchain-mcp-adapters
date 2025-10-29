@@ -86,38 +86,6 @@ class ToolCallInterceptor(Protocol):
 
         Returns:
             Final CallToolResult from tool execution or interceptor logic.
-
-        Examples:
-            Retry on error::
-
-                async def __call__(self, request, context, handler):
-                    for attempt in range(3):
-                        try:
-                            result = await handler(request)
-                            if not result.isError:
-                                return result
-                        except Exception:
-                            if attempt == 2:
-                                raise
-                    return result
-
-            Caching::
-
-                async def __call__(self, request, context, handler):
-                    cache_key = f"{request['name']}:{request['args']}"
-                    if cached := await get_cache_async(cache_key):
-                        return cached
-                    result = await handler(request)
-                    await save_cache_async(cache_key, result)
-                    return result
-
-            Request modification::
-
-                async def __call__(self, request, context, handler):
-                    modified_request = request.copy()
-                    modified_request["args"]["verbose"] = True
-                    return await handler(modified_request)
-        """
         ...
 
 

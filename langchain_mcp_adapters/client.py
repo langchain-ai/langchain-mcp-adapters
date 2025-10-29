@@ -111,17 +111,18 @@ class MultiServerMCPClient:
         *,
         auto_initialize: bool = True,
     ) -> AsyncIterator[ClientSession]:
-        """Create an MCP client session context manager.
+        """Connect to an MCP server and initialize a session.
 
         Args:
-            server_name: Server connection identifier.
-            auto_initialize: Auto-initialize session (default: True).
-
-        Yields:
-            Initialized ClientSession.
+            server_name: Name to identify this server connection
+            auto_initialize: Whether to automatically initialize the session
 
         Raises:
-            ValueError: If server_name not in connections.
+            ValueError: If the server name is not found in the connections
+
+        Yields:
+            An initialized ClientSession
+
         """
         if server_name not in self.connections:
             msg = (
@@ -142,20 +143,17 @@ class MultiServerMCPClient:
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
-        """Get tools from MCP servers.
-
-        Note: Creates new session per tool call. Tools from all servers
-        returned if server_name is None.
+        """Get a list of all tools from all connected servers.
 
         Args:
-            server_name: Optional server to fetch tools from. If None,
-                returns tools from all connected servers.
+            server_name: Optional name of the server to get tools from.
+                If None, all tools from all servers will be returned (default).
+
+        NOTE: a new session will be created for each tool call
 
         Returns:
-            List of LangChain BaseTool instances.
+            A list of LangChain tools
 
-        Raises:
-            ValueError: If specified server_name not in connections.
         """
         if server_name is not None:
             if server_name not in self.connections:
@@ -197,19 +195,7 @@ class MultiServerMCPClient:
         *,
         arguments: dict[str, Any] | None = None,
     ) -> list[HumanMessage | AIMessage]:
-        """Get a prompt from an MCP server.
-
-        Args:
-            server_name: Name of the server to fetch prompt from.
-            prompt_name: Name of the prompt to load.
-            arguments: Optional prompt template arguments.
-
-        Returns:
-            List of LangChain messages (HumanMessage or AIMessage).
-
-        Raises:
-            ValueError: If server_name not found in connections.
-        """
+        """Get a prompt from a given MCP server."""
         async with self.session(server_name) as session:
             return await load_mcp_prompt(session, prompt_name, arguments=arguments)
 
@@ -219,17 +205,16 @@ class MultiServerMCPClient:
         *,
         uris: str | list[str] | None = None,
     ) -> list[Blob]:
-        """Get resources from an MCP server.
+        """Get resources from a given MCP server.
 
         Args:
-            server_name: Server to fetch resources from.
-            uris: Optional URI(s) to load. If None, loads all resources.
+            server_name: Name of the server to get resources from
+            uris: Optional resource URI or list of URIs to load. If not provided,
+                all resources will be loaded.
 
         Returns:
-            List of LangChain Blob objects.
+            A list of LangChain Blobs
 
-        Raises:
-            ValueError: If server_name not in connections.
         """
         async with self.session(server_name) as session:
             return await load_mcp_resources(session, uris=uris)
