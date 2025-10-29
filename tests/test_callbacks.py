@@ -1,7 +1,10 @@
 """Tests for callback functionality."""
 
+import asyncio
 
 from mcp.server import FastMCP
+from mcp.server.fastmcp import Context
+from mcp.server.session import ServerSession
 from mcp.types import LoggingMessageNotificationParams
 
 from langchain_mcp_adapters.callbacks import (
@@ -61,10 +64,18 @@ def _create_progress_server():
     server = FastMCP(port=8184)
 
     @server.tool()
-    async def process_data(data: str) -> str:
+    async def process_data(data: str, ctx: Context[ServerSession, None]) -> str:
         """Process data with progress reporting"""
-        # FastMCP tools can report progress through the context
-        # In this test, we'll verify the callback infrastructure works
+        # Report progress at different stages
+        await ctx.report_progress(progress=0.0, total=1.0)
+        await asyncio.sleep(0.01)  # Small delay to ensure callback is processed
+
+        await ctx.report_progress(progress=0.5, total=1.0)
+        await asyncio.sleep(0.01)
+
+        await ctx.report_progress(progress=1.0, total=1.0)
+        await asyncio.sleep(0.01)
+
         return f"Processed: {data}"
 
     return server
@@ -105,16 +116,32 @@ async def test_progress_callback_execution(socket_enabled) -> None:
         )
         assert "Processed: test" in result.content
 
+        # Verify progress callbacks were called
+        await asyncio.sleep(0.05)  # Give time for callbacks to complete
+        assert len(progress_calls) >= 3, f"Expected at least 3 progress calls, got {len(progress_calls)}"
+        # Verify we got progress updates at different stages
+        progress_values = [call[0] for call in progress_calls]
+        assert 0.0 in progress_values
+        assert 1.0 in progress_values
+
 
 def _create_logging_server():
     """Create a server with a tool that generates logs."""
     server = FastMCP(port=8185)
 
     @server.tool()
-    async def analyze_data(data: str) -> str:
+    async def analyze_data(data: str, ctx: Context[ServerSession, None]) -> str:
         """Analyze data with logging"""
-        # FastMCP tools can log through the context
-        # In this test, we'll verify the callback infrastructure works
+        # Log at different levels
+        await ctx.info(f"Starting analysis of: {data}")
+        await asyncio.sleep(0.01)
+
+        await ctx.debug("Processing data...")
+        await asyncio.sleep(0.01)
+
+        await ctx.info("Analysis complete")
+        await asyncio.sleep(0.01)
+
         return f"Analyzed: {data}"
 
     return server
@@ -152,14 +179,34 @@ async def test_logging_callback_execution(socket_enabled) -> None:
         )
         assert "Analyzed: test" in result.content
 
+        # Verify logging callbacks were called
+        await asyncio.sleep(0.05)  # Give time for callbacks to complete
+        assert len(logging_calls) >= 3, f"Expected at least 3 logging calls, got {len(logging_calls)}"
+        # Verify we got different log levels
+        log_levels = [call[0] for call in logging_calls]
+        assert "info" in log_levels
+        assert "debug" in log_levels
+
 
 def _create_callback_server():
     """Create a server with a tool for testing callbacks."""
     server = FastMCP(port=8186)
 
     @server.tool()
-    async def execute_task(task: str) -> str:
+    async def execute_task(task: str, ctx: Context[ServerSession, None]) -> str:
         """Execute a task with progress and logging"""
+        await ctx.info(f"Starting task: {task}")
+        await ctx.report_progress(progress=0.0, total=1.0)
+        await asyncio.sleep(0.01)
+
+        await ctx.debug("Executing task...")
+        await ctx.report_progress(progress=0.5, total=1.0)
+        await asyncio.sleep(0.01)
+
+        await ctx.info(f"Completed task: {task}")
+        await ctx.report_progress(progress=1.0, total=1.0)
+        await asyncio.sleep(0.01)
+
         return f"Executed: {task}"
 
     return server
@@ -202,19 +249,40 @@ async def test_callbacks_with_mcp_tool_execution(socket_enabled) -> None:
         )
         assert "Executed: test" in result.content
 
+        # Verify both progress and logging callbacks were called
+        await asyncio.sleep(0.05)  # Give time for callbacks to complete
+        raise ValueError(progress_calls)
+        assert len(progress_calls) >= 3, f"Expected at least 3 progress calls, got {len(progress_calls)}"
+        assert len(logging_calls) >= 2, f"Expected at least 2 logging calls, got {len(logging_calls)}"
+
+        # Verify progress values
+        progress_values = [call[0] for call in progress_calls]
+        assert 0.0 in progress_values
+        assert 1.0 in progress_values
+
+        # Verify log levels
+        log_levels = [call[0] for call in logging_calls]
+        assert "info" in log_levels
+
 
 def _create_multi_tool_server():
     """Create a server with multiple tools for testing load_mcp_tools."""
     server = FastMCP(port=8187)
 
     @server.tool()
-    async def tool1(input_data: str) -> str:
+    async def tool1(input_data: str, ctx: Context[ServerSession, None]) -> str:
         """First test tool"""
+        await ctx.report_progress(progress=0.5, total=1.0)
+        await asyncio.sleep(0.01)
+        await ctx.report_progress(progress=1.0, total=1.0)
+        await asyncio.sleep(0.01)
         return f"tool1 result: {input_data}"
 
     @server.tool()
-    async def tool2(input_data: str) -> str:
+    async def tool2(input_data: str, ctx: Context[ServerSession, None]) -> str:
         """Second test tool"""
+        await ctx.report_progress(progress=1.0, total=1.0)
+        await asyncio.sleep(0.01)
         return f"tool2 result: {input_data}"
 
     return server
@@ -254,3 +322,12 @@ async def test_callbacks_with_load_mcp_tools(socket_enabled) -> None:
             {"args": {"input_data": "test2"}, "id": "2", "type": "tool_call"}
         )
         assert "tool2 result: test2" in result2.content
+
+        # Verify progress callbacks were called for both tools
+        await asyncio.sleep(0.05)  # Give time for callbacks to complete
+        assert len(progress_calls) >= 3, f"Expected at least 3 progress calls, got {len(progress_calls)}"
+
+        # Verify both tools reported progress
+        tool_names = [call[0] for call in progress_calls]
+        assert "tool1" in tool_names
+        assert "tool2" in tool_names
