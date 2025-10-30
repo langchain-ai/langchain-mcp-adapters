@@ -54,9 +54,9 @@ class MCPToolCallRequest:
 
     name: str
     args: dict[str, Any]
-    server_name: str
-    headers: dict[str, Any] | None = None
-    runtime: object | None = None
+    server_name: str  # Context: MCP server name
+    headers: dict[str, Any] | None = None  # Modifiable: HTTP headers
+    runtime: object | None = None  # Context: LangGraph runtime (if any)
 
     def override(
         self, **overrides: Unpack[_MCPToolCallRequestOverrides]
