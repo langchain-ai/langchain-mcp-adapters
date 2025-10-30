@@ -5,7 +5,8 @@ tools, handle tool execution, and manage tool conversion between the two formats
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, cast, get_args
+
+from typing import Any, get_args
 
 from langchain_core.tools import (
     BaseTool,
@@ -239,8 +240,7 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
-            # Execute the tool call
-            call_tool_result = None
+            captured_exception = None
 
             if session is None:
                 # If a session is not provided, we will create one on the fly
@@ -252,28 +252,30 @@ def convert_mcp_tool_to_langchain_tool(
                     effective_connection, mcp_callbacks=mcp_callbacks
                 ) as tool_session:
                     await tool_session.initialize()
-                    call_tool_result = await cast(
-                        "ClientSession", tool_session
-                    ).call_tool(
-                        tool_name,
-                        tool_args,
-                        progress_callback=mcp_callbacks.progress_callback,
-                    )
+                    try:
+                        call_tool_result = await tool_session.call_tool(
+                            tool_name,
+                            tool_args,
+                            progress_callback=mcp_callbacks.progress_callback,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        # Capture exception to re-raise outside context manager
+                        captured_exception = e
+
+                # Re-raise the exception outside the context manager
+                # This is necessary because the context manager may suppress exceptions
+                # This change was introduced to work-around an issue in MCP SDK
+                # that may suppress exceptions when the client disconnects.
+                # If this is causing an issue, with your use case, please file an issue
+                # on the langchain-mcp-adapters GitHub repo.
+                if captured_exception is not None:
+                    raise captured_exception
             else:
                 call_tool_result = await session.call_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
                 )
-
-            if call_tool_result is None:
-                msg = (
-                    "Tool call failed: no result returned from the underlying MCP SDK. "
-                    "This may indicate that an exception was handled or suppressed "
-                    "by the MCP SDK (e.g., client disconnection, network issue, "
-                    "or other execution error)."
-                )
-                raise RuntimeError(msg)
 
             return call_tool_result
 
