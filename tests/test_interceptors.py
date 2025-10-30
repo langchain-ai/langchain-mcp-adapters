@@ -8,7 +8,6 @@ from mcp.types import (
 )
 
 from langchain_mcp_adapters.interceptors import (
-    Interceptors,
     ToolCallRequest,
     ToolInterceptorContext,
 )
@@ -54,8 +53,6 @@ class TestInterceptorModifiesRequest:
             )
             return await handler(modified_request)
 
-        interceptors = Interceptors(tools=[modify_args_interceptor])
-
         with run_streamable_http(_create_math_server, 8200):
             tools = await load_mcp_tools(
                 None,
@@ -63,7 +60,7 @@ class TestInterceptorModifiesRequest:
                     "url": "http://localhost:8200/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[modify_args_interceptor],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")
@@ -89,8 +86,6 @@ class TestInterceptorModifiesRequest:
                 return await handler(modified_request)
             return await handler(request)
 
-        interceptors = Interceptors(tools=[redirect_tool_interceptor])
-
         with run_streamable_http(_create_math_server, 8201):
             tools = await load_mcp_tools(
                 None,
@@ -98,7 +93,7 @@ class TestInterceptorModifiesRequest:
                     "url": "http://localhost:8201/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[redirect_tool_interceptor],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")
@@ -136,8 +131,6 @@ class TestInterceptorModifiesResponse:
                 isError=result.isError,
             )
 
-        interceptors = Interceptors(tools=[modify_result_interceptor])
-
         with run_streamable_http(_create_math_server, 8203):
             tools = await load_mcp_tools(
                 None,
@@ -145,7 +138,7 @@ class TestInterceptorModifiesResponse:
                     "url": "http://localhost:8203/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[modify_result_interceptor],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")
@@ -167,8 +160,6 @@ class TestInterceptorModifiesResponse:
                 isError=False,
             )
 
-        interceptors = Interceptors(tools=[return_custom_result_interceptor])
-
         with run_streamable_http(_create_math_server, 8204):
             tools = await load_mcp_tools(
                 None,
@@ -176,7 +167,7 @@ class TestInterceptorModifiesResponse:
                     "url": "http://localhost:8204/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[return_custom_result_interceptor],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")
@@ -209,8 +200,6 @@ class TestInterceptorAdvancedPatterns:
             cache[cache_key] = result
             return result
 
-        interceptors = Interceptors(tools=[caching_interceptor])
-
         with run_streamable_http(_create_math_server, 8206):
             tools = await load_mcp_tools(
                 None,
@@ -218,7 +207,7 @@ class TestInterceptorAdvancedPatterns:
                     "url": "http://localhost:8206/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[caching_interceptor],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")
@@ -267,10 +256,6 @@ class TestInterceptorComposition:
             return result
 
         # First in list should be outermost layer
-        interceptors = Interceptors(
-            tools=[logging_interceptor_1, logging_interceptor_2]
-        )
-
         with run_streamable_http(_create_math_server, 8207):
             tools = await load_mcp_tools(
                 None,
@@ -278,7 +263,7 @@ class TestInterceptorComposition:
                     "url": "http://localhost:8207/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[logging_interceptor_1, logging_interceptor_2],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")
@@ -303,8 +288,6 @@ class TestInterceptorErrorHandling:
         ) -> CallToolResult:
             raise ValueError("Interceptor failed")
 
-        interceptors = Interceptors(tools=[failing_interceptor])
-
         with run_streamable_http(_create_math_server, 8208):
             tools = await load_mcp_tools(
                 None,
@@ -312,7 +295,7 @@ class TestInterceptorErrorHandling:
                     "url": "http://localhost:8208/mcp",
                     "transport": "streamable_http",
                 },
-                interceptors=interceptors,
+                tool_interceptors=[failing_interceptor],
             )
 
             add_tool = next(tool for tool in tools if tool.name == "add")

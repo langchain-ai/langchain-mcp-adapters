@@ -9,7 +9,7 @@ request / result lifecycle, for example to support elicitation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from mcp.types import CallToolResult as MCPCallToolResult
@@ -84,19 +84,3 @@ class ToolCallInterceptor(Protocol):
             Final CallToolResult from tool execution or interceptor logic.
         ...
         """
-
-
-@dataclass
-class Interceptors:
-    """Container for MCP client interceptors.
-
-    Interceptors compose in order with first as outermost layer.
-    For [A, B, C], execution order is A -> B -> C  tool_call.
-
-    Future: Will support resource_interceptors and prompt_interceptors.
-
-    Attributes:
-        tools: List of tool call interceptors applied in order.
-    """
-
-    tools: list[ToolCallInterceptor] = field(default_factory=list)

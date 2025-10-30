@@ -30,7 +30,6 @@ from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.interceptors import (
-    Interceptors,
     ToolCallInterceptor,
     ToolCallRequest,
     ToolInterceptorContext,
@@ -86,14 +85,14 @@ def _convert_call_tool_result(
 
 def _build_interceptor_chain(
     base_handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]],
-    interceptors: Interceptors | None,
+    tool_interceptors: list[ToolCallInterceptor] | None,
     context: ToolInterceptorContext,
 ) -> Callable[[ToolCallRequest], Awaitable[CallToolResult]]:
     """Build composed handler chain with interceptors in onion pattern.
 
     Args:
         base_handler: Innermost handler executing the actual tool call.
-        interceptors: Optional interceptors to wrap the handler.
+        tool_interceptors: Optional list of interceptors to wrap the handler.
         context: Context passed to each interceptor.
 
     Returns:
@@ -102,8 +101,8 @@ def _build_interceptor_chain(
     """
     handler = base_handler
 
-    if interceptors and interceptors.tools:
-        for interceptor in reversed(interceptors.tools):
+    if tool_interceptors:
+        for interceptor in reversed(tool_interceptors):
             current_handler = handler
 
             async def wrapped_handler(
@@ -163,7 +162,7 @@ def convert_mcp_tool_to_langchain_tool(
     *,
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
-    interceptors: Interceptors | None = None,
+    tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
@@ -176,7 +175,7 @@ def convert_mcp_tool_to_langchain_tool(
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
         callbacks: Optional callbacks for handling notifications and events
-        interceptors: Optional interceptors for tool call processing
+        tool_interceptors: Optional list of interceptors for tool call processing
         server_name: Name of the server this tool belongs to
 
     Returns:
@@ -289,7 +288,7 @@ def convert_mcp_tool_to_langchain_tool(
 
         # Build and execute the interceptor chain
         handler = _build_interceptor_chain(
-            execute_tool, interceptors, interceptor_context
+            execute_tool, tool_interceptors, interceptor_context
         )
         request = ToolCallRequest(name=tool.name, args=arguments)
         call_tool_result = await handler(request)
@@ -316,7 +315,7 @@ async def load_mcp_tools(
     *,
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
-    interceptors: Interceptors | None = None,
+    tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
@@ -325,7 +324,7 @@ async def load_mcp_tools(
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
         callbacks: Optional callbacks for handling notifications and events.
-        interceptors: Optional interceptors for tool call processing.
+        tool_interceptors: Optional list of interceptors for tool call processing.
         server_name: Name of the server these tools belong to.
 
     Returns:
@@ -364,7 +363,7 @@ async def load_mcp_tools(
             tool,
             connection=connection,
             callbacks=callbacks,
-            interceptors=interceptors,
+            tool_interceptors=tool_interceptors,
             server_name=server_name,
         )
         for tool in tools

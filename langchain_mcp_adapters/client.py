@@ -16,7 +16,7 @@ from langchain_core.tools import BaseTool
 from mcp import ClientSession
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
-from langchain_mcp_adapters.interceptors import Interceptors
+from langchain_mcp_adapters.interceptors import ToolCallInterceptor
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
@@ -53,7 +53,7 @@ class MultiServerMCPClient:
         connections: dict[str, Connection] | None = None,
         *,
         callbacks: Callbacks | None = None,
-        interceptors: Interceptors | None = None,
+        tool_interceptors: list[ToolCallInterceptor] | None = None,
     ) -> None:
         """Initialize a MultiServerMCPClient with MCP servers connections.
 
@@ -61,7 +61,8 @@ class MultiServerMCPClient:
             connections: A dictionary mapping server names to connection configurations.
                 If None, no initial connections are established.
             callbacks: Optional callbacks for handling notifications and events.
-            interceptors: Optional interceptors for modifying requests and responses.
+            tool_interceptors: Optional list of tool call interceptors for modifying
+                requests and responses.
 
         Example: basic usage (starting a new session on each tool call)
 
@@ -102,7 +103,7 @@ class MultiServerMCPClient:
             connections if connections is not None else {}
         )
         self.callbacks = callbacks or Callbacks()
-        self.interceptors = interceptors or Interceptors()
+        self.tool_interceptors = tool_interceptors or []
 
     @asynccontextmanager
     async def session(
@@ -167,7 +168,7 @@ class MultiServerMCPClient:
                 connection=self.connections[server_name],
                 callbacks=self.callbacks,
                 server_name=server_name,
-                interceptors=self.interceptors,
+                tool_interceptors=self.tool_interceptors,
             )
 
         all_tools: list[BaseTool] = []
@@ -179,7 +180,7 @@ class MultiServerMCPClient:
                     connection=connection,
                     callbacks=self.callbacks,
                     server_name=name,
-                    interceptors=self.interceptors,
+                    tool_interceptors=self.tool_interceptors,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
