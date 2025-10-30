@@ -13,12 +13,25 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from mcp.types import CallToolResult as MCPCallToolResult
+from typing_extensions import NotRequired, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 # Type aliases to avoid direct MCP type dependencies
 CallToolResult = MCPCallToolResult
+
+
+class _MCPToolCallRequestOverrides(TypedDict, total=False):
+    """Possible overrides for MCPToolCallRequest.override() method.
+
+    Only includes modifiable request fields, not context fields like
+    server_name and runtime which are read-only.
+    """
+
+    name: NotRequired[str]
+    args: NotRequired[dict[str, Any]]
+    headers: NotRequired[dict[str, Any] | None]
 
 
 @dataclass
@@ -45,22 +58,29 @@ class MCPToolCallRequest:
     headers: dict[str, Any] | None = None
     runtime: object | None = None
 
-    def override(self, **overrides: Any) -> MCPToolCallRequest:
+    def override(
+        self, **overrides: Unpack[_MCPToolCallRequestOverrides]
+    ) -> MCPToolCallRequest:
         """Replace the request with a new request with the given overrides.
 
-        Returns a new `MCPToolCallRequest` instance with the specified attributes replaced.
-        This follows an immutable pattern, leaving the original request unchanged.
+        Returns a new `MCPToolCallRequest` instance with the specified
+        attributes replaced. This follows an immutable pattern, leaving the
+        original request unchanged.
 
         Args:
-            **overrides: Keyword arguments for attributes to override. Supported keys:
+            **overrides: Keyword arguments for attributes to override.
+                Supported keys:
                 - name: Tool name
                 - args: Tool arguments
                 - headers: HTTP headers
-                - server_name: Server name (not recommended to modify)
-                - runtime: Runtime context (not recommended to modify)
 
         Returns:
-            New MCPToolCallRequest instance with specified overrides applied.
+            New MCPToolCallRequest instance with specified overrides
+            applied.
+
+        Note:
+            Context fields (server_name, runtime) cannot be overridden as
+            they are read-only.
 
         Examples:
             ```python
