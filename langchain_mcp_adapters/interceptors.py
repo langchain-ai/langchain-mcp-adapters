@@ -38,9 +38,9 @@ class _MCPToolCallRequestOverrides(TypedDict, total=False):
 class MCPToolCallRequest:
     """Tool execution request passed to MCP tool call interceptors.
 
-    Similar to LangChain's ToolCallRequest but adapted for MCP remote tools.
-    MCP tools don't have local BaseTool instances, so this flattens the call
-    data and context into a single object.
+    This tool call request follows a similar pattern to LangChain's
+    ToolCallRequest (flat namespace) rather than separating the call data
+    and context into nested objects.
 
     Modifiable fields (override these to change behavior):
         name: Tool name to invoke.
