@@ -8,8 +8,7 @@ from mcp.types import (
 )
 
 from langchain_mcp_adapters.interceptors import (
-    ToolCallRequest,
-    ToolInterceptorContext,
+    MCPToolCallRequest,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import run_streamable_http
@@ -39,18 +38,12 @@ class TestInterceptorModifiesRequest:
         """Test that interceptor can modify tool arguments."""
 
         async def modify_args_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             # Double the arguments
-            args = request.get("args", {})
-            modified_args = {k: v * 2 for k, v in args.items()}
-            modified_request = ToolCallRequest(
-                name=request.get("name"),
-                args=modified_args,
-                headers=request.get("headers", {}),
-            )
+            modified_args = {k: v * 2 for k, v in request.args.items()}
+            modified_request = request.override(args=modified_args)
             return await handler(modified_request)
 
         with run_streamable_http(_create_math_server, 8200):
@@ -72,17 +65,12 @@ class TestInterceptorModifiesRequest:
         """Test that interceptor can redirect to different tool."""
 
         async def redirect_tool_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             # Redirect add to multiply
-            if request.get("name") == "add":
-                modified_request = ToolCallRequest(
-                    name="multiply",
-                    args=request.get("args", {}),
-                    headers=request.get("headers", {}),
-                )
+            if request.name == "add":
+                modified_request = request.override(name="multiply")
                 return await handler(modified_request)
             return await handler(request)
 
@@ -109,8 +97,7 @@ class TestInterceptorModifiesResponse:
         """Test that interceptor can modify tool result."""
 
         async def modify_result_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             # Execute the tool first
@@ -150,8 +137,7 @@ class TestInterceptorModifiesResponse:
         """Test that interceptor can return a completely custom CallToolResult."""
 
         async def return_custom_result_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             # Don't call handler, just return custom result
@@ -185,12 +171,11 @@ class TestInterceptorAdvancedPatterns:
         call_count = 0
 
         async def caching_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             nonlocal call_count
-            cache_key = f"{request.get('name')}:{request.get('args')}"
+            cache_key = f"{request.name}:{request.args}"
 
             if cache_key in cache:
                 return cache[cache_key]
@@ -236,8 +221,7 @@ class TestInterceptorComposition:
         execution_order = []
 
         async def logging_interceptor_1(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             execution_order.append("before_1")
@@ -246,8 +230,7 @@ class TestInterceptorComposition:
             return result
 
         async def logging_interceptor_2(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             execution_order.append("before_2")
@@ -282,8 +265,7 @@ class TestInterceptorErrorHandling:
         """Test that exceptions in interceptors propagate correctly."""
 
         async def failing_interceptor(
-            request: ToolCallRequest,
-            context: ToolInterceptorContext,
+            request: MCPToolCallRequest,
             handler,
         ) -> CallToolResult:
             raise ValueError("Interceptor failed")

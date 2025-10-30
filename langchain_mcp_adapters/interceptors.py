@@ -9,11 +9,10 @@ request / result lifecycle, for example to support elicitation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from mcp.types import CallToolResult as MCPCallToolResult
-from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -23,36 +22,56 @@ CallToolResult = MCPCallToolResult
 
 
 @dataclass
-class ToolInterceptorContext:
-    """Context passed to interceptors for tool execution.
+class MCPToolCallRequest:
+    """Tool execution request passed to MCP tool call interceptors.
 
-    Attributes:
-        server_name: Name of the MCP server handling the tool.
-        tool_name: Name of the tool being executed.
-        runtime: LangGraph runtime instance if available.
-    """
+    Similar to LangChain's ToolCallRequest but adapted for MCP remote tools.
+    MCP tools don't have local BaseTool instances, so this flattens the call
+    data and context into a single object.
 
-    server_name: str
-    tool_name: str
-    # note: langgraph state is not yet available as part of the context.
-    # it needs to be plumbed through.
-    runtime: object | None = None
-
-
-class ToolCallRequest(TypedDict, total=False):
-    """TypedDict representing a modifiable tool call request.
-
-    All fields are optional to allow partial modifications by interceptors.
-
-    Attributes:
+    Modifiable fields (override these to change behavior):
         name: Tool name to invoke.
         args: Tool arguments as key-value pairs.
         headers: HTTP headers for applicable transports (SSE, HTTP).
+
+    Context fields (read-only, use for routing/logging):
+        server_name: Name of the MCP server handling the tool.
+        runtime: LangGraph runtime context (optional, None if outside graph).
     """
 
-    name: NotRequired[str]
-    args: NotRequired[dict[str, Any]]
-    headers: NotRequired[dict[str, Any]]
+    name: str
+    args: dict[str, Any]
+    server_name: str
+    headers: dict[str, Any] | None = None
+    runtime: object | None = None
+
+    def override(self, **overrides: Any) -> MCPToolCallRequest:
+        """Replace the request with a new request with the given overrides.
+
+        Returns a new `MCPToolCallRequest` instance with the specified attributes replaced.
+        This follows an immutable pattern, leaving the original request unchanged.
+
+        Args:
+            **overrides: Keyword arguments for attributes to override. Supported keys:
+                - name: Tool name
+                - args: Tool arguments
+                - headers: HTTP headers
+                - server_name: Server name (not recommended to modify)
+                - runtime: Runtime context (not recommended to modify)
+
+        Returns:
+            New MCPToolCallRequest instance with specified overrides applied.
+
+        Examples:
+            ```python
+            # Modify tool arguments
+            new_request = request.override(args={"value": 10})
+
+            # Change tool name
+            new_request = request.override(name="different_tool")
+            ```
+        """
+        return replace(self, **overrides)
 
 
 class ToolCallInterceptor(Protocol):
@@ -64,23 +83,24 @@ class ToolCallInterceptor(Protocol):
 
     The handler can be called multiple times (retry), skipped (caching/short-circuit),
     or wrapped with error handling. Each handler call is independent.
+
+    Similar to LangChain's middleware pattern but adapted for MCP remote tools.
     """
 
     async def __call__(
         self,
-        request: ToolCallRequest,
-        context: ToolInterceptorContext,
-        handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]],
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], Awaitable[CallToolResult]],
     ) -> CallToolResult:
         """Intercept tool execution with control over handler invocation.
 
         Args:
-            request: Tool call request (name, args, headers).
-            context: Execution context with server/tool info and LangGraph state.
+            request: Tool call request containing name, args, headers, and context
+                (server_name, runtime). Access context fields like request.server_name.
             handler: Async callable executing the tool. Can be called multiple
                 times, skipped, or wrapped for error handling.
 
         Returns:
             Final CallToolResult from tool execution or interceptor logic.
-        ...
         """
+        ...

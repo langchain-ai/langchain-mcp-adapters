@@ -30,9 +30,8 @@ from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.interceptors import (
+    MCPToolCallRequest,
     ToolCallInterceptor,
-    ToolCallRequest,
-    ToolInterceptorContext,
 )
 from langchain_mcp_adapters.sessions import Connection, create_session
 
@@ -84,16 +83,14 @@ def _convert_call_tool_result(
 
 
 def _build_interceptor_chain(
-    base_handler: Callable[[ToolCallRequest], Awaitable[CallToolResult]],
+    base_handler: Callable[[MCPToolCallRequest], Awaitable[CallToolResult]],
     tool_interceptors: list[ToolCallInterceptor] | None,
-    context: ToolInterceptorContext,
-) -> Callable[[ToolCallRequest], Awaitable[CallToolResult]]:
+) -> Callable[[MCPToolCallRequest], Awaitable[CallToolResult]]:
     """Build composed handler chain with interceptors in onion pattern.
 
     Args:
         base_handler: Innermost handler executing the actual tool call.
         tool_interceptors: Optional list of interceptors to wrap the handler.
-        context: Context passed to each interceptor.
 
     Returns:
         Composed handler with all interceptors applied. First interceptor
@@ -106,13 +103,13 @@ def _build_interceptor_chain(
             current_handler = handler
 
             async def wrapped_handler(
-                req: ToolCallRequest,
+                req: MCPToolCallRequest,
                 _interceptor: ToolCallInterceptor = interceptor,
                 _handler: Callable[
-                    [ToolCallRequest], Awaitable[CallToolResult]
+                    [MCPToolCallRequest], Awaitable[CallToolResult]
                 ] = current_handler,
             ) -> CallToolResult:
-                return await _interceptor(req, context, _handler)
+                return await _interceptor(req, _handler)
 
             handler = wrapped_handler
 
@@ -211,18 +208,12 @@ def convert_mcp_tool_to_langchain_tool(
         except Exception:  # noqa: BLE001
             runtime = None
 
-        interceptor_context = ToolInterceptorContext(
-            server_name=server_name or "unknown",
-            tool_name=tool.name,
-            runtime=runtime,
-        )
-
         # Create the innermost handler that actually executes the tool call
-        async def execute_tool(request: ToolCallRequest) -> CallToolResult:
+        async def execute_tool(request: MCPToolCallRequest) -> CallToolResult:
             """Execute the actual MCP tool call with optional session creation.
 
             Args:
-                request: Tool call request with name, args, and headers.
+                request: Tool call request with name, args, headers, and context.
 
             Returns:
                 CallToolResult from MCP SDK.
@@ -231,12 +222,12 @@ def convert_mcp_tool_to_langchain_tool(
                 ValueError: If neither session nor connection provided.
                 RuntimeError: If tool call returns None.
             """
-            tool_name = request.get("name", tool.name)
-            tool_args = request.get("args", {})
+            tool_name = request.name
+            tool_args = request.args
             effective_connection = connection
 
             # If headers were modified, create a new connection with updated headers
-            modified_headers = request.get("headers")
+            modified_headers = request.headers
             if modified_headers is not None and connection is not None:
                 # Create a new connection config with updated headers
                 updated_connection = dict(connection)
@@ -287,10 +278,14 @@ def convert_mcp_tool_to_langchain_tool(
             return call_tool_result
 
         # Build and execute the interceptor chain
-        handler = _build_interceptor_chain(
-            execute_tool, tool_interceptors, interceptor_context
+        handler = _build_interceptor_chain(execute_tool, tool_interceptors)
+        request = MCPToolCallRequest(
+            name=tool.name,
+            args=arguments,
+            server_name=server_name or "unknown",
+            headers=None,
+            runtime=runtime,
         )
-        request = ToolCallRequest(name=tool.name, args=arguments)
         call_tool_result = await handler(request)
 
         return _convert_call_tool_result(call_tool_result)
