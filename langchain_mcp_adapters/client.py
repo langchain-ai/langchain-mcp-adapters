@@ -1,6 +1,6 @@
 """Client for connecting to multiple MCP servers and loading LangChain tools/resources.
 
-This module provides the MultiServerMCPClient class for managing connections to multiple
+This module provides the `MultiServerMCPClient` class for managing connections to multiple
 MCP servers and loading tools, prompts, and resources from them.
 """
 
@@ -55,49 +55,49 @@ class MultiServerMCPClient:
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
     ) -> None:
-        """Initialize a MultiServerMCPClient with MCP servers connections.
+        """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
         Args:
-            connections: A dictionary mapping server names to connection configurations.
-                If None, no initial connections are established.
+            connections: A `dict` mapping server names to connection configurations. If
+                `None`, no initial connections are established.
             callbacks: Optional callbacks for handling notifications and events.
             tool_interceptors: Optional list of tool call interceptors for modifying
                 requests and responses.
 
-        Example: basic usage (starting a new session on each tool call)
+        !!! example "Basic usage (starting a new session on each tool call)"
 
-        ```python
-        from langchain_mcp_adapters.client import MultiServerMCPClient
+            ```python
+            from langchain_mcp_adapters.client import MultiServerMCPClient
 
-        client = MultiServerMCPClient(
-            {
-                "math": {
-                    "command": "python",
-                    # Make sure to update to the full absolute path to your
-                    # math_server.py file
-                    "args": ["/path/to/math_server.py"],
-                    "transport": "stdio",
-                },
-                "weather": {
-                    # Make sure you start your weather server on port 8000
-                    "url": "http://localhost:8000/mcp",
-                    "transport": "streamable_http",
+            client = MultiServerMCPClient(
+                {
+                    "math": {
+                        "command": "python",
+                        # Make sure to update to the full absolute path to your
+                        # math_server.py file
+                        "args": ["/path/to/math_server.py"],
+                        "transport": "stdio",
+                    },
+                    "weather": {
+                        # Make sure you start your weather server on port 8000
+                        "url": "http://localhost:8000/mcp",
+                        "transport": "streamable_http",
+                    }
                 }
-            }
-        )
-        all_tools = await client.get_tools()
-        ```
+            )
+            all_tools = await client.get_tools()
+            ```
 
-        Example: explicitly starting a session
+        !!! example "Explicitly starting a session"
 
-        ```python
-        from langchain_mcp_adapters.client import MultiServerMCPClient
-        from langchain_mcp_adapters.tools import load_mcp_tools
+            ```python
+            from langchain_mcp_adapters.client import MultiServerMCPClient
+            from langchain_mcp_adapters.tools import load_mcp_tools
 
-        client = MultiServerMCPClient({...})
-        async with client.session("math") as session:
-            tools = await load_mcp_tools(session)
-        ```
+            client = MultiServerMCPClient({...})
+            async with client.session("math") as session:
+                tools = await load_mcp_tools(session)
+            ```
         """
         self.connections: dict[str, Connection] = (
             connections if connections is not None else {}
@@ -122,7 +122,7 @@ class MultiServerMCPClient:
             ValueError: If the server name is not found in the connections
 
         Yields:
-            An initialized ClientSession
+            An initialized `ClientSession`
 
         """
         if server_name not in self.connections:
@@ -148,12 +148,14 @@ class MultiServerMCPClient:
 
         Args:
             server_name: Optional name of the server to get tools from.
-                If None, all tools from all servers will be returned (default).
+                If `None`, all tools from all servers will be returned.
 
-        NOTE: a new session will be created for each tool call
+        !!! note
+
+            A new session will be created for each tool call
 
         Returns:
-            A list of LangChain tools
+            A list of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools)
 
         """
         if server_name is not None:
@@ -214,7 +216,7 @@ class MultiServerMCPClient:
                 all resources will be loaded.
 
         Returns:
-            A list of LangChain Blobs
+            A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
 
         """
         async with self.session(server_name) as session:

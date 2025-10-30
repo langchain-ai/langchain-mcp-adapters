@@ -314,18 +314,18 @@ async def load_mcp_tools(
     tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
 ) -> list[BaseTool]:
-    """Load all available MCP tools and convert them to LangChain tools.
+    """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
     Args:
-        session: The MCP client session. If None, connection must be provided.
-        connection: Connection config to create a new session if session is None.
-        callbacks: Optional callbacks for handling notifications and events.
+        session: The MCP client session. If `None`, connection must be provided.
+        connection: Connection config to create a new session if session is `None`.
+        callbacks: Optional `Callbacks` for handling notifications and events.
         tool_interceptors: Optional list of interceptors for tool call processing.
         server_name: Name of the server these tools belong to.
 
     Returns:
-        List of LangChain tools. Tool annotations are returned as part
-        of the tool metadata object.
+        List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
+            Tool annotations are returned as part of the tool metadata object.
 
     Raises:
         ValueError: If neither session nor connection is provided.
