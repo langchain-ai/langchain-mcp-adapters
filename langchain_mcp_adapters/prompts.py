@@ -1,4 +1,4 @@
-"""Prompts adapter for converting MCP prompts to LangChain messages.
+"""Prompts adapter for converting MCP prompts to LangChain [messages](https://docs.langchain.com/oss/python/langchain/messages).
 
 This module provides functionality to convert MCP prompt messages into LangChain
 message objects, handling both user and assistant message types.
@@ -41,7 +41,7 @@ async def load_mcp_prompt(
     *,
     arguments: dict[str, Any] | None = None,
 ) -> list[HumanMessage | AIMessage]:
-    """Load MCP prompt and convert to LangChain messages.
+    """Load MCP prompt and convert to LangChain [messages](https://docs.langchain.com/oss/python/langchain/messages).
 
     Args:
         session: The MCP client session.
@@ -49,7 +49,8 @@ async def load_mcp_prompt(
         arguments: Optional arguments to pass to the prompt.
 
     Returns:
-        A list of LangChain messages converted from the MCP prompt.
+        A list of LangChain [messages](https://docs.langchain.com/oss/python/langchain/messages)
+            converted from the MCP prompt.
     """
     response = await session.get_prompt(name, arguments)
     return [
