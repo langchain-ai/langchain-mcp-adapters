@@ -296,17 +296,20 @@ from langgraph.prebuilt import create_react_agent
 async def make_graph():
     client = MultiServerMCPClient(
         {
+            "weather": {
+                # make sure you start your weather server on port 8000
+                "url": "http://localhost:8000/mcp",
+                "transport": "streamable_http",
+            },
+            # ATTENTION: MCP's stdio transport was designed primarily to support applications running on a user's machine.
+            # Before using stdio in a web server context, evaluate whether there's a more appropriate solution.
+            # For example, do you actually need MCP? or can you get away with a simple `@tool`?
             "math": {
                 "command": "python",
                 # Make sure to update to the full absolute path to your math_server.py file
                 "args": ["/path/to/math_server.py"],
                 "transport": "stdio",
             },
-            "weather": {
-                # make sure you start your weather server on port 8000
-                "url": "http://localhost:8000/mcp",
-                "transport": "streamable_http",
-            }
         }
     )
     tools = await client.get_tools()
@@ -323,29 +326,4 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
     "agent": "./graph.py:make_graph"
   }
 }
-```
-
-## Add LangChain tools to a FastMCP server
-
-Use `to_fastmcp` to convert LangChain tools to FastMCP, and then add them to the `FastMCP` server via the initializer:
-
-> [!NOTE]
-> `tools` argument is only available in FastMCP as of `mcp >= 1.9.1`
-
-```python
-from langchain_core.tools import tool
-from langchain_mcp_adapters.tools import to_fastmcp
-from mcp.server.fastmcp import FastMCP
-
-
-@tool
-def add(a: int, b: int) -> int:
-    """Add two numbers"""
-    return a + b
-
-
-fastmcp_tool = to_fastmcp(add)
-
-mcp = FastMCP("Math", tools=[fastmcp_tool])
-mcp.run(transport="stdio")
 ```
