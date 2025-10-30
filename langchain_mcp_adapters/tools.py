@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+from collections.abc import Awaitable, Callable
 from typing import Any, cast, get_args
 
 from langchain_core.tools import (
@@ -18,7 +19,6 @@ from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
-    CallToolResult,
     EmbeddedResource,
     ImageContent,
     ResourceLink,
@@ -28,17 +28,16 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
-from langchain_mcp_adapters.hooks import CallToolRequestSpec, Hooks, ToolHookContext
+from langchain_mcp_adapters.interceptors import (
+    MCPToolCallRequest,
+    MCPToolCallResult,
+    ToolCallInterceptor,
+)
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 try:
-    from langgraph.config import get_config
     from langgraph.runtime import get_runtime
 except ImportError:
-
-    def get_config() -> dict:
-        """no-op config getter."""
-        return {}
 
     def get_runtime() -> None:
         """no-op runtime getter."""
@@ -50,9 +49,9 @@ MAX_ITERATIONS = 1000
 
 
 def _convert_call_tool_result(
-    call_tool_result: CallToolResult,
+    call_tool_result: MCPToolCallResult,
 ) -> tuple[str | list[str], list[NonTextContent] | None]:
-    """Convert MCP CallToolResult to LangChain tool result format.
+    """Convert MCP MCPToolCallResult to LangChain tool result format.
 
     Args:
         call_tool_result: The result from calling an MCP tool.
@@ -81,6 +80,40 @@ def _convert_call_tool_result(
         raise ToolException(tool_content)
 
     return tool_content, non_text_contents or None
+
+
+def _build_interceptor_chain(
+    base_handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    tool_interceptors: list[ToolCallInterceptor] | None,
+) -> Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]]:
+    """Build composed handler chain with interceptors in onion pattern.
+
+    Args:
+        base_handler: Innermost handler executing the actual tool call.
+        tool_interceptors: Optional list of interceptors to wrap the handler.
+
+    Returns:
+        Composed handler with all interceptors applied. First interceptor
+        in list becomes outermost layer.
+    """
+    handler = base_handler
+
+    if tool_interceptors:
+        for interceptor in reversed(tool_interceptors):
+            current_handler = handler
+
+            async def wrapped_handler(
+                req: MCPToolCallRequest,
+                _interceptor: ToolCallInterceptor = interceptor,
+                _handler: Callable[
+                    [MCPToolCallRequest], Awaitable[MCPToolCallResult]
+                ] = current_handler,
+            ) -> MCPToolCallResult:
+                return await _interceptor(req, _handler)
+
+            handler = wrapped_handler
+
+    return handler
 
 
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
@@ -126,7 +159,7 @@ def convert_mcp_tool_to_langchain_tool(
     *,
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
-    hooks: Hooks | None = None,
+    tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
@@ -139,7 +172,7 @@ def convert_mcp_tool_to_langchain_tool(
         connection: Optional connection config to use to create a new session
                     if a `session` is not provided
         callbacks: Optional callbacks for handling notifications and events
-        hooks: Optional hooks for before/after tool call processing
+        tool_interceptors: Optional list of interceptors for tool call processing
         server_name: Name of the server this tool belongs to
 
     Returns:
@@ -153,6 +186,14 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
+        """Execute tool call with interceptor chain and return formatted result.
+
+        Args:
+            **arguments: Tool arguments as keyword args.
+
+        Returns:
+            Tuple of (text_content, non_text_content).
+        """
         mcp_callbacks = (
             callbacks.to_mcp_format(
                 context=CallbackContext(server_name=server_name, tool_name=tool.name)
@@ -161,89 +202,91 @@ def convert_mcp_tool_to_langchain_tool(
             else _MCPCallbacks()
         )
 
-        tool_name = tool.name
-        tool_args = arguments
-        effective_connection = connection
-
-        # try to get config and runtime if we're in a langgraph context
+        # try to get runtime if we're in a langgraph context
         try:
-            config = get_config()
             runtime = get_runtime()
         except Exception:  # noqa: BLE001
-            config = {}
             runtime = None
 
-        hook_context = ToolHookContext(
-            server_name=server_name or "unknown",
-            tool_name=tool.name,
-            config=config,
-            runtime=runtime,
-        )
+        # Create the innermost handler that actually executes the tool call
+        async def execute_tool(request: MCPToolCallRequest) -> MCPToolCallResult:
+            """Execute the actual MCP tool call with optional session creation.
 
-        if hooks and hooks.before_tool_call:
-            tool_request_spec = CallToolRequestSpec(
-                name=tool.name,
-                args=arguments,
-            )
+            Args:
+                request: Tool call request with name, args, headers, and context.
 
-            modified_request = await hooks.before_tool_call(
-                tool_request_spec, hook_context
-            )
-            if modified_request is not None:
-                tool_name = modified_request.get("name") or tool_name
-                tool_args = modified_request.get("args") or tool_args
+            Returns:
+                MCPToolCallResult from MCP SDK.
 
-                # If headers were modified, create a new connection with updated headers
-                modified_headers = modified_request.get("headers")
-                if modified_headers is not None and connection is not None:
-                    # Create a new connection config with updated headers
-                    updated_connection = dict(connection)
-                    if connection["transport"] in ("sse", "streamable_http"):
-                        existing_headers = connection.get("headers", {})
-                        updated_connection["headers"] = {
-                            **existing_headers,
-                            **modified_headers,
-                        }
-                        effective_connection = updated_connection
+            Raises:
+                ValueError: If neither session nor connection provided.
+                RuntimeError: If tool call returns None.
+            """
+            tool_name = request.name
+            tool_args = request.args
+            effective_connection = connection
 
-        # Execute the tool call
-        call_tool_result = None
+            # If headers were modified, create a new connection with updated headers
+            modified_headers = request.headers
+            if modified_headers is not None and connection is not None:
+                # Create a new connection config with updated headers
+                updated_connection = dict(connection)
+                if connection["transport"] in ("sse", "streamable_http"):
+                    existing_headers = connection.get("headers", {})
+                    updated_connection["headers"] = {
+                        **existing_headers,
+                        **modified_headers,
+                    }
+                    effective_connection = updated_connection
 
-        if session is None:
-            # If a session is not provided, we will create one on the fly
-            if effective_connection is None:
-                msg = "Either session or connection must be provided"
-                raise ValueError(msg)
+            # Execute the tool call
+            call_tool_result = None
 
-            async with create_session(
-                effective_connection, mcp_callbacks=mcp_callbacks
-            ) as tool_session:
-                await tool_session.initialize()
-                call_tool_result = await cast("ClientSession", tool_session).call_tool(
+            if session is None:
+                # If a session is not provided, we will create one on the fly
+                if effective_connection is None:
+                    msg = "Either session or connection must be provided"
+                    raise ValueError(msg)
+
+                async with create_session(
+                    effective_connection, mcp_callbacks=mcp_callbacks
+                ) as tool_session:
+                    await tool_session.initialize()
+                    call_tool_result = await cast(
+                        "ClientSession", tool_session
+                    ).call_tool(
+                        tool_name,
+                        tool_args,
+                        progress_callback=mcp_callbacks.progress_callback,
+                    )
+            else:
+                call_tool_result = await session.call_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
                 )
-        else:
-            call_tool_result = await session.call_tool(
-                tool_name,
-                tool_args,
-                progress_callback=mcp_callbacks.progress_callback,
-            )
 
-        if call_tool_result is None:
-            msg = (
-                "Tool call failed: no result returned from the underlying MCP SDK. "
-                "This may indicate that an exception was handled or suppressed "
-                "by the MCP SDK (e.g., client disconnection, network issue, "
-                "or other execution error)."
-            )
-            raise RuntimeError(msg)
+            if call_tool_result is None:
+                msg = (
+                    "Tool call failed: no result returned from the underlying MCP SDK. "
+                    "This may indicate that an exception was handled or suppressed "
+                    "by the MCP SDK (e.g., client disconnection, network issue, "
+                    "or other execution error)."
+                )
+                raise RuntimeError(msg)
 
-        if hooks and hooks.after_tool_call:
-            hook_result = await hooks.after_tool_call(call_tool_result, hook_context)
-            if hook_result is not None:
-                call_tool_result = hook_result
+            return call_tool_result
+
+        # Build and execute the interceptor chain
+        handler = _build_interceptor_chain(execute_tool, tool_interceptors)
+        request = MCPToolCallRequest(
+            name=tool.name,
+            args=arguments,
+            server_name=server_name or "unknown",
+            headers=None,
+            runtime=runtime,
+        )
+        call_tool_result = await handler(request)
 
         return _convert_call_tool_result(call_tool_result)
 
@@ -267,7 +310,7 @@ async def load_mcp_tools(
     *,
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
-    hooks: Hooks | None = None,
+    tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain tools.
@@ -276,7 +319,7 @@ async def load_mcp_tools(
         session: The MCP client session. If None, connection must be provided.
         connection: Connection config to create a new session if session is None.
         callbacks: Optional callbacks for handling notifications and events.
-        hooks: Optional hooks for before/after tool call processing.
+        tool_interceptors: Optional list of interceptors for tool call processing.
         server_name: Name of the server these tools belong to.
 
     Returns:
@@ -315,7 +358,7 @@ async def load_mcp_tools(
             tool,
             connection=connection,
             callbacks=callbacks,
-            hooks=hooks,
+            tool_interceptors=tool_interceptors,
             server_name=server_name,
         )
         for tool in tools
@@ -323,16 +366,17 @@ async def load_mcp_tools(
 
 
 def _get_injected_args(tool: BaseTool) -> list[str]:
-    """Get the list of injected argument names from a LangChain tool.
+    """Extract field names with InjectedToolArg annotation from tool schema.
 
     Args:
-        tool: The LangChain tool to inspect.
+        tool: LangChain tool to inspect.
 
     Returns:
-        A list of injected argument names.
+        List of field names marked as injected arguments.
     """
 
     def _is_injected_arg_type(type_: type) -> bool:
+        """Check if type annotation contains InjectedToolArg."""
         return any(
             isinstance(arg, InjectedToolArg)
             or (isinstance(arg, type) and issubclass(arg, InjectedToolArg))
@@ -347,17 +391,17 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
 
 
 def to_fastmcp(tool: BaseTool) -> FastMCPTool:
-    """Convert a LangChain tool to a FastMCP tool.
+    """Convert LangChain tool to FastMCP tool.
 
     Args:
-        tool: The LangChain tool to convert.
+        tool: LangChain tool to convert.
 
     Returns:
-        A FastMCP tool equivalent of the LangChain tool.
+        FastMCP tool equivalent.
 
     Raises:
-        TypeError: If the tool's args_schema is not a BaseModel subclass.
-        NotImplementedError: If the tool has injected arguments.
+        TypeError: If args_schema is not BaseModel subclass.
+        NotImplementedError: If tool has injected arguments.
     """
     if not issubclass(tool.args_schema, BaseModel):
         msg = (
