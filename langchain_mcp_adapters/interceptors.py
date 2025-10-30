@@ -12,14 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
-from mcp.types import CallToolResult as MCPCallToolResult
+from mcp.types import CallToolResult
 from typing_extensions import NotRequired, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-# Type aliases to avoid direct MCP type dependencies
-CallToolResult = MCPCallToolResult
+
+MCPToolCallResult = CallToolResult
 
 
 class _MCPToolCallRequestOverrides(TypedDict, total=False):
@@ -110,8 +110,8 @@ class ToolCallInterceptor(Protocol):
     async def __call__(
         self,
         request: MCPToolCallRequest,
-        handler: Callable[[MCPToolCallRequest], Awaitable[CallToolResult]],
-    ) -> CallToolResult:
+        handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    ) -> MCPToolCallResult:
         """Intercept tool execution with control over handler invocation.
 
         Args:
@@ -121,6 +121,6 @@ class ToolCallInterceptor(Protocol):
                 times, skipped, or wrapped for error handling.
 
         Returns:
-            Final CallToolResult from tool execution or interceptor logic.
+            Final MCPToolCallResult from tool execution or interceptor logic.
         """
         ...

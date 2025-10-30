@@ -19,7 +19,6 @@ from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
-    CallToolResult,
     EmbeddedResource,
     ImageContent,
     ResourceLink,
@@ -31,6 +30,7 @@ from pydantic import BaseModel, create_model
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.interceptors import (
     MCPToolCallRequest,
+    MCPToolCallResult,
     ToolCallInterceptor,
 )
 from langchain_mcp_adapters.sessions import Connection, create_session
@@ -49,9 +49,9 @@ MAX_ITERATIONS = 1000
 
 
 def _convert_call_tool_result(
-    call_tool_result: CallToolResult,
+    call_tool_result: MCPToolCallResult,
 ) -> tuple[str | list[str], list[NonTextContent] | None]:
-    """Convert MCP CallToolResult to LangChain tool result format.
+    """Convert MCP MCPToolCallResult to LangChain tool result format.
 
     Args:
         call_tool_result: The result from calling an MCP tool.
@@ -83,9 +83,9 @@ def _convert_call_tool_result(
 
 
 def _build_interceptor_chain(
-    base_handler: Callable[[MCPToolCallRequest], Awaitable[CallToolResult]],
+    base_handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
     tool_interceptors: list[ToolCallInterceptor] | None,
-) -> Callable[[MCPToolCallRequest], Awaitable[CallToolResult]]:
+) -> Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]]:
     """Build composed handler chain with interceptors in onion pattern.
 
     Args:
@@ -106,9 +106,9 @@ def _build_interceptor_chain(
                 req: MCPToolCallRequest,
                 _interceptor: ToolCallInterceptor = interceptor,
                 _handler: Callable[
-                    [MCPToolCallRequest], Awaitable[CallToolResult]
+                    [MCPToolCallRequest], Awaitable[MCPToolCallResult]
                 ] = current_handler,
-            ) -> CallToolResult:
+            ) -> MCPToolCallResult:
                 return await _interceptor(req, _handler)
 
             handler = wrapped_handler
@@ -209,14 +209,14 @@ def convert_mcp_tool_to_langchain_tool(
             runtime = None
 
         # Create the innermost handler that actually executes the tool call
-        async def execute_tool(request: MCPToolCallRequest) -> CallToolResult:
+        async def execute_tool(request: MCPToolCallRequest) -> MCPToolCallResult:
             """Execute the actual MCP tool call with optional session creation.
 
             Args:
                 request: Tool call request with name, args, headers, and context.
 
             Returns:
-                CallToolResult from MCP SDK.
+                MCPToolCallResult from MCP SDK.
 
             Raises:
                 ValueError: If neither session nor connection provided.
