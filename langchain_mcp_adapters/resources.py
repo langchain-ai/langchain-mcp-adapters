@@ -12,7 +12,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from mcp import ClientSession
 from mcp.types import BlobResourceContents, ResourceContents, TextResourceContents
 from pydantic import BaseModel, Field
-from langchain_mcp_adapters.sessions import Connection
+from langchain_mcp_adapters.sessions import Connection, create_session
 from langchain_core.callbacks import Callbacks
 
 def convert_mcp_resource_to_langchain_blob(
@@ -256,7 +256,7 @@ async def load_mcp_resources_as_tools(
     list_tool = StructuredTool(
         name="list_resources",
         description=(
-            "List available MCP resources. Resources are data sources that can be read. "
+            "List available resources. Resources are data sources that can be read. "
             "Returns a list of resources with their URIs, names, descriptions, and MIME types. "
             "Supports pagination via the cursor parameter. "
             "Use this to discover what resources are available before reading them."
@@ -268,7 +268,7 @@ async def load_mcp_resources_as_tools(
     read_tool = StructuredTool(
         name="read_resource",
         description=(
-            "Read the contents of a specific MCP resource by its URI. "
+            "Read the contents of a specific resource by its URI. "
             "Returns the resource contents which may include text, binary data, or both. "
             "Use list_resources first to discover available resource URIs."
         ),
