@@ -16,6 +16,7 @@ from langchain_mcp_adapters.resources import (
     convert_mcp_resource_to_langchain_blob,
     get_mcp_resource,
     load_mcp_resources,
+    load_mcp_resources_as_tools,
 )
 
 
@@ -273,3 +274,172 @@ async def test_load_mcp_resources_with_blob_content():
     assert isinstance(blobs[0], Blob)
     assert blobs[0].data == original_data
     assert blobs[0].mimetype == "application/octet-stream"
+
+
+async def test_load_mcp_resources_as_tools():
+    """Test that load_mcp_resources_as_tools returns two tools."""
+    session = AsyncMock()
+
+    tools = await load_mcp_resources_as_tools(session)
+
+    assert len(tools) == 2
+    assert tools[0].name == "list_resources"
+    assert tools[1].name == "read_resource"
+
+
+async def test_list_resources_tool():
+    """Test the list_resources tool functionality."""
+    session = AsyncMock()
+
+    session.list_resources = AsyncMock(
+        return_value=ListResourcesResult(
+            resources=[
+                Resource(
+                    uri="file:///test1.txt",
+                    name="test1.txt",
+                    description="First test file",
+                    mimeType="text/plain",
+                ),
+                Resource(
+                    uri="file:///test2.txt",
+                    name="test2.txt",
+                    description="Second test file",
+                    mimeType="text/plain",
+                ),
+            ],
+            nextCursor="cursor123",
+        ),
+    )
+
+    tools = await load_mcp_resources_as_tools(session)
+    list_tool = tools[0]
+
+    result = await list_tool.ainvoke({})
+
+    assert "resources" in result
+    assert "nextCursor" in result
+    assert len(result["resources"]) == 2
+    assert result["resources"][0]["uri"] == "file:///test1.txt"
+    assert result["resources"][0]["name"] == "test1.txt"
+    assert result["resources"][0]["description"] == "First test file"
+    assert result["resources"][0]["mimeType"] == "text/plain"
+    assert result["nextCursor"] == "cursor123"
+
+
+async def test_list_resources_tool_with_cursor():
+    """Test the list_resources tool with pagination cursor."""
+    session = AsyncMock()
+
+    session.list_resources = AsyncMock(
+        return_value=ListResourcesResult(
+            resources=[
+                Resource(
+                    uri="file:///test3.txt",
+                    name="test3.txt",
+                    mimeType="text/plain",
+                ),
+            ],
+            nextCursor=None,
+        ),
+    )
+
+    tools = await load_mcp_resources_as_tools(session)
+    list_tool = tools[0]
+
+    result = await list_tool.ainvoke({"cursor": "cursor123"})
+
+    assert len(result["resources"]) == 1
+    assert result["resources"][0]["uri"] == "file:///test3.txt"
+    assert result["nextCursor"] is None
+    session.list_resources.assert_called_once_with(cursor="cursor123")
+
+
+async def test_read_resource_tool():
+    """Test the read_resource tool functionality."""
+    session = AsyncMock()
+    uri = "file:///test.txt"
+
+    session.read_resource = AsyncMock(
+        return_value=ReadResourceResult(
+            contents=[
+                TextResourceContents(uri=uri, mimeType="text/plain", text="Test content"),
+            ],
+        ),
+    )
+
+    tools = await load_mcp_resources_as_tools(session)
+    read_tool = tools[1]
+
+    result = await read_tool.ainvoke({"uri": uri})
+
+    assert "uri" in result
+    assert "contents" in result
+    assert result["uri"] == uri
+    assert len(result["contents"]) == 1
+    assert result["contents"][0]["type"] == "text"
+    assert result["contents"][0]["data"] == "Test content"
+    assert result["contents"][0]["mimeType"] == "text/plain"
+
+
+async def test_read_resource_tool_with_blob():
+    """Test the read_resource tool with binary content."""
+    session = AsyncMock()
+    uri = "file:///test.bin"
+    original_data = b"binary data"
+    base64_blob = base64.b64encode(original_data).decode()
+
+    session.read_resource = AsyncMock(
+        return_value=ReadResourceResult(
+            contents=[
+                BlobResourceContents(
+                    uri=uri,
+                    mimeType="application/octet-stream",
+                    blob=base64_blob,
+                ),
+            ],
+        ),
+    )
+
+    tools = await load_mcp_resources_as_tools(session)
+    read_tool = tools[1]
+
+    result = await read_tool.ainvoke({"uri": uri})
+
+    assert result["uri"] == uri
+    assert len(result["contents"]) == 1
+    assert result["contents"][0]["type"] == "blob"
+    assert result["contents"][0]["data"] == base64_blob
+    assert result["contents"][0]["mimeType"] == "application/octet-stream"
+
+
+async def test_read_resource_tool_with_mixed_content():
+    """Test the read_resource tool with both text and binary content."""
+    session = AsyncMock()
+    uri = "file:///mixed"
+    original_data = b"binary data"
+    base64_blob = base64.b64encode(original_data).decode()
+
+    session.read_resource = AsyncMock(
+        return_value=ReadResourceResult(
+            contents=[
+                TextResourceContents(uri=uri, mimeType="text/plain", text="Text content"),
+                BlobResourceContents(
+                    uri=uri,
+                    mimeType="application/octet-stream",
+                    blob=base64_blob,
+                ),
+            ],
+        ),
+    )
+
+    tools = await load_mcp_resources_as_tools(session)
+    read_tool = tools[1]
+
+    result = await read_tool.ainvoke({"uri": uri})
+
+    assert len(result["contents"]) == 2
+    assert result["contents"][0]["type"] == "text"
+    assert result["contents"][0]["data"] == "Text content"
+    assert result["contents"][1]["type"] == "blob"
+    assert result["contents"][1]["data"] == base64_blob
+
