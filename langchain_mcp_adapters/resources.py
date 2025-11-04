@@ -5,15 +5,19 @@ objects, handling both text and binary resource content types.
 """  # noqa: E501
 
 import base64
-from typing import Any
+from collections.abc import Awaitable, Callable
+from functools import wraps
+from typing import Any, ParamSpec, TypeVar
 
 from langchain_core.documents.base import Blob
 from langchain_core.tools import BaseTool, StructuredTool
 from mcp import ClientSession
 from mcp.types import BlobResourceContents, ResourceContents, TextResourceContents
 from pydantic import BaseModel, Field
+
+from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
 from langchain_mcp_adapters.sessions import Connection, create_session
-from langchain_core.callbacks import Callbacks
+from langchain_mcp_adapters.callbacks import Callbacks, _MCPCallbacks
 
 def convert_mcp_resource_to_langchain_blob(
     resource_uri: str, contents: ResourceContents
@@ -176,13 +180,39 @@ async def load_mcp_resources_as_tools(
     mcp_callbacks = (
         callbacks.to_mcp_format(context=CallbackContext(server_name=server_name))
         if callbacks is not None
-        else []
+        else _MCPCallbacks()
     )
 
-    async def list_resources_fn(cursor: str | None = None) -> dict[str, Any]:
+    def with_session_context(
+        func: Callable[..., Awaitable[dict[str, Any]]]
+    ) -> Callable[..., Awaitable[dict[str, Any]]]:
+        """Decorator with access to closure variables."""
+        @wraps(func)
+        async def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            if session is None:
+                if connection is None:
+                    msg = "Either session or connection must be provided"
+                    raise ValueError(msg)
+                
+                async with create_session(
+                    connection, mcp_callbacks=mcp_callbacks
+                ) as temp_session:
+                    await temp_session.initialize()
+                    return await func(temp_session, *args, **kwargs)
+            else:
+                return await func(session, *args, **kwargs)
+        
+        return wrapper
+
+    @with_session_context
+    async def list_resources_fn(
+        session: ClientSession,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
         """List available MCP resources with pagination support.
 
         Args:
+            session: MCP client session.
             cursor: Optional pagination cursor from a previous call.
 
         Returns:
@@ -190,17 +220,7 @@ async def load_mcp_resources_as_tools(
                 - resources: List of resource dictionaries with uri, name, description, mimeType
                 - nextCursor: Pagination cursor for the next page (if available)
         """
-        if session is None:
-            if connection is None:
-                msg = "Either session or connection must be provided"
-                raise ValueError(msg)
-            async with create_session(
-                connection, mcp_callbacks=mcp_callbacks
-            ) as resource_session:
-                await resource_session.initialize()
-                result = await resource_session.list_resources(cursor=cursor)
-        else:
-            result = await session.list_resources(cursor=cursor)
+        result = await session.list_resources(cursor=cursor)
 
         resources = [
             {
@@ -217,10 +237,15 @@ async def load_mcp_resources_as_tools(
             "nextCursor": result.nextCursor,
         }
 
-    async def read_resource_fn(uri: str) -> dict[str, Any]:
+    @with_session_context
+    async def read_resource_fn(
+        session: ClientSession,
+        uri: str,
+    ) -> dict[str, Any]:
         """Read a specific MCP resource by URI.
 
         Args:
+            session: MCP client session.
             uri: The URI of the resource to read.
 
         Returns:
@@ -228,10 +253,7 @@ async def load_mcp_resources_as_tools(
                 - uri: The resource URI
                 - contents: List of content dictionaries with type, data, and mimeType
         """
-        blobs = await get_mcp_resource(
-            session,
-            uri
-        )
+        blobs = await get_mcp_resource(session, uri)
 
         contents = []
         for blob in blobs:
