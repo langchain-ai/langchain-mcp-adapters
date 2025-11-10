@@ -527,18 +527,18 @@ async def test_convert_mcp_tool_metadata_variants():
         "_meta": {"flag": True},
     }
 
+
 def test_convert_with_structured_content():
     """Test CallToolResult with structuredContent field."""
     structured_data = {"results": [{"id": 1}, {"id": 2}], "count": 2}
-    
+
     result = CallToolResult(
-        content=[TextContent(type="text", text="Search completed")],
-        isError=False
+        content=[TextContent(type="text", text="Search completed")], isError=False
     )
     result.structuredContent = structured_data
-    
+
     text_content, artifact = _convert_call_tool_result(result)
-    
+
     assert text_content == "Search completed"
     assert artifact["structuredContent"] == structured_data
 
@@ -546,15 +546,14 @@ def test_convert_with_structured_content():
 def test_convert_structured_content_includes_json_block():
     """Test that structuredContent is included in artifact only."""
     structured_data = {"result": "success"}
-    
+
     result = CallToolResult(
-        content=[TextContent(type="text", text="Done")],
-        isError=False
+        content=[TextContent(type="text", text="Done")], isError=False
     )
     result.structuredContent = structured_data
-    
+
     content, artifact = _convert_call_tool_result(result)
-    
+
     # Content stays simple - just the text
     assert content == "Done"
     # Structured data goes in artifact
@@ -564,11 +563,11 @@ def test_convert_structured_content_includes_json_block():
 def test_convert_with_structured_content_only():
     """Test CallToolResult with only structuredContent, no text content."""
     structured_data = {"status": "success"}
-    
+
     result = CallToolResult(content=[], isError=False)
     result.structuredContent = structured_data
-    
+
     content, artifact = _convert_call_tool_result(result)
-    
+
     assert content == ""
     assert artifact["structuredContent"] == structured_data

@@ -4,8 +4,8 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from typing import Any, TypeAlias, cast, get_args
 from collections.abc import Awaitable, Callable
+from typing import Any, TypeAlias, cast, get_args
 
 from langchain_core.tools import (
     BaseTool,
@@ -24,7 +24,6 @@ from mcp.types import (
     ImageContent,
     ResourceLink,
     TextContent,
-    TextResourceContents,
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
@@ -37,19 +36,20 @@ from langchain_mcp_adapters.interceptors import (
 )
 from langchain_mcp_adapters.sessions import Connection, create_session
 
-NonTextContent: TypeAlias = ImageContent | AudioContent | ResourceLink | EmbeddedResource
+NonTextContent: TypeAlias = (
+    ImageContent | AudioContent | ResourceLink | EmbeddedResource
+)
 
 try:
-    from langgraph.runtime import get_runtime
+    from langgraph.runtime import get_runtime  # type: ignore[import-not-found]
 except ImportError:
 
     def get_runtime() -> None:
         """no-op runtime getter."""
         return
 
+
 MAX_ITERATIONS = 1000
-
-
 
 
 def _convert_call_tool_result(
@@ -242,7 +242,9 @@ def convert_mcp_tool_to_langchain_tool(
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(
-                context=CallbackContext(server_name=server_name, tool_name=tool.name)
+                context=CallbackContext(
+                    server_name=server_name or "unknown", tool_name=tool.name
+                )
             )
             if callbacks is not None
             else _MCPCallbacks()
@@ -276,14 +278,20 @@ def convert_mcp_tool_to_langchain_tool(
             modified_headers = request.headers
             if modified_headers is not None and connection is not None:
                 # Create a new connection config with updated headers
-                updated_connection = dict(connection)
+                updated_connection: dict[str, Any] = dict(connection)  # type: ignore[arg-type]
                 if connection["transport"] in ("sse", "streamable_http"):
-                    existing_headers = connection.get("headers", {})
+                    existing_headers_raw = connection.get("headers", {})
+                    existing_headers: dict[str, Any] = (
+                        existing_headers_raw
+                        if isinstance(existing_headers_raw, dict)
+                        else {}
+                    )
+                    headers_dict: dict[str, Any] = modified_headers
                     updated_connection["headers"] = {
                         **existing_headers,
-                        **modified_headers,
+                        **headers_dict,
                     }
-                    effective_connection = updated_connection
+                    effective_connection = cast("Connection", updated_connection)
 
             captured_exception = None
 
@@ -381,7 +389,9 @@ async def load_mcp_tools(
         raise ValueError(msg)
 
     mcp_callbacks = (
-        callbacks.to_mcp_format(context=CallbackContext(server_name=server_name))
+        callbacks.to_mcp_format(
+            context=CallbackContext(server_name=server_name or "unknown")
+        )
         if callbacks is not None
         else _MCPCallbacks()
     )
@@ -422,13 +432,19 @@ def _get_injected_args(tool: BaseTool) -> list[str]:
         List of field names marked as injected arguments.
     """
 
-    def _is_injected_arg_type(type_: type) -> bool:
+    def _is_injected_arg_type(annotation: Any) -> bool:
         """Check if type annotation contains InjectedToolArg."""
-        return any(
-            isinstance(arg, InjectedToolArg)
-            or (isinstance(arg, type) and issubclass(arg, InjectedToolArg))
-            for arg in get_args(type_)[1:]
-        )
+        try:
+            args = get_args(annotation)
+            if len(args) > 1:
+                return any(
+                    isinstance(arg, InjectedToolArg)
+                    or (isinstance(arg, type) and issubclass(arg, InjectedToolArg))
+                    for arg in args[1:]
+                )
+        except (TypeError, AttributeError):
+            pass
+        return False
 
     return [
         field
@@ -451,8 +467,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         NotImplementedError: If tool has injected arguments.
     """
     if not (
-        isinstance(tool.args_schema, type) and
-        issubclass(tool.args_schema, BaseModel)
+        isinstance(tool.args_schema, type) and issubclass(tool.args_schema, BaseModel)
     ):
         msg = (
             "Tool args_schema must be a subclass of pydantic.BaseModel. "
@@ -468,9 +483,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
         for field, field_info in args_schema.model_fields.items()
     }
     arg_model = create_model(  # type: ignore[call-overload]
-        f"{tool.name}Arguments",
-        __base__=ArgModelBase,
-        **field_definitions
+        f"{tool.name}Arguments", __base__=ArgModelBase, **field_definitions
     )
     fn_metadata = FuncMetadata(arg_model=arg_model)
 
@@ -487,6 +500,7 @@ def to_fastmcp(tool: BaseTool) -> FastMCPTool:
     return FastMCPTool(
         fn=fn,
         name=tool.name,
+        title=tool.name,
         description=tool.description,
         parameters=parameters,
         fn_metadata=fn_metadata,
