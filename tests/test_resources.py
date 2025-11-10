@@ -56,7 +56,6 @@ def test_convert_mcp_resource_to_langchain_blob_with_invalid_type():
         convert_mcp_resource_to_langchain_blob("file:///dummy", DummyContent())
 
 
-@pytest.mark.asyncio
 async def test_get_mcp_resource_with_contents():
     session = AsyncMock()
     uri = "file:///test.txt"
@@ -78,7 +77,6 @@ async def test_get_mcp_resource_with_contents():
     assert blobs[1].data == "Content 2"
 
 
-@pytest.mark.asyncio
 async def test_get_mcp_resource_with_text_and_blob():
     session = AsyncMock()
     uri = "file:///mixed"
@@ -112,7 +110,6 @@ async def test_get_mcp_resource_with_text_and_blob():
     assert results[1].mimetype == "application/octet-stream"
 
 
-@pytest.mark.asyncio
 async def test_get_mcp_resource_with_empty_contents():
     session = AsyncMock()
     uri = "file:///empty.txt"
@@ -125,7 +122,6 @@ async def test_get_mcp_resource_with_empty_contents():
     session.read_resource.assert_called_once_with(uri)
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_resources_with_list_of_uris():
     session = AsyncMock()
     uri1 = "file:///test1.txt"
@@ -160,7 +156,6 @@ async def test_load_mcp_resources_with_list_of_uris():
     assert session.read_resource.call_count == 2
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_resources_with_single_uri_string():
     session = AsyncMock()
     uri = "file:///test.txt"
@@ -184,7 +179,6 @@ async def test_load_mcp_resources_with_single_uri_string():
     session.read_resource.assert_called_once_with(uri)
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_resources_with_all_resources():
     session = AsyncMock()
 
@@ -232,7 +226,6 @@ async def test_load_mcp_resources_with_all_resources():
     assert session.read_resource.call_count == 2
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_resources_with_error_handling():
     session = AsyncMock()
     uri1 = "file:///valid.txt"
@@ -256,7 +249,6 @@ async def test_load_mcp_resources_with_error_handling():
     assert "Error fetching resource" in str(exc_info.value)
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_resources_with_blob_content():
     session = AsyncMock()
     uri = "file:///with_blob"

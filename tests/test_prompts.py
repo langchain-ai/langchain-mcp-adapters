@@ -60,7 +60,6 @@ def test_convert_mcp_prompt_message_to_langchain_message_with_image_content(role
         convert_mcp_prompt_message_to_langchain_message(message)
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_prompt():
     session = AsyncMock()
     session.get_prompt = AsyncMock(
