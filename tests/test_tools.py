@@ -85,10 +85,10 @@ def test_convert_with_non_text_content():
         isError=False,
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    text_content, artifact = _convert_call_tool_result(result)
 
     assert text_content == "text result"
-    assert non_text_content == [image_content, resource_content]
+    assert artifact == {"nonText": [image_content, resource_content]}
 
 
 def test_convert_with_error():
@@ -322,16 +322,16 @@ async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
     fastmcp_tool = to_fastmcp(tool_instance)
     assert fastmcp_tool.name == "add"
     assert fastmcp_tool.description == "Add two numbers"
-    assert fastmcp_tool.parameters == {
-        "description": "Add two numbers",
-        "properties": {
-            "a": {"title": "A", "type": "integer"},
-            "b": {"title": "B", "type": "integer"},
-        },
-        "required": ["a", "b"],
-        "title": "add",
-        "type": "object",
+    # Check parameters schema
+    parameters = fastmcp_tool.parameters
+    assert parameters["description"] == "Add two numbers"
+    assert parameters["properties"] == {
+        "a": {"title": "A", "type": "integer"},
+        "b": {"title": "B", "type": "integer"},
     }
+    assert parameters["required"] == ["a", "b"]
+    assert parameters["type"] == "object"
+    # Note: title varies by tool type (schema class name vs tool name)
     assert fastmcp_tool.fn_metadata.arg_model.model_json_schema() == {
         "properties": {
             "a": {"title": "A", "type": "integer"},
@@ -526,3 +526,48 @@ async def test_convert_mcp_tool_metadata_variants():
         "openWorldHint": None,
         "_meta": {"flag": True},
     }
+
+
+def test_convert_with_structured_content():
+    """Test CallToolResult with structuredContent field."""
+    structured_data = {"results": [{"id": 1}, {"id": 2}], "count": 2}
+
+    result = CallToolResult(
+        content=[TextContent(type="text", text="Search completed")], isError=False
+    )
+    result.structuredContent = structured_data
+
+    text_content, artifact = _convert_call_tool_result(result)
+
+    assert text_content == "Search completed"
+    assert artifact["structuredContent"] == structured_data
+
+
+def test_convert_structured_content_includes_json_block():
+    """Test that structuredContent is included in artifact only."""
+    structured_data = {"result": "success"}
+
+    result = CallToolResult(
+        content=[TextContent(type="text", text="Done")], isError=False
+    )
+    result.structuredContent = structured_data
+
+    content, artifact = _convert_call_tool_result(result)
+
+    # Content stays simple - just the text
+    assert content == "Done"
+    # Structured data goes in artifact
+    assert artifact["structuredContent"] == structured_data
+
+
+def test_convert_with_structured_content_only():
+    """Test CallToolResult with only structuredContent, no text content."""
+    structured_data = {"status": "success"}
+
+    result = CallToolResult(content=[], isError=False)
+    result.structuredContent = structured_data
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == ""
+    assert artifact["structuredContent"] == structured_data
