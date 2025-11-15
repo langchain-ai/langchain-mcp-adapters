@@ -1,7 +1,7 @@
 """Types for callbacks."""
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from mcp.client.session import LoggingFnT as MCPLoggingFnT
 from mcp.shared.session import ProgressFnT as MCPProgressFnT
@@ -23,6 +23,7 @@ class CallbackContext:
     tool_name: str | None = None
 
 
+@runtime_checkable
 class LoggingMessageCallback(Protocol):
     """Light wrapper around the mcp.client.session.LoggingFnT.
 
@@ -38,6 +39,7 @@ class LoggingMessageCallback(Protocol):
         ...
 
 
+@runtime_checkable
 class ProgressCallback(Protocol):
     """Light wrapper around the mcp.shared.session.ProgressFnT.
 
