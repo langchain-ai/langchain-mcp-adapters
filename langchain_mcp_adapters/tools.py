@@ -161,6 +161,7 @@ def convert_mcp_tool_to_langchain_tool(
     callbacks: Callbacks | None = None,
     tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
+    prefix_tool_name_with_server_name: bool = False,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -174,6 +175,9 @@ def convert_mcp_tool_to_langchain_tool(
         callbacks: Optional callbacks for handling notifications and events
         tool_interceptors: Optional list of interceptors for tool call processing
         server_name: Name of the server this tool belongs to
+        prefix_tool_name_with_server_name: Whether to prefix tool names with server
+            name to avoid collisions. When True, tool names will be formatted as
+            "{server_name}__{tool_name}".
 
     Returns:
         a LangChain tool
@@ -296,8 +300,13 @@ def convert_mcp_tool_to_langchain_tool(
     meta = {"_meta": meta} if meta is not None else {}
     metadata = {**base, **meta} or None
 
+    # Prefix tool name with server name if requested
+    tool_name = tool.name
+    if prefix_tool_name_with_server_name and server_name:
+        tool_name = f"{server_name}__{tool.name}"
+
     return StructuredTool(
-        name=tool.name,
+        name=tool_name,
         description=tool.description or "",
         args_schema=tool.inputSchema,
         coroutine=call_tool,
@@ -313,6 +322,7 @@ async def load_mcp_tools(
     callbacks: Callbacks | None = None,
     tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
+    prefix_tool_name_with_server_name: bool = False,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
@@ -322,6 +332,9 @@ async def load_mcp_tools(
         callbacks: Optional `Callbacks` for handling notifications and events.
         tool_interceptors: Optional list of interceptors for tool call processing.
         server_name: Name of the server these tools belong to.
+        prefix_tool_name_with_server_name: Whether to prefix tool names with server
+            name to avoid collisions. When True, tool names will be formatted as
+            "{server_name}__{tool_name}".
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
@@ -361,6 +374,7 @@ async def load_mcp_tools(
             callbacks=callbacks,
             tool_interceptors=tool_interceptors,
             server_name=server_name,
+            prefix_tool_name_with_server_name=prefix_tool_name_with_server_name,
         )
         for tool in tools
     ]
