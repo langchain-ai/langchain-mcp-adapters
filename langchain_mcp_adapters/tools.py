@@ -35,15 +35,6 @@ from langchain_mcp_adapters.interceptors import (
 )
 from langchain_mcp_adapters.sessions import Connection, create_session
 
-try:
-    from langgraph.runtime import get_runtime
-except ImportError:
-
-    def get_runtime() -> None:
-        """no-op runtime getter."""
-        return
-
-
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
 MAX_ITERATIONS = 1000
 
@@ -184,11 +175,13 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
+        runtime: Any = None,
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         """Execute tool call with interceptor chain and return formatted result.
 
         Args:
+            runtime: LangGraph tool runtime if available, otherwise None.
             **arguments: Tool arguments as keyword args.
 
         Returns:
@@ -201,12 +194,6 @@ def convert_mcp_tool_to_langchain_tool(
             if callbacks is not None
             else _MCPCallbacks()
         )
-
-        # try to get runtime if we're in a langgraph context
-        try:
-            runtime = get_runtime()
-        except Exception:  # noqa: BLE001
-            runtime = None
 
         # Create the innermost handler that actually executes the tool call
         async def execute_tool(request: MCPToolCallRequest) -> MCPToolCallResult:
