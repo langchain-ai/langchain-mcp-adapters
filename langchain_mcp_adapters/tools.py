@@ -7,6 +7,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 from collections.abc import Awaitable, Callable
 from typing import Any, get_args
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -19,6 +20,7 @@ from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
+    CallToolResult,
     EmbeddedResource,
     ImageContent,
     ResourceLink,
@@ -40,9 +42,9 @@ MAX_ITERATIONS = 1000
 
 
 def _convert_call_tool_result(
-    call_tool_result: MCPToolCallResult,
+    call_tool_result: CallToolResult,
 ) -> tuple[str | list[str], list[NonTextContent] | None]:
-    """Convert MCP MCPToolCallResult to LangChain tool result format.
+    """Convert MCP CallToolResult to LangChain tool result format.
 
     Args:
         call_tool_result: The result from calling an MCP tool.
@@ -73,21 +75,69 @@ def _convert_call_tool_result(
     return tool_content, non_text_contents or None
 
 
+def _convert_mcp_tool_call_result(
+    result: MCPToolCallResult,
+) -> tuple[str | list[str], list[NonTextContent] | None]:
+    """Convert MCPToolCallResult (CallToolResult or ToolMessage) to LangChain format.
+
+    Args:
+        result: The result from an interceptor, either CallToolResult or ToolMessage.
+
+    Returns:
+        A tuple containing the text content and any non-text content.
+
+    Raises:
+        ToolException: If the tool call resulted in an error.
+    """
+    if isinstance(result, ToolMessage):
+        # ToolMessage already has the content in LangChain format
+        # Extract text content and artifact
+        content = result.content
+        artifact = result.artifact
+
+        # Handle different content types
+        if isinstance(content, str):
+            return content, artifact if artifact else None
+        if isinstance(content, list):
+            # If content is a list, convert to appropriate format
+            text_parts = []
+            for item in content:
+                if isinstance(item, str):
+                    text_parts.append(item)
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+
+            if len(text_parts) == 0:
+                return "", artifact if artifact else None
+            if len(text_parts) == 1:
+                return text_parts[0], artifact if artifact else None
+            return text_parts, artifact if artifact else None
+        return str(content), artifact if artifact else None
+    # Handle CallToolResult
+    return _convert_call_tool_result(result)
+
+
 def _build_interceptor_chain(
-    base_handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    base_handler: Callable[[MCPToolCallRequest], Awaitable[CallToolResult]],
     tool_interceptors: list[ToolCallInterceptor] | None,
 ) -> Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]]:
     """Build composed handler chain with interceptors in onion pattern.
 
     Args:
         base_handler: Innermost handler executing the actual tool call.
+            Returns CallToolResult from MCP SDK.
         tool_interceptors: Optional list of interceptors to wrap the handler.
+            Interceptors can return either CallToolResult or ToolMessage.
 
     Returns:
         Composed handler with all interceptors applied. First interceptor
-        in list becomes outermost layer.
+        in list becomes outermost layer. Returns MCPToolCallResult which
+        can be either CallToolResult or ToolMessage.
     """
-    handler = base_handler
+    # The handler type needs to be flexible to support the chain
+    # The innermost handler returns CallToolResult, but interceptors can return
+    # either CallToolResult or ToolMessage
+    handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]] = base_handler
 
     if tool_interceptors:
         for interceptor in reversed(tool_interceptors):
@@ -175,7 +225,7 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
-        runtime: Any = None,
+        runtime: Any = None,  # noqa: ANN401
         **arguments: dict[str, Any],
     ) -> tuple[str | list[str], list[NonTextContent] | None]:
         """Execute tool call with interceptor chain and return formatted result.
@@ -196,14 +246,14 @@ def convert_mcp_tool_to_langchain_tool(
         )
 
         # Create the innermost handler that actually executes the tool call
-        async def execute_tool(request: MCPToolCallRequest) -> MCPToolCallResult:
+        async def execute_tool(request: MCPToolCallRequest) -> CallToolResult:
             """Execute the actual MCP tool call with optional session creation.
 
             Args:
                 request: Tool call request with name, args, headers, and context.
 
             Returns:
-                MCPToolCallResult from MCP SDK.
+                CallToolResult from MCP SDK.
 
             Raises:
                 ValueError: If neither session nor connection provided.
@@ -276,7 +326,7 @@ def convert_mcp_tool_to_langchain_tool(
         )
         call_tool_result = await handler(request)
 
-        return _convert_call_tool_result(call_tool_result)
+        return _convert_mcp_tool_call_result(call_tool_result)
 
     meta = getattr(tool, "meta", None)
     base = tool.annotations.model_dump() if tool.annotations is not None else {}

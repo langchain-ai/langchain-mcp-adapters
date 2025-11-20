@@ -18,6 +18,8 @@ from typing_extensions import NotRequired, TypedDict, Unpack
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from langchain_core.messages import ToolMessage
+
 
 MCPToolCallResult = CallToolResult
 
@@ -111,8 +113,10 @@ class ToolCallInterceptor(Protocol):
     async def __call__(
         self,
         request: MCPToolCallRequest,
-        handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
-    ) -> MCPToolCallResult:
+        handler: Callable[
+            [MCPToolCallRequest], Awaitable[MCPToolCallResult | ToolMessage]
+        ],
+    ) -> MCPToolCallResult | ToolMessage:
         """Intercept tool execution with control over handler invocation.
 
         Args:
