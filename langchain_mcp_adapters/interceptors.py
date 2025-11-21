@@ -10,7 +10,7 @@ request / result lifecycle, for example to support elicitation.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from mcp.types import CallToolResult
 from typing_extensions import NotRequired, TypedDict, Unpack
@@ -94,6 +94,7 @@ class MCPToolCallRequest:
         return replace(self, **overrides)
 
 
+@runtime_checkable
 class ToolCallInterceptor(Protocol):
     """Protocol for tool call interceptors using handler callback pattern.
 

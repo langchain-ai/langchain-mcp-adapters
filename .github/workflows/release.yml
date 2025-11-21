@@ -57,7 +57,7 @@ jobs:
       - name: Build project for distribution
         run: uv build
       - name: Upload build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dist
           path: ${{ inputs.working-directory }}/dist/
@@ -100,7 +100,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: dist
           path: ${{ inputs.working-directory }}/dist/
@@ -136,7 +136,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: dist
           path: ${{ inputs.working-directory }}/dist/
