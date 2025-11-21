@@ -1,8 +1,8 @@
-"""Resources adapter for converting MCP resources to LangChain Blobs.
+"""Resources adapter for converting MCP resources to LangChain [Blob objects][langchain_core.documents.base.Blob].
 
 This module provides functionality to convert MCP resources into LangChain Blob
 objects, handling both text and binary resource content types.
-"""
+"""  # noqa: E501
 
 import base64
 
@@ -38,15 +38,15 @@ def convert_mcp_resource_to_langchain_blob(
 
 
 async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
-    """Fetch a single MCP resource and convert it to LangChain Blobs.
+    """Fetch a single MCP resource and convert it to LangChain [Blob objects][langchain_core.documents.base.Blob].
 
     Args:
         session: MCP client session.
         uri: URI of the resource to fetch.
 
     Returns:
-        A list of LangChain Blobs.
-    """
+        A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
+    """  # noqa: E501
     contents_result = await session.read_resource(uri)
     if not contents_result.contents or len(contents_result.contents) == 0:
         return []
@@ -62,21 +62,24 @@ async def load_mcp_resources(
     *,
     uris: str | list[str] | None = None,
 ) -> list[Blob]:
-    """Load MCP resources and convert them to LangChain Blobs.
+    """Load MCP resources and convert them to LangChain [Blob objects][langchain_core.documents.base.Blob].
 
     Args:
         session: MCP client session.
-        uris: List of URIs to load. If None, all resources will be loaded.
-            Note: Dynamic resources will NOT be loaded when None is specified,
-            as they require parameters and are ignored by the MCP SDK's
-            session.list_resources() method.
+        uris: List of URIs to load. If `None`, all resources will be loaded.
+
+            !!! note
+
+                Dynamic resources will NOT be loaded when `None` is specified,
+                as they require parameters and are ignored by the MCP SDK's
+                `session.list_resources()` method.
 
     Returns:
-        A list of LangChain Blobs.
+        A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
 
     Raises:
         RuntimeError: If an error occurs while fetching a resource.
-    """
+    """  # noqa: E501
     blobs = []
 
     if uris is None:
