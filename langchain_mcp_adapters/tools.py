@@ -7,6 +7,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 from collections.abc import Awaitable, Callable
 from typing import Any, get_args
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -41,18 +42,28 @@ MAX_ITERATIONS = 1000
 
 def _convert_call_tool_result(
     call_tool_result: MCPToolCallResult,
-) -> tuple[str | list[str], list[NonTextContent] | None]:
+) -> tuple[str | list[str] | ToolMessage, list[NonTextContent] | None]:
     """Convert MCP MCPToolCallResult to LangChain tool result format.
 
     Args:
-        call_tool_result: The result from calling an MCP tool.
+        call_tool_result: The result from calling an MCP tool. Can be either
+            a CallToolResult (MCP format) or a ToolMessage (LangChain format).
 
     Returns:
-        A tuple containing the text content and any non-text content.
+        A tuple containing the text content (which may be a ToolMessage) and any
+        non-text content. When a ToolMessage is returned by an interceptor, it's
+        placed in the first position of the tuple as the content, with None as
+        the artifact.
 
     Raises:
         ToolException: If the tool call resulted in an error.
     """
+    # If the interceptor returned a ToolMessage directly, return it as the content
+    # with None as the artifact to match the content_and_artifact format
+    if isinstance(call_tool_result, ToolMessage):
+        return call_tool_result, None
+
+    # Otherwise, convert from CallToolResult
     text_contents: list[TextContent] = []
     non_text_contents = []
     for content in call_tool_result.content:
@@ -175,9 +186,9 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
-        runtime: Any = None,
+        runtime: Any = None,  # noqa: ANN401
         **arguments: dict[str, Any],
-    ) -> tuple[str | list[str], list[NonTextContent] | None]:
+    ) -> tuple[str | list[str] | ToolMessage, list[NonTextContent] | None]:
         """Execute tool call with interceptor chain and return formatted result.
 
         Args:
@@ -185,7 +196,8 @@ def convert_mcp_tool_to_langchain_tool(
             **arguments: Tool arguments as keyword args.
 
         Returns:
-            Tuple of (text_content, non_text_content).
+            A tuple of (text_content, non_text_content), where text_content may be
+            a ToolMessage if an interceptor returned one directly.
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(
