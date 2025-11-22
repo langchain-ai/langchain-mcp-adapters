@@ -36,24 +36,40 @@ from langchain_mcp_adapters.interceptors import (
 )
 from langchain_mcp_adapters.sessions import Connection, create_session
 
+try:
+    # langgraph installed
+    import langgraph
+    from langgraph.types import Command
+    LANGGRAPH_PRESENT = True
+except ImportError:
+    LANGGRAPH_PRESENT = False
+
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
+
+# Conditional type based on langgraph availability
+if LANGGRAPH_PRESENT:
+    ConvertedToolResult = str | list[str] | ToolMessage | Command
+else:
+    ConvertedToolResult = str | list[str] | ToolMessage
+
 MAX_ITERATIONS = 1000
 
 
 def _convert_call_tool_result(
     call_tool_result: MCPToolCallResult,
-) -> tuple[str | list[str] | ToolMessage, list[NonTextContent] | None]:
+) -> tuple[ConvertedToolResult, list[NonTextContent] | None]:
     """Convert MCP MCPToolCallResult to LangChain tool result format.
 
     Args:
         call_tool_result: The result from calling an MCP tool. Can be either
-            a CallToolResult (MCP format) or a ToolMessage (LangChain format).
+            a CallToolResult (MCP format), a ToolMessage (LangChain format),
+            or a Command (LangGraph format, if langgraph is installed).
 
     Returns:
-        A tuple containing the text content (which may be a ToolMessage) and any
-        non-text content. When a ToolMessage is returned by an interceptor, it's
-        placed in the first position of the tuple as the content, with None as
-        the artifact.
+        A tuple containing the text content (which may be a ToolMessage or Command)
+        and any non-text content. When a ToolMessage or Command is returned by an
+        interceptor, it's placed in the first position of the tuple as the content,
+        with None as the artifact.
 
     Raises:
         ToolException: If the tool call resulted in an error.
@@ -61,6 +77,10 @@ def _convert_call_tool_result(
     # If the interceptor returned a ToolMessage directly, return it as the content
     # with None as the artifact to match the content_and_artifact format
     if isinstance(call_tool_result, ToolMessage):
+        return call_tool_result, None
+
+    # If the interceptor returned a Command (LangGraph), return it directly
+    if LANGGRAPH_PRESENT and isinstance(call_tool_result, Command):
         return call_tool_result, None
 
     # Otherwise, convert from CallToolResult
@@ -188,7 +208,7 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         runtime: Any = None,  # noqa: ANN401
         **arguments: dict[str, Any],
-    ) -> tuple[str | list[str] | ToolMessage, list[NonTextContent] | None]:
+    ) -> tuple[ConvertedToolResult, list[NonTextContent] | None]:
         """Execute tool call with interceptor chain and return formatted result.
 
         Args:
@@ -197,7 +217,8 @@ def convert_mcp_tool_to_langchain_tool(
 
         Returns:
             A tuple of (text_content, non_text_content), where text_content may be
-            a ToolMessage if an interceptor returned one directly.
+            a ToolMessage or Command (if langgraph is installed) if an interceptor
+            returned one directly.
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(
