@@ -12,14 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from langchain_core.messages import ToolMessage
 from mcp.types import CallToolResult
 from typing_extensions import NotRequired, TypedDict, Unpack
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-
-MCPToolCallResult = CallToolResult
+MCPToolCallResult = CallToolResult | ToolMessage
 
 
 class _MCPToolCallRequestOverrides(TypedDict, total=False):
