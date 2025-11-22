@@ -19,6 +19,7 @@ from typing_extensions import NotRequired, TypedDict, Unpack
 try:
     # langgraph installed
     import langgraph
+
     LANGGRAPH_PRESENT = True
 except ImportError:
     LANGGRAPH_PRESENT = False
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 
 if LANGGRAPH_PRESENT:
     from langgraph.types import Command
+
     MCPToolCallResult = CallToolResult | ToolMessage | Command
 else:
     MCPToolCallResult = CallToolResult | ToolMessage

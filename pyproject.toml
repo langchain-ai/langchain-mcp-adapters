@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+integration = [
+    "langchain>=1.0.8",
+]
 test = [
     "pytest>=8.0.0",
     "ruff>=0.9.4",

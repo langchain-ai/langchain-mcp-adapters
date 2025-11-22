@@ -40,6 +40,7 @@ try:
     # langgraph installed
     import langgraph
     from langgraph.types import Command
+
     LANGGRAPH_PRESENT = True
 except ImportError:
     LANGGRAPH_PRESENT = False
