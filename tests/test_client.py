@@ -161,3 +161,104 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+async def test_prefix_tool_name_with_server_name(
+    socket_enabled,
+    websocket_server,
+    websocket_server_port: int,
+):
+    """Test that tool names can be prefixed with server name to avoid collisions."""
+    # Get the absolute path to the server scripts
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": [weather_server_path],
+                "transport": "stdio",
+            },
+            "time": {
+                "url": f"ws://127.0.0.1:{websocket_server_port}/ws",
+                "transport": "websocket",
+            },
+        },
+        prefix_tool_name_with_server_name=True,
+    )
+
+    # Get all tools with prefixed names
+    all_tools = await client.get_tools()
+
+    # Should have 4 tools (add, multiply, get_weather, get_time)
+    assert len(all_tools) == 4
+
+    # Verify tool names are prefixed with server name
+    tool_names = {tool.name for tool in all_tools}
+    assert tool_names == {
+        "math__add",
+        "math__multiply",
+        "weather__get_weather",
+        "time__get_time",
+    }
+
+    # Test that we can still call the prefixed tools
+    add_tool = next(tool for tool in all_tools if tool.name == "math__add")
+    result = await add_tool.ainvoke({"a": 2, "b": 3})
+    assert result == "5"
+
+    # Test multiply tool
+    multiply_tool = next(tool for tool in all_tools if tool.name == "math__multiply")
+    result = await multiply_tool.ainvoke({"a": 4, "b": 5})
+    assert result == "20"
+
+    # Test weather tool
+    weather_tool = next(
+        tool for tool in all_tools if tool.name == "weather__get_weather"
+    )
+    result = await weather_tool.ainvoke({"location": "London"})
+    assert result == "It's always sunny in London"
+
+    # Test time tool
+    time_tool = next(tool for tool in all_tools if tool.name == "time__get_time")
+    result = await time_tool.ainvoke({"args": ""})
+    assert result == "5:20:00 PM EST"
+
+    # Test getting tools from a specific server still has prefix
+    math_tools = await client.get_tools(server_name="math")
+    assert len(math_tools) == 2
+    math_tool_names = {tool.name for tool in math_tools}
+    assert math_tool_names == {"math__add", "math__multiply"}
+
+
+async def test_prefix_tool_name_disabled_by_default(socket_enabled):
+    """Test that prefix_tool_name_with_server_name is disabled by default."""
+    # Get the absolute path to the server scripts
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    # Create client without prefix option (should default to False)
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            }
+        }
+    )
+
+    all_tools = await client.get_tools()
+
+    # Verify tool names are NOT prefixed
+    tool_names = {tool.name for tool in all_tools}
+    assert tool_names == {"add", "multiply"}
+    assert "math__add" not in tool_names
+    assert "math__multiply" not in tool_names
