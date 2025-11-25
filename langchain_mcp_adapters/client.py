@@ -204,14 +204,15 @@ class MultiServerMCPClient:
 
     async def get_resources(
         self,
-        server_name: str,
+        server_name: str | None = None,
         *,
         uris: str | list[str] | None = None,
     ) -> list[Blob]:
         """Get resources from a given MCP server.
 
         Args:
-            server_name: Name of the server to get resources from
+            server_name: Optional name of the server to get resources from.
+                If `None`, all resources from all servers will be returned.
             uris: Optional resource URI or list of URIs to load. If not provided,
                 all resources will be loaded.
 
@@ -219,8 +220,30 @@ class MultiServerMCPClient:
             A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
 
         """
-        async with self.session(server_name) as session:
-            return await load_mcp_resources(session, uris=uris)
+        if server_name is not None:
+            if server_name not in self.connections:
+                msg = (
+                    f"Couldn't find a server with name '{server_name}', "
+                    f"expected one of '{list(self.connections.keys())}'"
+                )
+                raise ValueError(msg)
+            async with self.session(server_name) as session:
+                return await load_mcp_resources(session, uris=uris)
+
+        all_resources: list[Blob] = []
+        load_resource_tasks = []
+        for name in self.connections:
+
+            async def load_for_server(srv_name: str) -> list[Blob]:
+                async with self.session(srv_name) as session:
+                    return await load_mcp_resources(session, uris=uris)
+
+            load_resource_tasks.append(asyncio.create_task(load_for_server(name)))
+
+        resources_list = await asyncio.gather(*load_resource_tasks)
+        for resources in resources_list:
+            all_resources.extend(resources)
+        return all_resources
 
     async def __aenter__(self) -> "MultiServerMCPClient":
         """Async context manager entry point.
