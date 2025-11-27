@@ -10,10 +10,14 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+import anyio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.server import Server
+from mcp.server.fastmcp import FastMCP as FastMCP1Server
+from mcp.shared.memory import create_client_server_memory_streams
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -183,8 +187,31 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
+class InMemoryConnection(TypedDict):
+    """Configuration for In-memory transport connections to MCP servers."""
+
+    transport: Literal["in_memory"]
+
+    server: Server[Any] | FastMCP1Server
+    """The Server instance to connect to."""
+
+    raise_exceptions: NotRequired[bool]
+    """When False, exceptions are returned as messages to the client.
+    When True, exceptions are raised, which will cause the server to shut down
+    but also make tracing exceptions much easier during testing and when using
+    in-process servers.
+    """
+
+    session_kwargs: NotRequired[dict[str, Any] | None]
+    """Additional keyword arguments to pass to the ClientSession"""
+
+
 Connection = (
-    StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
+    StdioConnection
+    | SSEConnection
+    | StreamableHttpConnection
+    | WebsocketConnection
+    | InMemoryConnection
 )
 
 
@@ -232,6 +259,46 @@ async def _create_stdio_session(
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
         yield session
+
+
+@asynccontextmanager
+async def _create_inmemory_session(
+    *,
+    server: Server[Any] | FastMCP1Server,
+    raise_exceptions: bool = False,
+    session_kwargs: dict[str, Any] | None = None,
+) -> AsyncIterator[ClientSession]:
+    async with create_client_server_memory_streams() as (
+        client_streams,
+        server_streams,
+    ):
+        if isinstance(server, FastMCP1Server):
+            server = server._mcp_server  # type: ignore[reportPrivateUsage]
+
+        # https://github.com/jlowin/fastmcp/pull/758
+        client_read, client_write = client_streams
+        server_read, server_write = server_streams
+
+        # Create a cancel scope for the server task
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(
+                lambda: server.run(
+                    server_read,
+                    server_write,
+                    server.create_initialization_options(),
+                    raise_exceptions=raise_exceptions,
+                )
+            )
+
+            try:
+                async with ClientSession(
+                    client_read,
+                    client_write,
+                    **(session_kwargs or {}),
+                ) as client_session:
+                    yield client_session
+            finally:
+                tg.cancel_scope.cancel()
 
 
 @asynccontextmanager
@@ -422,6 +489,12 @@ async def create_session(
             msg = "'url' parameter is required for Websocket connection"
             raise ValueError(msg)
         async with _create_websocket_session(**params) as session:
+            yield session
+    elif transport == "in_memory":
+        if "server" not in params:
+            msg = "'server' parameter is required for In-memory connection"
+            raise ValueError(msg)
+        async with _create_inmemory_session(**params) as session:
             yield session
     else:
         msg = (
