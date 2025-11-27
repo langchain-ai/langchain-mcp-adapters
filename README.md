@@ -60,7 +60,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from langchain_mcp_adapters.tools import load_mcp_tools
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 server_params = StdioServerParameters(
     command="python",
@@ -77,7 +77,7 @@ async with stdio_client(server_params) as (read, write):
         tools = await load_mcp_tools(session)
 
         # Create and run the agent
-        agent = create_react_agent("openai:gpt-4.1", tools)
+        agent = create_agent("openai:gpt-4.1", tools)
         agent_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
@@ -114,7 +114,7 @@ python weather_server.py
 
 ```python
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 client = MultiServerMCPClient(
     {
@@ -132,7 +132,7 @@ client = MultiServerMCPClient(
     }
 )
 tools = await client.get_tools()
-agent = create_react_agent("openai:gpt-4.1", tools)
+agent = create_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
@@ -169,7 +169,7 @@ To use it with Python MCP SDK `streamablehttp_client`:
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 async with streamablehttp_client("http://localhost:3000/mcp") as (read, write, _):
@@ -179,7 +179,7 @@ async with streamablehttp_client("http://localhost:3000/mcp") as (read, write, _
 
         # Get tools
         tools = await load_mcp_tools(session)
-        agent = create_react_agent("openai:gpt-4.1", tools)
+        agent = create_agent("openai:gpt-4.1", tools)
         math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
@@ -188,7 +188,7 @@ Use it with `MultiServerMCPClient`:
 ```python
 # Use server from examples/servers/streamable-http-stateless/
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 client = MultiServerMCPClient(
     {
@@ -199,7 +199,7 @@ client = MultiServerMCPClient(
     }
 )
 tools = await client.get_tools()
-agent = create_react_agent("openai:gpt-4.1", tools)
+agent = create_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
@@ -214,7 +214,7 @@ When connecting to MCP servers, you can include custom headers (e.g., for authen
 
 ```python
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 client = MultiServerMCPClient(
     {
@@ -229,7 +229,7 @@ client = MultiServerMCPClient(
     }
 )
 tools = await client.get_tools()
-agent = create_react_agent("openai:gpt-4.1", tools)
+agent = create_agent("openai:gpt-4.1", tools)
 response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
@@ -291,26 +291,29 @@ If you want to run a LangGraph agent that uses MCP tools in a LangGraph API serv
 # graph.py
 from contextlib import asynccontextmanager
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 async def make_graph():
     client = MultiServerMCPClient(
         {
+            "weather": {
+                # make sure you start your weather server on port 8000
+                "url": "http://localhost:8000/mcp",
+                "transport": "streamable_http",
+            },
+            # ATTENTION: MCP's stdio transport was designed primarily to support applications running on a user's machine.
+            # Before using stdio in a web server context, evaluate whether there's a more appropriate solution.
+            # For example, do you actually need MCP? or can you get away with a simple `@tool`?
             "math": {
                 "command": "python",
                 # Make sure to update to the full absolute path to your math_server.py file
                 "args": ["/path/to/math_server.py"],
                 "transport": "stdio",
             },
-            "weather": {
-                # make sure you start your weather server on port 8000
-                "url": "http://localhost:8000/mcp",
-                "transport": "streamable_http",
-            }
         }
     )
     tools = await client.get_tools()
-    agent = create_react_agent("openai:gpt-4.1", tools)
+    agent = create_agent("openai:gpt-4.1", tools)
     return agent
 ```
 
@@ -323,29 +326,4 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
     "agent": "./graph.py:make_graph"
   }
 }
-```
-
-## Add LangChain tools to a FastMCP server
-
-Use `to_fastmcp` to convert LangChain tools to FastMCP, and then add them to the `FastMCP` server via the initializer:
-
-> [!NOTE]
-> `tools` argument is only available in FastMCP as of `mcp >= 1.9.1`
-
-```python
-from langchain_core.tools import tool
-from langchain_mcp_adapters.tools import to_fastmcp
-from mcp.server.fastmcp import FastMCP
-
-
-@tool
-def add(a: int, b: int) -> int:
-    """Add two numbers"""
-    return a + b
-
-
-fastmcp_tool = to_fastmcp(add)
-
-mcp = FastMCP("Math", tools=[fastmcp_tool])
-mcp.run(transport="stdio")
 ```

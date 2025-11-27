@@ -1,10 +1,14 @@
-from typing import Annotated
+import typing
+from collections.abc import Callable, Sequence
+from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_core.messages import ToolMessage
+from langchain_core.language_models import LanguageModelInput
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
 from mcp.server import FastMCP
 from mcp.types import (
@@ -19,6 +23,7 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.interceptors import MCPToolCallRequest
 from langchain_mcp_adapters.tools import (
     _convert_call_tool_result,
     convert_mcp_tool_to_langchain_tool,
@@ -564,3 +569,141 @@ async def test_convert_mcp_tool_metadata_variants():
         "openWorldHint": None,
         "_meta": {"flag": True},
     }
+
+
+def _create_increment_server():
+    server = FastMCP(port=8183)
+
+    @server.tool()
+    def increment(value: int) -> str:
+        """Increment a counter"""
+        return f"Incremented to {value + 1}"
+
+    return server
+
+
+try:
+    import langchain
+
+    LANGCHAIN_INSTALLED = True
+except ImportError:
+    LANGCHAIN_INSTALLED = False
+
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+
+
+class FixedGenericFakeChatModel(GenericFakeChatModel):
+    def bind_tools(
+        self,
+        tools: Sequence[
+            typing.Dict[str, Any] | type | Callable | BaseTool  # noqa: UP006
+        ],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Override bind-tools."""
+        return self
+
+
+@pytest.mark.skipif(not LANGCHAIN_INSTALLED, reason="langchain not installed")
+async def test_mcp_tools_with_agent_and_command_interceptor(socket_enabled) -> None:
+    """Test Command objects from interceptors work end-to-end with create_agent.
+
+    This test verifies that:
+    1. MCP tools can be used with create_agent
+    2. Interceptors can return Command objects to short-circuit execution
+    3. Commands can update custom agent state
+    """
+    from langchain.agents import AgentState, create_agent
+    from langchain.tools import ToolRuntime
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.types import Command
+
+    from langchain_mcp_adapters.interceptors import MCPToolCallResult
+
+    # Interceptor that returns Command to update state
+    async def counter_interceptor(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], typing.Awaitable[MCPToolCallResult]],
+    ) -> Command:
+        # Instead of calling the tool, return a Command that updates state
+        tool_runtime: ToolRuntime = request.runtime
+        assert tool_runtime.tool_call_id == "call_1"
+        return Command(
+            update={
+                "counter": 42,
+                "messages": [
+                    ToolMessage(
+                        content="Counter updated!",
+                        tool_call_id=tool_runtime.tool_call_id,
+                    ),
+                    AIMessage(content="hello"),
+                ],
+            },
+            goto="__end__",
+        )
+
+    with run_streamable_http(_create_increment_server, 8183):
+        # Initialize client and connect to server
+        client = MultiServerMCPClient(
+            {
+                "increment": {
+                    "url": "http://localhost:8183/mcp",
+                    "transport": "streamable_http",
+                }
+            },
+            tool_interceptors=[counter_interceptor],
+        )
+
+        # Get tools from the server
+        tools = await client.get_tools(server_name="increment")
+        assert len(tools) == 1
+        original_tool = tools[0]
+        assert original_tool.name == "increment"
+
+        # Custom state schema with counter field
+        class CustomAgentState(AgentState):
+            counter: typing.NotRequired[int]
+
+        model = FixedGenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "increment",
+                                "args": {"value": 1},
+                                "id": "call_1",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(
+                        content="The counter has been incremented.",
+                    ),
+                ]
+            )
+        )
+        # Create agent with custom state
+        agent = create_agent(
+            model,
+            tools,
+            state_schema=CustomAgentState,
+            checkpointer=MemorySaver(),
+        )
+
+        # Run agent
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content="Increment the counter")], "counter": 0},
+            {"configurable": {"thread_id": "test_1"}},
+        )
+
+        # Verify Command updated the state
+        assert result["counter"] == 42
+        # Verify the Command's message was added
+        assert any(
+            isinstance(msg, ToolMessage) and msg.content == "Counter updated!"
+            for msg in result["messages"]
+        )

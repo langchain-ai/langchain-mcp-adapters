@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "langchain-mcp-adapters"
-version = "0.1.10"
+version = "0.1.14"
 description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
 authors = [
     { name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com" },
@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+integration = [
+    "langchain>=1.0.8",
+]
 test = [
     "pytest>=8.0.0",
     "ruff>=0.9.4",
