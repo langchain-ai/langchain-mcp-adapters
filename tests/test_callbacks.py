@@ -118,7 +118,12 @@ async def test_callbacks_with_mcp_tool_execution(socket_enabled) -> None:
         result = await tool.ainvoke(
             {"args": {"task": "test"}, "id": "1", "type": "tool_call"}
         )
-        assert "Executed: test" in result.content
+        # Content is now a list of content blocks
+        assert any(
+            "Executed: test" in block.get("text", "")
+            for block in result.content
+            if isinstance(block, dict)
+        )
 
         # Verify both progress and logging callbacks were called
         await asyncio.sleep(0.05)  # Give time for callbacks to complete

@@ -38,29 +38,29 @@ from tests.utils import run_streamable_http
 
 
 def test_convert_empty_text_content():
-    # Test with a single text content
+    # Test with empty content - returns empty list of content blocks
     result = CallToolResult(content=[], isError=False)
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == ""
-    assert non_text_content is None
+    assert content == []
+    assert artifact is None
 
 
 def test_convert_single_text_content():
-    # Test with a single text content
+    # Test with a single text content - returns list with one content block
     result = CallToolResult(
         content=[TextContent(type="text", text="test result")], isError=False
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == "test result"
-    assert non_text_content is None
+    assert content == [{"type": "text", "text": "test result"}]
+    assert artifact is None
 
 
 def test_convert_multiple_text_contents():
-    # Test with multiple text contents
+    # Test with multiple text contents - returns list of content blocks
     result = CallToolResult(
         content=[
             TextContent(type="text", text="result 1"),
@@ -69,10 +69,13 @@ def test_convert_multiple_text_contents():
         isError=False,
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == ["result 1", "result 2"]
-    assert non_text_content is None
+    assert content == [
+        {"type": "text", "text": "result 1"},
+        {"type": "text", "text": "result 2"},
+    ]
+    assert artifact is None
 
 
 def test_convert_with_non_text_content():
@@ -128,7 +131,7 @@ def test_convert_with_structured_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == "text result"
+    assert content == [{"type": "text", "text": "text result"}]
     assert artifact == {"key": "value", "nested": {"data": 123}}
 
 
@@ -299,9 +302,11 @@ async def test_convert_mcp_tool_to_langchain_tool():
         "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
     )
 
-    # Verify result
+    # Verify result - content is now a list of content blocks
     assert result == ToolMessage(
-        content="tool result", name="test_tool", tool_call_id="1"
+        content=[{"type": "text", "text": "tool result"}],
+        name="test_tool",
+        tool_call_id="1",
     )
 
 
@@ -356,22 +361,32 @@ async def test_load_mcp_tools():
     assert tools[0].name == "tool1"
     assert tools[1].name == "tool2"
 
-    # Test calling the first tool
+    # Test calling the first tool - content is now a list of content blocks
     result1 = await tools[0].ainvoke(
         {"args": {"param1": "test1", "param2": 1}, "id": "1", "type": "tool_call"},
     )
     assert result1 == ToolMessage(
-        content="tool1 result with {'param1': 'test1', 'param2': 1}",
+        content=[
+            {
+                "type": "text",
+                "text": "tool1 result with {'param1': 'test1', 'param2': 1}",
+            }
+        ],
         name="tool1",
         tool_call_id="1",
     )
 
-    # Test calling the second tool
+    # Test calling the second tool - content is now a list of content blocks
     result2 = await tools[1].ainvoke(
         {"args": {"param1": "test2", "param2": 2}, "id": "2", "type": "tool_call"},
     )
     assert result2 == ToolMessage(
-        content="tool2 result with {'param1': 'test2', 'param2': 2}",
+        content=[
+            {
+                "type": "text",
+                "text": "tool2 result with {'param1': 'test2', 'param2': 2}",
+            }
+        ],
         name="tool2",
         tool_call_id="2",
     )
@@ -555,9 +570,9 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
         tool = tools[0]
         assert tool.name == "get_status"
 
-        # Test that the tool works correctly
+        # Test that the tool works correctly - content is now a list of content blocks
         result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
-        assert result.content == "Server is running"
+        assert result.content == [{"type": "text", "text": "Server is running"}]
 
 
 def _create_info_server():

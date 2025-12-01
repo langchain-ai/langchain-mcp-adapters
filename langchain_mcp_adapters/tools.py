@@ -26,6 +26,7 @@ from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadat
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
+    ContentBlock,
     EmbeddedResource,
     ImageContent,
     ResourceLink,
@@ -51,24 +52,21 @@ try:
 except ImportError:
     LANGGRAPH_PRESENT = False
 
-NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
-
 # Type alias for LangChain content blocks used in ToolMessage
 ToolMessageContentBlock = TextContentBlock | ImageContentBlock | FileContentBlock
 
 # Conditional type based on langgraph availability
+ConvertedToolResult = ContentBlock | ToolMessage
 if LANGGRAPH_PRESENT:
-    ConvertedToolResult = (
-        str | list[str | ToolMessageContentBlock] | ToolMessage | Command
-    )
+    ConvertedToolResult = list[ToolMessageContentBlock] | ToolMessage | Command
 else:
-    ConvertedToolResult = str | list[str | ToolMessageContentBlock] | ToolMessage
+    ConvertedToolResult = list[str | ToolMessageContentBlock] | ToolMessage
 
 MAX_ITERATIONS = 1000
 
 
 def _convert_mcp_content_to_lc_block(
-    content: TextContent | NonTextContent,
+    content: ContentBlock,
 ) -> ToolMessageContentBlock:
     """Convert any MCP content block to a LangChain content block.
 
@@ -167,43 +165,20 @@ def _convert_call_tool_result(
         return call_tool_result, None
 
     # Convert all MCP content blocks to LangChain content blocks
-    lc_content_blocks: list[ToolMessageContentBlock] = [
+    tool_content: list[ToolMessageContentBlock] = [
         _convert_mcp_content_to_lc_block(content)
         for content in call_tool_result.content
     ]
 
-    # Determine the tool content format
-    # If only text blocks, check if we can simplify to string(s)
-    all_text_blocks = all(block["type"] == "text" for block in lc_content_blocks)
-
-    if all_text_blocks:
-        # Extract just the text for simpler representation
-        text_contents = [block["text"] for block in lc_content_blocks]
-        if not text_contents:
-            tool_content: ConvertedToolResult = ""
-        elif len(text_contents) == 1:
-            tool_content = text_contents[0]
-        else:
-            tool_content = text_contents
-    else:
-        # Mixed content - return as list of content blocks
-        tool_content = lc_content_blocks
-
     if call_tool_result.isError:
-        # For errors, convert content to string for the exception message
-        if isinstance(tool_content, str):
-            error_msg = tool_content
-        elif isinstance(tool_content, list):
-            # Join text from all blocks
-            error_parts = []
-            for item in tool_content:
-                if isinstance(item, str):
-                    error_parts.append(item)
-                elif isinstance(item, dict) and item.get("type") == "text":
-                    error_parts.append(item.get("text", ""))
-            error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
-        else:
-            error_msg = str(tool_content)
+        # Join text from all blocks
+        error_parts = []
+        for item in tool_content:
+            if isinstance(item, str):
+                error_parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                error_parts.append(item.get("text", ""))
+        error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
         raise ToolException(error_msg)
 
     # Extract structured content as the artifact

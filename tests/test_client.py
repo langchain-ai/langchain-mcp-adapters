@@ -67,25 +67,25 @@ async def test_multi_server_mcp_client(
     assert len(time_tools) == 1
     assert time_tools[0].name == "get_time"
 
-    # Test that we can call a math tool
+    # Test that we can call a math tool - content is now list of content blocks
     add_tool = next(tool for tool in all_tools if tool.name == "add")
     result = await add_tool.ainvoke({"a": 2, "b": 3})
-    assert result == "5"
+    assert result == [{"type": "text", "text": "5"}]
 
-    # Test that we can call a weather tool
+    # Test that we can call a weather tool - content is now list of content blocks
     weather_tool = next(tool for tool in all_tools if tool.name == "get_weather")
     result = await weather_tool.ainvoke({"location": "London"})
-    assert result == "It's always sunny in London"
+    assert result == [{"type": "text", "text": "It's always sunny in London"}]
 
-    # Test the multiply tool
+    # Test the multiply tool - content is now list of content blocks
     multiply_tool = next(tool for tool in all_tools if tool.name == "multiply")
     result = await multiply_tool.ainvoke({"a": 4, "b": 5})
-    assert result == "20"
+    assert result == [{"type": "text", "text": "20"}]
 
-    # Test that we can call a time tool
+    # Test that we can call a time tool - content is now list of content blocks
     time_tool = next(tool for tool in all_tools if tool.name == "get_time")
     result = await time_tool.ainvoke({"args": ""})
-    assert result == "5:20:00 PM EST"
+    assert result == [{"type": "text", "text": "5:20:00 PM EST"}]
 
 
 async def test_multi_server_connect_methods(
@@ -116,8 +116,9 @@ async def test_multi_server_connect_methods(
     async with client.session("math") as session:
         tools = await load_mcp_tools(session)
         assert len(tools) == 2
+        # Content is now list of content blocks
         result = await tools[0].ainvoke({"a": 2, "b": 3})
-        assert result == "5"
+        assert result == [{"type": "text", "text": "5"}]
 
         for tool in tools:
             tool_names.add(tool.name)
@@ -125,8 +126,9 @@ async def test_multi_server_connect_methods(
     async with client.session("time") as session:
         tools = await load_mcp_tools(session)
         assert len(tools) == 1
+        # Content is now list of content blocks
         result = await tools[0].ainvoke({"args": ""})
-        assert result == "5:20:00 PM EST"
+        assert result == [{"type": "text", "text": "5:20:00 PM EST"}]
 
         for tool in tools:
             tool_names.add(tool.name)
