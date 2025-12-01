@@ -8,6 +8,11 @@ from collections.abc import Awaitable, Callable
 from typing import Any, get_args
 
 from langchain_core.messages import ToolMessage
+from langchain_core.messages.content import (
+    FileContentBlock,
+    ImageContentBlock,
+    TextContentBlock,
+)
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -20,10 +25,12 @@ from mcp.server.fastmcp.tools import Tool as FastMCPTool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
+    BlobResourceContents,
     EmbeddedResource,
     ImageContent,
     ResourceLink,
     TextContent,
+    TextResourceContents,
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
@@ -38,7 +45,6 @@ from langchain_mcp_adapters.sessions import Connection, create_session
 
 try:
     # langgraph installed
-    import langgraph
     from langgraph.types import Command
 
     LANGGRAPH_PRESENT = True
@@ -47,19 +53,94 @@ except ImportError:
 
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
 
+# Type alias for LangChain content blocks used in ToolMessage
+ToolMessageContentBlock = TextContentBlock | ImageContentBlock | FileContentBlock
+
 # Conditional type based on langgraph availability
 if LANGGRAPH_PRESENT:
-    ConvertedToolResult = str | list[str] | ToolMessage | Command
+    ConvertedToolResult = (
+        str | list[str | ToolMessageContentBlock] | ToolMessage | Command
+    )
 else:
-    ConvertedToolResult = str | list[str] | ToolMessage
+    ConvertedToolResult = str | list[str | ToolMessageContentBlock] | ToolMessage
 
 MAX_ITERATIONS = 1000
 
 
+def _convert_mcp_content_to_lc_block(
+    content: TextContent | NonTextContent,
+) -> ToolMessageContentBlock:
+    """Convert any MCP content block to a LangChain content block.
+
+    Args:
+        content: MCP content object (TextContent, ImageContent, AudioContent,
+            ResourceLink, or EmbeddedResource).
+
+    Returns:
+        LangChain content block dict.
+
+    Raises:
+        NotImplementedError: If AudioContent is passed.
+        ValueError: If an unknown content type is passed.
+    """
+    if isinstance(content, TextContent):
+        return {"type": "text", "text": content.text}
+
+    if isinstance(content, ImageContent):
+        return {
+            "type": "image",
+            "base64": content.data,
+            "mime_type": content.mimeType,
+        }
+
+    if isinstance(content, AudioContent):
+        msg = (
+            "AudioContent conversion to LangChain content blocks is not yet "
+            f"supported. Received audio with mime type: {content.mimeType}"
+        )
+        raise NotImplementedError(msg)
+
+    if isinstance(content, ResourceLink):
+        block: ToolMessageContentBlock = {"type": "file", "url": str(content.uri)}
+        if content.mimeType:
+            block["mime_type"] = content.mimeType
+        return block
+
+    if isinstance(content, EmbeddedResource):
+        resource = content.resource
+        if isinstance(resource, TextResourceContents):
+            return {"type": "text", "text": resource.text}
+        if isinstance(resource, BlobResourceContents):
+            mime_type = resource.mimeType or ""
+            if mime_type.startswith("image/"):
+                return {
+                    "type": "image",
+                    "base64": resource.blob,
+                    "mime_type": mime_type,
+                }
+            block = {"type": "file", "base64": resource.blob}
+            if mime_type:
+                block["mime_type"] = mime_type
+            return block
+        msg = f"Unknown embedded resource type: {type(resource).__name__}"
+        raise ValueError(msg)
+
+    msg = f"Unknown MCP content type: {type(content).__name__}"
+    raise ValueError(msg)
+
+
 def _convert_call_tool_result(
     call_tool_result: MCPToolCallResult,
-) -> tuple[ConvertedToolResult, list[NonTextContent] | None]:
+) -> tuple[ConvertedToolResult, dict[str, Any] | None]:
     """Convert MCP MCPToolCallResult to LangChain tool result format.
+
+    Converts MCP content blocks to LangChain content blocks:
+    - TextContent -> {"type": "text", "text": ...}
+    - ImageContent -> {"type": "image", "base64": ..., "mime_type": ...}
+    - ResourceLink -> {"type": "file", "url": ..., "mime_type": ...}
+    - EmbeddedResource (text) -> {"type": "text", "text": ...}
+    - EmbeddedResource (blob) -> {"type": "image", ...} or {"type": "file", ...}
+    - AudioContent -> raises NotImplementedError
 
     Args:
         call_tool_result: The result from calling an MCP tool. Can be either
@@ -67,13 +148,14 @@ def _convert_call_tool_result(
             or a Command (LangGraph format, if langgraph is installed).
 
     Returns:
-        A tuple containing the text content (which may be a ToolMessage or Command)
-        and any non-text content. When a ToolMessage or Command is returned by an
-        interceptor, it's placed in the first position of the tuple as the content,
-        with None as the artifact.
+        A tuple containing:
+        - The content: either a string (single text), list of content blocks,
+          ToolMessage, or Command
+        - The artifact: structuredContent from MCP if present, otherwise None
 
     Raises:
         ToolException: If the tool call resulted in an error.
+        NotImplementedError: If AudioContent is encountered.
     """
     # If the interceptor returned a ToolMessage directly, return it as the content
     # with None as the artifact to match the content_and_artifact format
@@ -84,25 +166,50 @@ def _convert_call_tool_result(
     if LANGGRAPH_PRESENT and isinstance(call_tool_result, Command):
         return call_tool_result, None
 
-    # Otherwise, convert from CallToolResult
-    text_contents: list[TextContent] = []
-    non_text_contents = []
-    for content in call_tool_result.content:
-        if isinstance(content, TextContent):
-            text_contents.append(content)
-        else:
-            non_text_contents.append(content)
+    # Convert all MCP content blocks to LangChain content blocks
+    lc_content_blocks: list[ToolMessageContentBlock] = [
+        _convert_mcp_content_to_lc_block(content)
+        for content in call_tool_result.content
+    ]
 
-    tool_content: str | list[str] = [content.text for content in text_contents]
-    if not text_contents:
-        tool_content = ""
-    elif len(text_contents) == 1:
-        tool_content = tool_content[0]
+    # Determine the tool content format
+    # If only text blocks, check if we can simplify to string(s)
+    all_text_blocks = all(block["type"] == "text" for block in lc_content_blocks)
+
+    if all_text_blocks:
+        # Extract just the text for simpler representation
+        text_contents = [block["text"] for block in lc_content_blocks]
+        if not text_contents:
+            tool_content: ConvertedToolResult = ""
+        elif len(text_contents) == 1:
+            tool_content = text_contents[0]
+        else:
+            tool_content = text_contents
+    else:
+        # Mixed content - return as list of content blocks
+        tool_content = lc_content_blocks
 
     if call_tool_result.isError:
-        raise ToolException(tool_content)
+        # For errors, convert content to string for the exception message
+        if isinstance(tool_content, str):
+            error_msg = tool_content
+        elif isinstance(tool_content, list):
+            # Join text from all blocks
+            error_parts = []
+            for item in tool_content:
+                if isinstance(item, str):
+                    error_parts.append(item)
+                elif isinstance(item, dict) and item.get("type") == "text":
+                    error_parts.append(item.get("text", ""))
+            error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
+        else:
+            error_msg = str(tool_content)
+        raise ToolException(error_msg)
 
-    return tool_content, non_text_contents or None
+    # Extract structured content as the artifact
+    artifact = call_tool_result.structuredContent
+
+    return tool_content, artifact
 
 
 def _build_interceptor_chain(
@@ -209,7 +316,7 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         runtime: Any = None,  # noqa: ANN401
         **arguments: dict[str, Any],
-    ) -> tuple[ConvertedToolResult, list[NonTextContent] | None]:
+    ) -> tuple[ConvertedToolResult, dict[str, Any] | None]:
         """Execute tool call with interceptor chain and return formatted result.
 
         Args:
@@ -217,9 +324,9 @@ def convert_mcp_tool_to_langchain_tool(
             **arguments: Tool arguments as keyword args.
 
         Returns:
-            A tuple of (text_content, non_text_content), where text_content may be
-            a ToolMessage or Command (if langgraph is installed) if an interceptor
-            returned one directly.
+            A tuple of (content, artifact) where:
+            - content: string, list of strings/content blocks, ToolMessage, or Command
+            - artifact: structuredContent from MCP if present, otherwise None
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(

@@ -7,14 +7,18 @@ import httpx
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
 from mcp.server import FastMCP
 from mcp.types import (
+    AudioContent,
+    BlobResourceContents,
     CallToolResult,
     EmbeddedResource,
     ImageContent,
+    ResourceLink,
     TextContent,
     TextResourceContents,
     ToolAnnotations,
@@ -23,7 +27,7 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.interceptors import MCPToolCallRequest
+from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallResult
 from langchain_mcp_adapters.tools import (
     _convert_call_tool_result,
     convert_mcp_tool_to_langchain_tool,
@@ -72,7 +76,7 @@ def test_convert_multiple_text_contents():
 
 
 def test_convert_with_non_text_content():
-    # Test with non-text content
+    # Test with non-text content (now converted to LangChain content blocks)
     image_content = ImageContent(type="image", mimeType="image/png", data="base64data")
     resource_content = EmbeddedResource(
         type="resource",
@@ -90,10 +94,16 @@ def test_convert_with_non_text_content():
         isError=False,
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == "text result"
-    assert non_text_content == [image_content, resource_content]
+    # With mixed content, we get a list of LangChain content blocks
+    assert content == [
+        {"type": "text", "text": "text result"},
+        {"type": "image", "base64": "base64data", "mime_type": "image/png"},
+        {"type": "text", "text": "hi"},  # EmbeddedResource with text -> text block
+    ]
+    # No structuredContent in this result
+    assert artifact is None
 
 
 def test_convert_with_error():
@@ -106,6 +116,146 @@ def test_convert_with_error():
         _convert_call_tool_result(result)
 
     assert str(exc_info.value) == "error message"
+
+
+def test_convert_with_structured_content():
+    """Test that structuredContent is returned as the artifact."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="text result")],
+        isError=False,
+        structuredContent={"key": "value", "nested": {"data": 123}},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == "text result"
+    assert artifact == {"key": "value", "nested": {"data": 123}}
+
+
+def test_convert_image_content():
+    """Test ImageContent conversion to LangChain image block."""
+    result = CallToolResult(
+        content=[
+            ImageContent(type="image", mimeType="image/jpeg", data="jpeg_base64_data")
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    # Single non-text content returns as a list of content blocks
+    assert content == [
+        {"type": "image", "base64": "jpeg_base64_data", "mime_type": "image/jpeg"}
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link():
+    """Test ResourceLink conversion to LangChain file block."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="file:///path/to/document.pdf",
+                name="document.pdf",
+                mimeType="application/pdf",
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "file",
+            "url": "file:///path/to/document.pdf",
+            "mime_type": "application/pdf",
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_embedded_resource_blob_image():
+    """Test EmbeddedResource with blob image converts to image block."""
+    result = CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="resource://image",
+                    blob="png_base64_data",
+                    mimeType="image/png",
+                ),
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {"type": "image", "base64": "png_base64_data", "mime_type": "image/png"}
+    ]
+    assert artifact is None
+
+
+def test_convert_embedded_resource_blob_file():
+    """Test EmbeddedResource with non-image blob converts to file block."""
+    result = CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="resource://data",
+                    blob="pdf_base64_data",
+                    mimeType="application/pdf",
+                ),
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {"type": "file", "base64": "pdf_base64_data", "mime_type": "application/pdf"}
+    ]
+    assert artifact is None
+
+
+def test_convert_audio_content_raises():
+    """Test that AudioContent raises NotImplementedError."""
+    result = CallToolResult(
+        content=[AudioContent(type="audio", mimeType="audio/wav", data="audio_data")],
+        isError=False,
+    )
+
+    with pytest.raises(NotImplementedError) as exc_info:
+        _convert_call_tool_result(result)
+
+    assert "AudioContent conversion" in str(exc_info.value)
+    assert "audio/wav" in str(exc_info.value)
+
+
+def test_convert_mixed_content_with_structured_output():
+    """Test mixed content with structuredContent returns both."""
+    result = CallToolResult(
+        content=[
+            TextContent(type="text", text="Here's the analysis"),
+            ImageContent(type="image", mimeType="image/png", data="chart_data"),
+        ],
+        isError=False,
+        structuredContent={"analysis": {"score": 0.95, "confidence": "high"}},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {"type": "text", "text": "Here's the analysis"},
+        {"type": "image", "base64": "chart_data", "mime_type": "image/png"},
+    ]
+    assert artifact == {"analysis": {"score": 0.95, "confidence": "high"}}
 
 
 async def test_convert_mcp_tool_to_langchain_tool():
@@ -545,13 +695,11 @@ def _create_increment_server():
 
 
 try:
-    import langchain
+    import langchain.agents  # noqa: F401
 
     LANGCHAIN_INSTALLED = True
 except ImportError:
     LANGCHAIN_INSTALLED = False
-
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 
 
 class FixedGenericFakeChatModel(GenericFakeChatModel):
@@ -577,12 +725,10 @@ async def test_mcp_tools_with_agent_and_command_interceptor(socket_enabled) -> N
     2. Interceptors can return Command objects to short-circuit execution
     3. Commands can update custom agent state
     """
-    from langchain.agents import AgentState, create_agent
-    from langchain.tools import ToolRuntime
-    from langgraph.checkpoint.memory import MemorySaver
-    from langgraph.types import Command
-
-    from langchain_mcp_adapters.interceptors import MCPToolCallResult
+    from langchain.agents import AgentState, create_agent  # noqa: PLC0415
+    from langchain.tools import ToolRuntime  # noqa: PLC0415
+    from langgraph.checkpoint.memory import MemorySaver  # noqa: PLC0415
+    from langgraph.types import Command  # noqa: PLC0415
 
     # Interceptor that returns Command to update state
     async def counter_interceptor(

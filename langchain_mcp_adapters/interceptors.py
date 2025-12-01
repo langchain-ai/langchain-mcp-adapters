@@ -18,7 +18,7 @@ from typing_extensions import NotRequired, TypedDict, Unpack
 
 try:
     # langgraph installed
-    import langgraph
+    import langgraph  # noqa: F401
 
     LANGGRAPH_PRESENT = True
 except ImportError:
