@@ -56,7 +56,6 @@ except ImportError:
 ToolMessageContentBlock = TextContentBlock | ImageContentBlock | FileContentBlock
 
 # Conditional type based on langgraph availability
-ConvertedToolResult = ContentBlock | ToolMessage
 if LANGGRAPH_PRESENT:
     ConvertedToolResult = list[ToolMessageContentBlock] | ToolMessage | Command
 else:
