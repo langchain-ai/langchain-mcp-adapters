@@ -1,8 +1,10 @@
 import os
 from pathlib import Path
 
+import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
+from mcp.types import Prompt
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -161,3 +163,108 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+async def test_get_prompts():
+    """Test retrieving prompts from MCP servers."""
+    # Get the absolute path to the server scripts
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            }
+        },
+    )
+    # Test getting prompts from the math server
+    prompts = await client.get_prompts(
+        "math",
+    )
+
+    # Check that we got multiple Prompts back
+    assert len(prompts) == 3
+    assert all(isinstance(prompt, Prompt) for prompt in prompts)
+
+    # Check the first prompt (configure_assistant)
+    configure_prompt = [p for p in prompts if p.name == "configure_assistant"][0]
+    assert configure_prompt.description == ""
+    assert configure_prompt.title is None
+    assert len(configure_prompt.arguments) == 1
+    assert configure_prompt.arguments[0].name == "skills"
+    assert configure_prompt.arguments[0].required is True
+
+    # Check the second prompt (math_problem_solver)
+    solver_prompt = [p for p in prompts if p.name == "math_problem_solver"][0]
+    assert solver_prompt.description == ""
+    assert len(solver_prompt.arguments) == 1
+    assert solver_prompt.arguments[0].name == "problem_type"
+    assert solver_prompt.arguments[0].required is True
+
+    # Check the third prompt (calculation_guide)
+    guide_prompt = [p for p in prompts if p.name == "calculation_guide"][0]
+    assert guide_prompt.description == ""
+    # This prompt has no arguments
+    assert guide_prompt.arguments == []
+
+
+async def test_get_prompts_invalid_server():
+    """Test that get_prompts raises an error for invalid server name."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            }
+        },
+    )
+
+    # Test getting prompts from a non-existent server
+    with pytest.raises(ValueError) as exc_info:
+        await client.get_prompts("nonexistent_server")
+
+    error_msg = str(exc_info.value)
+    assert "Couldn't find a server with name 'nonexistent_server'" in error_msg
+    assert "expected one of '['math']'" in error_msg
+
+
+async def test_get_prompts_multiple_servers(
+    socket_enabled,
+    websocket_server,
+    websocket_server_port: int,
+):
+    """Test retrieving prompts from multiple servers."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": [weather_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+
+    # Test getting prompts from math server
+    math_prompts = await client.get_prompts("math")
+    assert len(math_prompts) == 3
+
+    # Test getting prompts from weather server (may have different prompts)
+    weather_prompts = await client.get_prompts("weather")
+    # Weather server may or may not have prompts, just verify it doesn't crash
+    assert isinstance(weather_prompts, list)
