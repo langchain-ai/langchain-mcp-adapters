@@ -38,7 +38,7 @@ from tests.utils import run_streamable_http
 
 
 def test_convert_empty_text_content():
-    # Test with empty content - returns empty list of content blocks
+    # Test with a single text content
     result = CallToolResult(content=[], isError=False)
 
     content, artifact = _convert_call_tool_result(result)
@@ -48,7 +48,7 @@ def test_convert_empty_text_content():
 
 
 def test_convert_single_text_content():
-    # Test with a single text content - returns list with one content block
+    # Test with a single text content
     result = CallToolResult(
         content=[TextContent(type="text", text="test result")], isError=False
     )
@@ -60,7 +60,7 @@ def test_convert_single_text_content():
 
 
 def test_convert_multiple_text_contents():
-    # Test with multiple text contents - returns list of content blocks
+    # Test with multiple text contents
     result = CallToolResult(
         content=[
             TextContent(type="text", text="result 1"),
@@ -302,7 +302,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
         "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
     )
 
-    # Verify result - content is now a list of content blocks
+    # Verify result
     assert result == ToolMessage(
         content=[{"type": "text", "text": "tool result"}],
         name="test_tool",
@@ -361,7 +361,7 @@ async def test_load_mcp_tools():
     assert tools[0].name == "tool1"
     assert tools[1].name == "tool2"
 
-    # Test calling the first tool - content is now a list of content blocks
+    # Test calling the first tool
     result1 = await tools[0].ainvoke(
         {"args": {"param1": "test1", "param2": 1}, "id": "1", "type": "tool_call"},
     )
@@ -376,7 +376,7 @@ async def test_load_mcp_tools():
         tool_call_id="1",
     )
 
-    # Test calling the second tool - content is now a list of content blocks
+    # Test calling the second tool
     result2 = await tools[1].ainvoke(
         {"args": {"param1": "test2", "param2": 2}, "id": "2", "type": "tool_call"},
     )
@@ -570,7 +570,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
         tool = tools[0]
         assert tool.name == "get_status"
 
-        # Test that the tool works correctly - content is now a list of content blocks
+        # Test that the tool works correctly
         result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
         assert result.content == [{"type": "text", "text": "Server is running"}]
 

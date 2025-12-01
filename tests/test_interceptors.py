@@ -87,7 +87,6 @@ class TestInterceptorModifiesRequest:
 
             add_tool = next(tool for tool in tools if tool.name == "add")
             # Call add but interceptor redirects to multiply: 5 * 2 = 10
-            # Content is now list of content blocks
             result = await add_tool.ainvoke({"a": 5, "b": 2})
             assert result == [{"type": "text", "text": "10"}]
 
@@ -197,7 +196,7 @@ class TestInterceptorAdvancedPatterns:
 
             add_tool = next(tool for tool in tools if tool.name == "add")
 
-            # First call - should execute (content is now list of content blocks)
+            # First call - should execute
             result1 = await add_tool.ainvoke({"a": 2, "b": 3})
             assert result1 == [{"type": "text", "text": "5"}]
             assert call_count == 1
@@ -251,7 +250,6 @@ class TestInterceptorComposition:
 
             add_tool = next(tool for tool in tools if tool.name == "add")
             result = await add_tool.ainvoke({"a": 2, "b": 3})
-            # Content is now list of content blocks
             assert result == [{"type": "text", "text": "5"}]
 
             # Should execute in onion order: 1 before, 2 before, execute, 2 after,

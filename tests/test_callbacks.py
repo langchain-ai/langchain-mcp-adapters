@@ -118,7 +118,6 @@ async def test_callbacks_with_mcp_tool_execution(socket_enabled) -> None:
         result = await tool.ainvoke(
             {"args": {"task": "test"}, "id": "1", "type": "tool_call"}
         )
-        # Content is now a list of content blocks
         assert any(
             "Executed: test" in block.get("text", "")
             for block in result.content

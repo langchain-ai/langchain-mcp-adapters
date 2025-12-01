@@ -82,14 +82,14 @@ def _convert_mcp_content_to_lc_block(
         ValueError: If an unknown content type is passed.
     """
     if isinstance(content, TextContent):
-        return {"type": "text", "text": content.text}
+        return TextContentBlock(type="text", text=content.text)
 
     if isinstance(content, ImageContent):
-        return {
-            "type": "image",
-            "base64": content.data,
-            "mime_type": content.mimeType,
-        }
+        return ImageContentBlock(
+            type="image",
+            base64=content.data,
+            mime_type=content.mimeType,
+        )
 
     if isinstance(content, AudioContent):
         msg = (
@@ -99,7 +99,7 @@ def _convert_mcp_content_to_lc_block(
         raise NotImplementedError(msg)
 
     if isinstance(content, ResourceLink):
-        block: ToolMessageContentBlock = {"type": "file", "url": str(content.uri)}
+        block: FileContentBlock = FileContentBlock(type="file", url=str(content.uri))
         if content.mimeType:
             block["mime_type"] = content.mimeType
         return block
@@ -107,16 +107,16 @@ def _convert_mcp_content_to_lc_block(
     if isinstance(content, EmbeddedResource):
         resource = content.resource
         if isinstance(resource, TextResourceContents):
-            return {"type": "text", "text": resource.text}
+            return TextContentBlock(type="text", text=resource.text)
         if isinstance(resource, BlobResourceContents):
             mime_type = resource.mimeType or ""
             if mime_type.startswith("image/"):
-                return {
-                    "type": "image",
-                    "base64": resource.blob,
-                    "mime_type": mime_type,
-                }
-            block = {"type": "file", "base64": resource.blob}
+                return ImageContentBlock(
+                    type="image",
+                    base64=resource.blob,
+                    mime_type=mime_type,
+                )
+            block = FileContentBlock(type="file", base64=resource.blob)
             if mime_type:
                 block["mime_type"] = mime_type
             return block
