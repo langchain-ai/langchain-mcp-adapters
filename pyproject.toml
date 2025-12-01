@@ -36,6 +36,9 @@ test = [
 [project.urls]
 repository = "https://www.github.com/langchain-ai/langchain-mcp-adapters"
 
+[tool.pdm.build]
+includes = ["langchain_mcp_adapters/py.typed"]
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 # -ra: Report all extra test outcomes (passed, skipped, failed, etc.)
