@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
@@ -161,3 +162,76 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+async def test_get_resources_from_all_servers():
+    """Test that get_resources loads resources from all servers when no server_name is specified."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": [weather_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+
+    # Get all resources from all servers (no server_name specified)
+    all_resources = await client.get_resources()
+
+    # Should have resources from both servers
+    assert len(all_resources) == 2
+    assert all(isinstance(r, Blob) for r in all_resources)
+
+    # Verify we have resources from both servers
+    resource_uris = {str(r.metadata["uri"]) for r in all_resources}
+    assert resource_uris == {"math://formulas", "weather://forecast"}
+
+    # Verify resource content
+    math_resource = next(r for r in all_resources if str(r.metadata["uri"]) == "math://formulas")
+    weather_resource = next(r for r in all_resources if str(r.metadata["uri"]) == "weather://forecast")
+    assert math_resource.data == "E = mc^2"
+    assert weather_resource.data == "Sunny with a chance of clouds"
+
+
+async def test_get_resources_from_specific_server():
+    """Test that get_resources loads resources from a specific server when server_name is provided."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": [weather_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+
+    # Get resources from math server only
+    math_resources = await client.get_resources(server_name="math")
+    assert len(math_resources) == 1
+    assert str(math_resources[0].metadata["uri"]) == "math://formulas"
+    assert math_resources[0].data == "E = mc^2"
+
+    # Get resources from weather server only
+    weather_resources = await client.get_resources(server_name="weather")
+    assert len(weather_resources) == 1
+    assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
+    assert weather_resources[0].data == "Sunny with a chance of clouds"
