@@ -12,6 +12,9 @@ from langchain_core.messages.content import (
     FileContentBlock,
     ImageContentBlock,
     TextContentBlock,
+    create_file_block,
+    create_image_block,
+    create_text_block,
 )
 from langchain_core.tools import (
     BaseTool,
@@ -60,12 +63,12 @@ ConvertedToolResult = ContentBlock | ToolMessage
 if LANGGRAPH_PRESENT:
     ConvertedToolResult = list[ToolMessageContentBlock] | ToolMessage | Command
 else:
-    ConvertedToolResult = list[str | ToolMessageContentBlock] | ToolMessage
+    ConvertedToolResult = list[ToolMessageContentBlock] | ToolMessage
 
 MAX_ITERATIONS = 1000
 
 
-def _convert_mcp_content_to_lc_block(
+def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
     content: ContentBlock,
 ) -> ToolMessageContentBlock:
     """Convert any MCP content block to a LangChain content block.
@@ -82,14 +85,10 @@ def _convert_mcp_content_to_lc_block(
         ValueError: If an unknown content type is passed.
     """
     if isinstance(content, TextContent):
-        return TextContentBlock(type="text", text=content.text)
+        return create_text_block(text=content.text)
 
     if isinstance(content, ImageContent):
-        return ImageContentBlock(
-            type="image",
-            base64=content.data,
-            mime_type=content.mimeType,
-        )
+        return create_image_block(base64=content.data, mime_type=content.mimeType)
 
     if isinstance(content, AudioContent):
         msg = (
@@ -99,27 +98,20 @@ def _convert_mcp_content_to_lc_block(
         raise NotImplementedError(msg)
 
     if isinstance(content, ResourceLink):
-        block: FileContentBlock = FileContentBlock(type="file", url=str(content.uri))
-        if content.mimeType:
-            block["mime_type"] = content.mimeType
-        return block
+        mime_type = content.mimeType or None
+        if mime_type and mime_type.startswith("image/"):
+            return create_image_block(url=str(content.uri), mime_type=mime_type)
+        return create_file_block(url=str(content.uri), mime_type=mime_type)
 
     if isinstance(content, EmbeddedResource):
         resource = content.resource
         if isinstance(resource, TextResourceContents):
-            return TextContentBlock(type="text", text=resource.text)
+            return create_text_block(text=resource.text)
         if isinstance(resource, BlobResourceContents):
-            mime_type = resource.mimeType or ""
-            if mime_type.startswith("image/"):
-                return ImageContentBlock(
-                    type="image",
-                    base64=resource.blob,
-                    mime_type=mime_type,
-                )
-            block = FileContentBlock(type="file", base64=resource.blob)
-            if mime_type:
-                block["mime_type"] = mime_type
-            return block
+            mime_type = resource.mimeType or None
+            if mime_type and mime_type.startswith("image/"):
+                return create_image_block(base64=resource.blob, mime_type=mime_type)
+            return create_file_block(base64=resource.blob, mime_type=mime_type)
         msg = f"Unknown embedded resource type: {type(resource).__name__}"
         raise ValueError(msg)
 
