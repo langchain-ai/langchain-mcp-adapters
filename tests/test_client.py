@@ -170,7 +170,7 @@ async def test_get_prompt():
 
 
 async def test_get_resources_from_all_servers():
-    """Test that get_resources loads resources from all servers when no server_name is specified."""
+    """Test that get_resources loads resources from all servers."""
     current_dir = Path(__file__).parent
     math_server_path = os.path.join(current_dir, "servers/math_server.py")
     weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
@@ -202,14 +202,18 @@ async def test_get_resources_from_all_servers():
     assert resource_uris == {"math://formulas", "weather://forecast"}
 
     # Verify resource content
-    math_resource = next(r for r in all_resources if str(r.metadata["uri"]) == "math://formulas")
-    weather_resource = next(r for r in all_resources if str(r.metadata["uri"]) == "weather://forecast")
+    math_resource = next(
+        r for r in all_resources if str(r.metadata["uri"]) == "math://formulas"
+    )
+    weather_resource = next(
+        r for r in all_resources if str(r.metadata["uri"]) == "weather://forecast"
+    )
     assert math_resource.data == "E = mc^2"
     assert weather_resource.data == "Sunny with a chance of clouds"
 
 
 async def test_get_resources_from_specific_server():
-    """Test that get_resources loads resources from a specific server when server_name is provided."""
+    """Test that get_resources loads resources from a specific server."""
     current_dir = Path(__file__).parent
     math_server_path = os.path.join(current_dir, "servers/math_server.py")
     weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
