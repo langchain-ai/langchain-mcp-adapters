@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallResult
 from langchain_mcp_adapters.tools import (
+    MCPToolArtifact,
     _convert_call_tool_result,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
@@ -131,7 +132,7 @@ def test_convert_with_error():
 
 
 def test_convert_with_structured_content():
-    """Test that structuredContent is returned as the artifact."""
+    """Test that structuredContent is returned as MCPToolArtifact."""
     result = CallToolResult(
         content=[TextContent(type="text", text="text result")],
         isError=False,
@@ -141,7 +142,9 @@ def test_convert_with_structured_content():
     content, artifact = _convert_call_tool_result(result)
 
     assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
-    assert artifact == {"key": "value", "nested": {"data": 123}}
+    assert artifact == MCPToolArtifact(
+        structured_output={"key": "value", "nested": {"data": 123}}
+    )
 
 
 def test_convert_image_content():
@@ -395,7 +398,9 @@ def test_convert_mixed_content_with_structured_output():
             "id": IsLangChainID,
         },
     ]
-    assert artifact == {"analysis": {"score": 0.95, "confidence": "high"}}
+    assert artifact == MCPToolArtifact(
+        structured_output={"analysis": {"score": 0.95, "confidence": "high"}}
+    )
 
 
 async def test_convert_mcp_tool_to_langchain_tool():

@@ -5,7 +5,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, get_args
+from typing import Any, TypedDict, get_args
 
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
@@ -67,6 +67,20 @@ else:
 MAX_ITERATIONS = 1000
 
 
+class MCPToolArtifact(TypedDict):
+    """Artifact returned from MCP tool calls.
+
+    This TypedDict wraps the structured output from MCP tool calls,
+    allowing for future extension if MCP adds more fields to tool results.
+
+    Attributes:
+        structured_output: The structured content returned by the MCP tool,
+            corresponding to the structuredContent field in CallToolResult.
+    """
+
+    structured_output: dict[str, Any]
+
+
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
     content: ContentBlock,
 ) -> ToolMessageContentBlock:
@@ -120,13 +134,14 @@ def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
 
 def _convert_call_tool_result(
     call_tool_result: MCPToolCallResult,
-) -> tuple[ConvertedToolResult, dict[str, Any] | None]:
+) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
     """Convert MCP MCPToolCallResult to LangChain tool result format.
 
     Converts MCP content blocks to LangChain content blocks:
     - TextContent -> {"type": "text", "text": ...}
     - ImageContent -> {"type": "image", "base64": ..., "mime_type": ...}
-    - ResourceLink -> {"type": "file", "url": ..., "mime_type": ...}
+    - ResourceLink (image/*) -> {"type": "image", "url": ..., "mime_type": ...}
+    - ResourceLink (other) -> {"type": "file", "url": ..., "mime_type": ...}
     - EmbeddedResource (text) -> {"type": "text", "text": ...}
     - EmbeddedResource (blob) -> {"type": "image", ...} or {"type": "file", ...}
     - AudioContent -> raises NotImplementedError
@@ -140,7 +155,8 @@ def _convert_call_tool_result(
         A tuple containing:
         - The content: either a string (single text), list of content blocks,
           ToolMessage, or Command
-        - The artifact: structuredContent from MCP if present, otherwise None
+        - The artifact: MCPToolArtifact with structured_output if present,
+          otherwise None
 
     Raises:
         ToolException: If the tool call resulted in an error.
@@ -172,8 +188,10 @@ def _convert_call_tool_result(
         error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
         raise ToolException(error_msg)
 
-    # Extract structured content as the artifact
-    artifact = call_tool_result.structuredContent
+    # Extract structured content and wrap in MCPToolArtifact
+    artifact: MCPToolArtifact | None = None
+    if call_tool_result.structuredContent is not None:
+        artifact = MCPToolArtifact(structured_output=call_tool_result.structuredContent)
 
     return tool_content, artifact
 
@@ -282,7 +300,7 @@ def convert_mcp_tool_to_langchain_tool(
     async def call_tool(
         runtime: Any = None,  # noqa: ANN401
         **arguments: dict[str, Any],
-    ) -> tuple[ConvertedToolResult, dict[str, Any] | None]:
+    ) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
         """Execute tool call with interceptor chain and return formatted result.
 
         Args:
@@ -292,7 +310,7 @@ def convert_mcp_tool_to_langchain_tool(
         Returns:
             A tuple of (content, artifact) where:
             - content: string, list of strings/content blocks, ToolMessage, or Command
-            - artifact: structuredContent from MCP if present, otherwise None
+            - artifact: MCPToolArtifact with structured_output if present, else None
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(
