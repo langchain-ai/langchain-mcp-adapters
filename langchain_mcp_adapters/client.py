@@ -14,6 +14,7 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
+from mcp.types import Prompt
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
@@ -201,6 +202,14 @@ class MultiServerMCPClient:
         """Get a prompt from a given MCP server."""
         async with self.session(server_name) as session:
             return await load_mcp_prompt(session, prompt_name, arguments=arguments)
+
+    async def get_prompts(
+        self, server_name: str, *, cursor: str | None = None
+    ) -> list[Prompt]:
+        """Get prompts from a given MCP server."""
+        async with self.session(server_name) as session:
+            prompts = await session.list_prompts(cursor=cursor)
+            return prompts.prompts
 
     async def get_resources(
         self,
