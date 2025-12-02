@@ -12,14 +12,28 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from langchain_core.messages import ToolMessage
 from mcp.types import CallToolResult
 from typing_extensions import NotRequired, TypedDict, Unpack
+
+try:
+    # langgraph installed
+    import langgraph
+
+    LANGGRAPH_PRESENT = True
+except ImportError:
+    LANGGRAPH_PRESENT = False
+
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+if LANGGRAPH_PRESENT:
+    from langgraph.types import Command
 
-MCPToolCallResult = CallToolResult
+    MCPToolCallResult = CallToolResult | ToolMessage | Command
+else:
+    MCPToolCallResult = CallToolResult | ToolMessage
 
 
 class _MCPToolCallRequestOverrides(TypedDict, total=False):

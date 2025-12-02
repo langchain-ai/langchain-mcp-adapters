@@ -1,6 +1,7 @@
 """Tests for the interceptor system functionality."""
 
 import pytest
+from langchain_core.messages import ToolMessage
 from mcp.server import FastMCP
 from mcp.types import (
     CallToolResult,
@@ -283,3 +284,38 @@ class TestInterceptorErrorHandling:
             add_tool = next(tool for tool in tools if tool.name == "add")
             with pytest.raises(ValueError, match="Interceptor failed"):
                 await add_tool.ainvoke({"a": 2, "b": 3})
+
+    async def test_interceptor_returns_tool_message(self, socket_enabled):
+        """Test that interceptor can return a ToolMessage directly."""
+
+        async def tool_message_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> ToolMessage:
+            # Return a ToolMessage directly instead of CallToolResult
+            return ToolMessage(
+                content="Custom ToolMessage response",
+                name=request.name,
+                tool_call_id="test-call-id",
+            )
+
+        with run_streamable_http(_create_math_server, 8209):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8209/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[tool_message_interceptor],
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke(
+                {"args": {"a": 2, "b": 3}, "id": "test-call-id", "type": "tool_call"}
+            )
+
+            # The interceptor returns a ToolMessage which should be returned as-is
+            assert isinstance(result, ToolMessage)
+            assert result.content == "Custom ToolMessage response"
+            assert result.name == "add"
+            assert result.tool_call_id == "test-call-id"

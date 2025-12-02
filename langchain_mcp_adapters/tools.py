@@ -7,6 +7,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 from collections.abc import Awaitable, Callable
 from typing import Any, get_args
 
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import (
     BaseTool,
     InjectedToolArg,
@@ -36,32 +37,54 @@ from langchain_mcp_adapters.interceptors import (
 from langchain_mcp_adapters.sessions import Connection, create_session
 
 try:
-    from langgraph.runtime import get_runtime
+    # langgraph installed
+    import langgraph
+    from langgraph.types import Command
+
+    LANGGRAPH_PRESENT = True
 except ImportError:
-
-    def get_runtime() -> None:
-        """no-op runtime getter."""
-        return
-
+    LANGGRAPH_PRESENT = False
 
 NonTextContent = ImageContent | AudioContent | ResourceLink | EmbeddedResource
+
+# Conditional type based on langgraph availability
+if LANGGRAPH_PRESENT:
+    ConvertedToolResult = str | list[str] | ToolMessage | Command
+else:
+    ConvertedToolResult = str | list[str] | ToolMessage
+
 MAX_ITERATIONS = 1000
 
 
 def _convert_call_tool_result(
     call_tool_result: MCPToolCallResult,
-) -> tuple[str | list[str], list[NonTextContent] | None]:
+) -> tuple[ConvertedToolResult, list[NonTextContent] | None]:
     """Convert MCP MCPToolCallResult to LangChain tool result format.
 
     Args:
-        call_tool_result: The result from calling an MCP tool.
+        call_tool_result: The result from calling an MCP tool. Can be either
+            a CallToolResult (MCP format), a ToolMessage (LangChain format),
+            or a Command (LangGraph format, if langgraph is installed).
 
     Returns:
-        A tuple containing the text content and any non-text content.
+        A tuple containing the text content (which may be a ToolMessage or Command)
+        and any non-text content. When a ToolMessage or Command is returned by an
+        interceptor, it's placed in the first position of the tuple as the content,
+        with None as the artifact.
 
     Raises:
         ToolException: If the tool call resulted in an error.
     """
+    # If the interceptor returned a ToolMessage directly, return it as the content
+    # with None as the artifact to match the content_and_artifact format
+    if isinstance(call_tool_result, ToolMessage):
+        return call_tool_result, None
+
+    # If the interceptor returned a Command (LangGraph), return it directly
+    if LANGGRAPH_PRESENT and isinstance(call_tool_result, Command):
+        return call_tool_result, None
+
+    # Otherwise, convert from CallToolResult
     text_contents: list[TextContent] = []
     non_text_contents = []
     for content in call_tool_result.content:
@@ -184,15 +207,19 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
+        runtime: Any = None,  # noqa: ANN401
         **arguments: dict[str, Any],
-    ) -> tuple[str | list[str], list[NonTextContent] | None]:
+    ) -> tuple[ConvertedToolResult, list[NonTextContent] | None]:
         """Execute tool call with interceptor chain and return formatted result.
 
         Args:
+            runtime: LangGraph tool runtime if available, otherwise None.
             **arguments: Tool arguments as keyword args.
 
         Returns:
-            Tuple of (text_content, non_text_content).
+            A tuple of (text_content, non_text_content), where text_content may be
+            a ToolMessage or Command (if langgraph is installed) if an interceptor
+            returned one directly.
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(
@@ -201,12 +228,6 @@ def convert_mcp_tool_to_langchain_tool(
             if callbacks is not None
             else _MCPCallbacks()
         )
-
-        # try to get runtime if we're in a langgraph context
-        try:
-            runtime = get_runtime()
-        except Exception:  # noqa: BLE001
-            runtime = None
 
         # Create the innermost handler that actually executes the tool call
         async def execute_tool(request: MCPToolCallRequest) -> MCPToolCallResult:
