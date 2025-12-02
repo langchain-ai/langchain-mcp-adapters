@@ -31,6 +31,7 @@ test = [
     "types-setuptools>=69.0.0",
     "websockets>=15.0.1",
     "pytest-timeout>=2.4.0",
+    "dirty-equals>=0.9.0",
 ]
 
 [project.urls]

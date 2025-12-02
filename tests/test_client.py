@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
+from tests.utils import IsLangChainID
 
 
 async def test_multi_server_mcp_client(
@@ -70,22 +71,24 @@ async def test_multi_server_mcp_client(
     # Test that we can call a math tool
     add_tool = next(tool for tool in all_tools if tool.name == "add")
     result = await add_tool.ainvoke({"a": 2, "b": 3})
-    assert result == "5"
+    assert result == [{"type": "text", "text": "5", "id": IsLangChainID}]
 
     # Test that we can call a weather tool
     weather_tool = next(tool for tool in all_tools if tool.name == "get_weather")
     result = await weather_tool.ainvoke({"location": "London"})
-    assert result == "It's always sunny in London"
+    assert result == [
+        {"type": "text", "text": "It's always sunny in London", "id": IsLangChainID}
+    ]
 
     # Test the multiply tool
     multiply_tool = next(tool for tool in all_tools if tool.name == "multiply")
     result = await multiply_tool.ainvoke({"a": 4, "b": 5})
-    assert result == "20"
+    assert result == [{"type": "text", "text": "20", "id": IsLangChainID}]
 
     # Test that we can call a time tool
     time_tool = next(tool for tool in all_tools if tool.name == "get_time")
     result = await time_tool.ainvoke({"args": ""})
-    assert result == "5:20:00 PM EST"
+    assert result == [{"type": "text", "text": "5:20:00 PM EST", "id": IsLangChainID}]
 
 
 async def test_multi_server_connect_methods(
@@ -117,7 +120,7 @@ async def test_multi_server_connect_methods(
         tools = await load_mcp_tools(session)
         assert len(tools) == 2
         result = await tools[0].ainvoke({"a": 2, "b": 3})
-        assert result == "5"
+        assert result == [{"type": "text", "text": "5", "id": IsLangChainID}]
 
         for tool in tools:
             tool_names.add(tool.name)
@@ -126,7 +129,9 @@ async def test_multi_server_connect_methods(
         tools = await load_mcp_tools(session)
         assert len(tools) == 1
         result = await tools[0].ainvoke({"args": ""})
-        assert result == "5:20:00 PM EST"
+        assert result == [
+            {"type": "text", "text": "5:20:00 PM EST", "id": IsLangChainID}
+        ]
 
         for tool in tools:
             tool_names.add(tool.name)
