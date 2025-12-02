@@ -54,6 +54,7 @@ class MultiServerMCPClient:
         *,
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
+        prefix_tool_name_with_server_name: bool = False,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -63,6 +64,10 @@ class MultiServerMCPClient:
             callbacks: Optional callbacks for handling notifications and events.
             tool_interceptors: Optional list of tool call interceptors for modifying
                 requests and responses.
+            prefix_tool_name_with_server_name: Whether to prefix tool names with server
+                name to avoid collisions. When True, tool names will be formatted as
+                "{server_name}__{tool_name}". This is useful when using multiple
+                servers that may have tools with the same name.
 
         !!! example "Basic usage (starting a new session on each tool call)"
 
@@ -98,12 +103,30 @@ class MultiServerMCPClient:
             async with client.session("math") as session:
                 tools = await load_mcp_tools(session)
             ```
+
+        !!! example "Using prefix to avoid tool name collisions"
+
+            ```python
+            from langchain_mcp_adapters.client import MultiServerMCPClient
+
+            # When using multiple servers that may have tools with the same name
+            client = MultiServerMCPClient(
+                {
+                    "server1": {...},
+                    "server2": {...}
+                },
+                prefix_tool_name_with_server_name=True
+            )
+            # Tools will be named "server1__tool_name" and "server2__tool_name"
+            all_tools = await client.get_tools()
+            ```
         """
         self.connections: dict[str, Connection] = (
             connections if connections is not None else {}
         )
         self.callbacks = callbacks or Callbacks()
         self.tool_interceptors = tool_interceptors or []
+        self.prefix_tool_name_with_server_name = prefix_tool_name_with_server_name
 
     @asynccontextmanager
     async def session(
@@ -171,6 +194,7 @@ class MultiServerMCPClient:
                 callbacks=self.callbacks,
                 server_name=server_name,
                 tool_interceptors=self.tool_interceptors,
+                prefix_tool_name_with_server_name=self.prefix_tool_name_with_server_name,
             )
 
         all_tools: list[BaseTool] = []
@@ -183,6 +207,7 @@ class MultiServerMCPClient:
                     callbacks=self.callbacks,
                     server_name=name,
                     tool_interceptors=self.tool_interceptors,
+                    prefix_tool_name_with_server_name=self.prefix_tool_name_with_server_name,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
