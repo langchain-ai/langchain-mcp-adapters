@@ -70,15 +70,15 @@ MAX_ITERATIONS = 1000
 class MCPToolArtifact(TypedDict):
     """Artifact returned from MCP tool calls.
 
-    This TypedDict wraps the structured output from MCP tool calls,
+    This TypedDict wraps the structured content from MCP tool calls,
     allowing for future extension if MCP adds more fields to tool results.
 
     Attributes:
-        structured_output: The structured content returned by the MCP tool,
+        structured_content: The structured content returned by the MCP tool,
             corresponding to the structuredContent field in CallToolResult.
     """
 
-    structured_output: dict[str, Any]
+    structured_content: dict[str, Any]
 
 
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
@@ -155,7 +155,7 @@ def _convert_call_tool_result(
         A tuple containing:
         - The content: either a string (single text), list of content blocks,
           ToolMessage, or Command
-        - The artifact: MCPToolArtifact with structured_output if present,
+        - The artifact: MCPToolArtifact with structured_content if present,
           otherwise None
 
     Raises:
@@ -191,7 +191,9 @@ def _convert_call_tool_result(
     # Extract structured content and wrap in MCPToolArtifact
     artifact: MCPToolArtifact | None = None
     if call_tool_result.structuredContent is not None:
-        artifact = MCPToolArtifact(structured_output=call_tool_result.structuredContent)
+        artifact = MCPToolArtifact(
+            structured_content=call_tool_result.structuredContent
+        )
 
     return tool_content, artifact
 
@@ -310,7 +312,7 @@ def convert_mcp_tool_to_langchain_tool(
         Returns:
             A tuple of (content, artifact) where:
             - content: string, list of strings/content blocks, ToolMessage, or Command
-            - artifact: MCPToolArtifact with structured_output if present, else None
+            - artifact: MCPToolArtifact with structured_content if present, else None
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(

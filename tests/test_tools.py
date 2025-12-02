@@ -143,7 +143,7 @@ def test_convert_with_structured_content():
 
     assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
     assert artifact == MCPToolArtifact(
-        structured_output={"key": "value", "nested": {"data": 123}}
+        structured_content={"key": "value", "nested": {"data": 123}}
     )
 
 
@@ -376,7 +376,7 @@ def test_convert_audio_content_raises():
     assert "audio/wav" in str(exc_info.value)
 
 
-def test_convert_mixed_content_with_structured_output():
+def test_convert_mixed_content_with_structured_content():
     """Test mixed content with structuredContent returns both."""
     result = CallToolResult(
         content=[
@@ -399,7 +399,7 @@ def test_convert_mixed_content_with_structured_output():
         },
     ]
     assert artifact == MCPToolArtifact(
-        structured_output={"analysis": {"score": 0.95, "confidence": "high"}}
+        structured_content={"analysis": {"score": 0.95, "confidence": "high"}}
     )
 
 
