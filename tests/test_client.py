@@ -3,6 +3,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
+from mcp.types import ResourceTemplate
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -166,3 +167,38 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+async def test_get_resource_templates():
+    """Test retrieving resource templates from MCP servers."""
+    # Get the absolute path to the server scripts
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            }
+        },
+    )
+    # Test getting resource templates from the math server
+    resource_templates = await client.get_resource_templates(
+        "math",
+    )
+
+    # Check that we got multiple resources back
+    assert len(resource_templates) == 1
+    assert all(
+        isinstance(template, ResourceTemplate) for template in resource_templates
+    )
+
+    # Check the first resource template
+    random_formulas_template = resource_templates[0]
+    assert random_formulas_template.name == "get_random_formulas"
+
+    assert random_formulas_template.title is None
+    assert random_formulas_template.description == "Get random formulas."
+    assert random_formulas_template.uriTemplate == "math://randomformulas/{name}"
