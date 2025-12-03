@@ -28,5 +28,16 @@ def configure_assistant(skills: str) -> list[dict]:
     ]
 
 
+@mcp.resource("math://randomformulas/{name}")
+def get_random_formulas(name: str) -> str:
+    """Get random formulas."""
+    formulas = {
+        "energy": "E = mc^2",
+        "area": "A = πr^2",
+        "volume": "V = lwh",
+    }
+    return formulas.get(name, "Unknown formula")
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

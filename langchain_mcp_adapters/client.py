@@ -14,6 +14,7 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
+from mcp.types import ResourceTemplate
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
@@ -221,6 +222,14 @@ class MultiServerMCPClient:
         """
         async with self.session(server_name) as session:
             return await load_mcp_resources(session, uris=uris)
+
+    async def get_resource_templates(
+        self, server_name: str, *, cursor: str | None = None
+    ) -> list[ResourceTemplate]:
+        """Send a resources/templates/list request."""
+        async with self.session(server_name) as session:
+            resource_templates = await session.list_resource_templates(cursor=cursor)
+            return resource_templates.resourceTemplates
 
     async def __aenter__(self) -> "MultiServerMCPClient":
         """Async context manager entry point.
