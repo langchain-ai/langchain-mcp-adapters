@@ -271,97 +271,125 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     return all_tools
 
 
+def _create_elicitation_callback(
+    server_name: str,
+    tool_name: str,
+    state: dict[str, Any],
+) -> Any:  # noqa: ANN401
+    """Create an elicitation callback that stores requests in shared state.
+
+    Args:
+        server_name: Name of the MCP server.
+        tool_name: Name of the tool being executed.
+        state: Shared dict to store pending request and response event.
+
+    Returns:
+        An async callback function for the MCP SDK.
+    """
+    from langchain_mcp_adapters.elicitation import ElicitationRequest
+    from mcp.types import ElicitResult
+
+    async def callback(context: Any, params: Any) -> ElicitResult:  # noqa: ANN401
+        state["pending"] = ElicitationRequest(
+            message=params.message,
+            requested_schema=params.requestedSchema or {},
+            server_name=server_name,
+            tool_name=tool_name,
+        )
+        state["event"] = asyncio.Event()
+
+        # Wait for response from tool execution task
+        await state["event"].wait()
+
+        response = state.get("response")
+        state["pending"] = None
+        state["event"] = None
+        state["response"] = None
+
+        return response if response else ElicitResult(action="cancel")
+
+    return callback
+
+
 async def _execute_tool_with_elicitation(
     tool_session: ClientSession,
     tool_name: str,
     tool_args: dict[str, Any],
     progress_callback: Any,  # noqa: ANN401
-    elicitation_bridge: Any | None,  # noqa: ANN401
+    elicitation_state: dict[str, Any] | None,
 ) -> MCPToolCallResult:
     """Execute a tool with elicitation support.
-
-    This function handles the coordination between tool execution and
-    elicitation by polling for pending elicitation requests while waiting
-    for the tool call to complete.
-
-    The elicitation bridge receives requests from the MCP SDK's receive loop
-    (Task B). This function runs in the tool execution task (Task A) where
-    LangGraph's interrupt() has proper context.
 
     Args:
         tool_session: The MCP client session.
         tool_name: Name of the tool to call.
         tool_args: Arguments to pass to the tool.
         progress_callback: Optional progress callback.
-        elicitation_bridge: Bridge for coordinating elicitation requests.
+        elicitation_state: Shared state dict for elicitation, or None if disabled.
 
     Returns:
-        The CallToolResult from the MCP server.
+        The tool call result.
     """
-    if elicitation_bridge is None:
-        # No elicitation support - just call the tool directly
+    if elicitation_state is None:
         return await tool_session.call_tool(
             tool_name,
             tool_args,
             progress_callback=progress_callback,
         )
 
-    # Import here to avoid circular imports and only when needed
     from langchain_mcp_adapters.elicitation import ElicitationResponse
+    from mcp.types import ElicitResult
 
-    # Start the tool call in a task so we can monitor for elicitation
+    # Run tool call in background task so we can poll for elicitation
     result_holder: list[MCPToolCallResult] = []
     exception_holder: list[Exception] = []
-    done_event = asyncio.Event()
+    done = asyncio.Event()
 
     async def do_call() -> None:
         try:
             result = await tool_session.call_tool(
-                tool_name,
-                tool_args,
-                progress_callback=progress_callback,
+                tool_name, tool_args, progress_callback=progress_callback
             )
             result_holder.append(result)
         except Exception as e:  # noqa: BLE001
             exception_holder.append(e)
         finally:
-            done_event.set()
+            done.set()
 
-    # Start the tool call in a task
     task = asyncio.create_task(do_call())
 
     try:
-        # Poll for completion or elicitation
-        while not done_event.is_set():
-            # Check if there's a pending elicitation
-            if elicitation_bridge.has_pending_elicitation():
-                request = elicitation_bridge.get_pending_request()
-                if request is not None:
-                    # Call interrupt in THIS task (Task A) - LangGraph context is here!
-                    # The interrupt() function will pause graph execution and return
-                    # when the user resumes with Command(resume=response)
-                    response = interrupt(request)
+        while not done.is_set():
+            # Check for pending elicitation request
+            pending = elicitation_state.get("pending")
+            if pending is not None:
+                # Call interrupt in THIS task where LangGraph context exists
+                response = interrupt(pending)
 
-                    # Convert the response if it's a dict (from Command(resume=...))
-                    if isinstance(response, dict):
-                        response = ElicitationResponse(
-                            action=response.get("action", "cancel"),
-                            content=response.get("content"),
-                        )
-                    elif not isinstance(response, ElicitationResponse):
-                        # If response is not the expected type, treat as cancel
-                        response = ElicitationResponse.cancel()
+                # Convert response to ElicitResult
+                if isinstance(response, ElicitationResponse):
+                    elicit_result = response.to_result()
+                elif isinstance(response, ElicitResult):
+                    elicit_result = response
+                elif isinstance(response, dict):
+                    elicit_result = ElicitResult(
+                        action=response.get("action", "cancel"),
+                        content=response.get("content"),
+                    )
+                else:
+                    elicit_result = ElicitResult(action="cancel")
 
-                    # Send response back to the bridge (which unblocks Task B)
-                    await elicitation_bridge.set_response(response)
+                # Send response back to callback
+                elicitation_state["response"] = elicit_result
+                if elicitation_state.get("event"):
+                    elicitation_state["event"].set()
 
-            # Small sleep to avoid busy-waiting (10ms)
+            # Brief sleep to avoid busy-wait
             try:
-                await asyncio.wait_for(done_event.wait(), timeout=0.01)
+                await asyncio.wait_for(done.wait(), timeout=0.01)
             except asyncio.TimeoutError:
                 pass
 
-        # Tool call completed
         if exception_holder:
             raise exception_holder[0]
         return result_holder[0]
@@ -469,15 +497,16 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
-            # Create elicitation bridge if LangGraph is available
-            # This enables automatic elicitation support when running in a LangGraph context
-            elicitation_bridge = None
+            # Create elicitation state if LangGraph is available
+            # This enables automatic elicitation support when running in a LG context
+            elicitation_state: dict[str, Any] | None = None
+            elicitation_callback = None
             if LANGGRAPH_PRESENT:
-                from langchain_mcp_adapters.elicitation import ElicitationBridge
-
-                elicitation_bridge = ElicitationBridge(
+                elicitation_state = {}
+                elicitation_callback = _create_elicitation_callback(
                     server_name=server_name or "unknown",
                     tool_name=tool_name,
+                    state=elicitation_state,
                 )
 
             captured_exception = None
@@ -491,7 +520,7 @@ def convert_mcp_tool_to_langchain_tool(
                 async with create_session(
                     effective_connection,
                     mcp_callbacks=mcp_callbacks,
-                    elicitation_bridge=elicitation_bridge,
+                    elicitation_callback=elicitation_callback,
                 ) as tool_session:
                     await tool_session.initialize()
                     try:
@@ -500,7 +529,7 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_name,
                             tool_args,
                             mcp_callbacks.progress_callback,
-                            elicitation_bridge,
+                            elicitation_state,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager

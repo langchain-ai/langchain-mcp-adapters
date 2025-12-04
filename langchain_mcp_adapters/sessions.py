@@ -17,13 +17,13 @@ from mcp.client.streamable_http import streamablehttp_client
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
     import httpx
+    from mcp.types import ElicitRequestParams, ElicitResult
 
     from langchain_mcp_adapters.callbacks import _MCPCallbacks
-    from langchain_mcp_adapters.elicitation import ElicitationBridge
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -363,16 +363,16 @@ async def create_session(
     connection: Connection,
     *,
     mcp_callbacks: _MCPCallbacks | None = None,
-    elicitation_bridge: ElicitationBridge | None = None,
+    elicitation_callback: (
+        Callable[[Any, ElicitRequestParams], Awaitable[ElicitResult]] | None
+    ) = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
         mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
-        elicitation_bridge: Optional bridge for handling elicitation requests.
-            When provided, enables the client to respond to elicitation requests
-            from the server via LangGraph interrupts.
+        elicitation_callback: Optional callback for handling elicitation requests.
 
     Raises:
         ValueError: If transport is not recognized
@@ -403,12 +403,10 @@ async def create_session(
                 mcp_callbacks.logging_callback
             )
 
-    # Add elicitation callback if bridge provided
-    if elicitation_bridge is not None:
+    # Add elicitation callback if provided
+    if elicitation_callback is not None:
         params["session_kwargs"] = params.get("session_kwargs", {})
-        params["session_kwargs"]["elicitation_callback"] = (
-            elicitation_bridge.elicitation_callback
-        )
+        params["session_kwargs"]["elicitation_callback"] = elicitation_callback
 
     if transport == "sse":
         if "url" not in params:
