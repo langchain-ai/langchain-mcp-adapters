@@ -28,5 +28,11 @@ def configure_assistant(skills: str) -> list[dict]:
     ]
 
 
+@mcp.resource("math://formulas")
+def get_math_formulas() -> str:
+    """Get math formulas."""
+    return "E = mc^2"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
