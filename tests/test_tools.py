@@ -547,6 +547,26 @@ def _create_annotations_server():
     return server
 
 
+@pytest.mark.parametrize("transport", ["http", "streamable_http", "streamable-http"])
+async def test_load_mcp_tools_with_http_variations(socket_enabled, transport) -> None:
+    """Test load mcp tools with annotations."""
+    with run_streamable_http(_create_annotations_server, 8181):
+        # Initialize client without initial connections
+        client = MultiServerMCPClient(
+            {
+                "time": {
+                    "url": "http://localhost:8181/mcp",
+                    "transport": transport,
+                }
+            },
+        )
+        # pass
+        tools = await client.get_tools(server_name="time")
+        assert len(tools) == 1
+        tool = tools[0]
+        assert tool.name == "get_time"
+
+
 async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
     """Test load mcp tools with annotations."""
     with run_streamable_http(_create_annotations_server, 8181):
