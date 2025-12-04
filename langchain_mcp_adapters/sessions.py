@@ -17,11 +17,10 @@ from mcp.client.streamable_http import streamablehttp_client
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator
     from pathlib import Path
 
     import httpx
-    from mcp.types import ElicitRequestParams, ElicitResult
 
     from langchain_mcp_adapters.callbacks import _MCPCallbacks
 
@@ -363,16 +362,12 @@ async def create_session(
     connection: Connection,
     *,
     mcp_callbacks: _MCPCallbacks | None = None,
-    elicitation_callback: (
-        Callable[[Any, ElicitRequestParams], Awaitable[ElicitResult]] | None
-    ) = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
         mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
-        elicitation_callback: Optional callback for handling elicitation requests.
 
     Raises:
         ValueError: If transport is not recognized
@@ -395,18 +390,14 @@ async def create_session(
 
     if mcp_callbacks is not None:
         params["session_kwargs"] = params.get("session_kwargs", {})
-        # right now the only callback supported on the ClientSession
-        # is the logging callback, but long term we'll also want to
-        # support sampling, elicitation, list roots, etc.
         if mcp_callbacks.logging_callback is not None:
             params["session_kwargs"]["logging_callback"] = (
                 mcp_callbacks.logging_callback
             )
-
-    # Add elicitation callback if provided
-    if elicitation_callback is not None:
-        params["session_kwargs"] = params.get("session_kwargs", {})
-        params["session_kwargs"]["elicitation_callback"] = elicitation_callback
+        if mcp_callbacks.elicitation_callback is not None:
+            params["session_kwargs"]["elicitation_callback"] = (
+                mcp_callbacks.elicitation_callback
+            )
 
     if transport == "sse":
         if "url" not in params:

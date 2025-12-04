@@ -4,7 +4,6 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict, get_args
 
@@ -271,136 +270,74 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     return all_tools
 
 
-def _create_elicitation_callback(
-    server_name: str,
-    tool_name: str,
-    state: dict[str, Any],
-) -> Any:  # noqa: ANN401
-    """Create an elicitation callback that stores requests in shared state.
+class _ElicitationState:
+    """State for coordinating elicitation between MCP callback and tool execution.
 
-    Args:
-        server_name: Name of the MCP server.
-        tool_name: Name of the tool being executed.
-        state: Shared dict to store pending request and response event.
+    This class uses asyncio primitives to coordinate the elicitation flow:
+    1. The MCP callback stores the request and signals the tool execution
+    2. The tool execution calls interrupt() in the LangGraph context
+    3. When resumed, the tool execution stores the response
+    4. The MCP callback receives the response and returns it to the MCP SDK
+    """
+
+    def __init__(self) -> None:
+        import asyncio  # noqa: PLC0415
+
+        self.pending_request: Any = None
+        self.response: Any = None
+        self.request_event = asyncio.Event()
+        self.response_event = asyncio.Event()
+
+    def reset(self) -> None:
+        """Reset state for a new elicitation cycle."""
+        self.pending_request = None
+        self.response = None
+        self.request_event.clear()
+        self.response_event.clear()
+
+
+def _create_elicitation_callback_and_state() -> (
+    tuple[Callbacks, _ElicitationState] | tuple[None, None]
+):
+    """Create an elicitation callback with coordination state.
+
+    This creates a callback that, when invoked by the MCP SDK, stores the
+    request and waits for a response. The tool execution monitors for requests
+    and calls interrupt() when one is detected.
 
     Returns:
-        An async callback function for the MCP SDK.
+        A tuple of (Callbacks, state) if LangGraph is available, or
+        (None, None) if not.
     """
-    from langchain_mcp_adapters.elicitation import ElicitationRequest
-    from mcp.types import ElicitResult
+    if not LANGGRAPH_PRESENT:
+        return None, None
 
-    async def callback(context: Any, params: Any) -> ElicitResult:  # noqa: ANN401
-        state["pending"] = ElicitationRequest(
-            message=params.message,
-            requested_schema=params.requestedSchema or {},
-            server_name=server_name,
-            tool_name=tool_name,
-        )
-        state["event"] = asyncio.Event()
+    from mcp.types import ElicitResult  # noqa: PLC0415
 
-        # Wait for response from tool execution task
-        await state["event"].wait()
+    from langchain_mcp_adapters.elicitation import (  # noqa: PLC0415
+        ElicitationRequest,
+    )
 
-        response = state.get("response")
-        state["pending"] = None
-        state["event"] = None
-        state["response"] = None
+    state = _ElicitationState()
 
-        return response if response else ElicitResult(action="cancel")
+    async def elicitation_handler(
+        request: ElicitationRequest,
+        context: CallbackContext,  # noqa: ARG001
+    ) -> ElicitResult:
+        # Store the request and signal that we have a pending elicitation
+        state.pending_request = request
+        state.request_event.set()
 
-    return callback
+        # Wait for the response (tool execution will set this after interrupt)
+        await state.response_event.wait()
 
+        # Get the response and reset for next use
+        response = state.response
+        state.reset()
 
-async def _execute_tool_with_elicitation(
-    tool_session: ClientSession,
-    tool_name: str,
-    tool_args: dict[str, Any],
-    progress_callback: Any,  # noqa: ANN401
-    elicitation_state: dict[str, Any] | None,
-) -> MCPToolCallResult:
-    """Execute a tool with elicitation support.
+        return response
 
-    Args:
-        tool_session: The MCP client session.
-        tool_name: Name of the tool to call.
-        tool_args: Arguments to pass to the tool.
-        progress_callback: Optional progress callback.
-        elicitation_state: Shared state dict for elicitation, or None if disabled.
-
-    Returns:
-        The tool call result.
-    """
-    if elicitation_state is None:
-        return await tool_session.call_tool(
-            tool_name,
-            tool_args,
-            progress_callback=progress_callback,
-        )
-
-    from langchain_mcp_adapters.elicitation import ElicitationResponse
-    from mcp.types import ElicitResult
-
-    # Run tool call in background task so we can poll for elicitation
-    result_holder: list[MCPToolCallResult] = []
-    exception_holder: list[Exception] = []
-    done = asyncio.Event()
-
-    async def do_call() -> None:
-        try:
-            result = await tool_session.call_tool(
-                tool_name, tool_args, progress_callback=progress_callback
-            )
-            result_holder.append(result)
-        except Exception as e:  # noqa: BLE001
-            exception_holder.append(e)
-        finally:
-            done.set()
-
-    task = asyncio.create_task(do_call())
-
-    try:
-        while not done.is_set():
-            # Check for pending elicitation request
-            pending = elicitation_state.get("pending")
-            if pending is not None:
-                # Call interrupt in THIS task where LangGraph context exists
-                response = interrupt(pending)
-
-                # Convert response to ElicitResult
-                if isinstance(response, ElicitationResponse):
-                    elicit_result = response.to_result()
-                elif isinstance(response, ElicitResult):
-                    elicit_result = response
-                elif isinstance(response, dict):
-                    elicit_result = ElicitResult(
-                        action=response.get("action", "cancel"),
-                        content=response.get("content"),
-                    )
-                else:
-                    elicit_result = ElicitResult(action="cancel")
-
-                # Send response back to callback
-                elicitation_state["response"] = elicit_result
-                if elicitation_state.get("event"):
-                    elicitation_state["event"].set()
-
-            # Brief sleep to avoid busy-wait
-            try:
-                await asyncio.wait_for(done.wait(), timeout=0.01)
-            except asyncio.TimeoutError:
-                pass
-
-        if exception_holder:
-            raise exception_holder[0]
-        return result_holder[0]
-
-    except BaseException:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        raise
+    return Callbacks(on_elicitation=elicitation_handler), state
 
 
 def convert_mcp_tool_to_langchain_tool(
@@ -453,11 +390,38 @@ def convert_mcp_tool_to_langchain_tool(
             - content: string, list of strings/content blocks, ToolMessage, or Command
             - artifact: MCPToolArtifact with structured_content if present, else None
         """
-        mcp_callbacks = (
-            callbacks.to_mcp_format(
-                context=CallbackContext(server_name=server_name, tool_name=tool.name)
+        from mcp.types import ElicitResult  # noqa: PLC0415
+
+        from langchain_mcp_adapters.elicitation import (  # noqa: PLC0415
+            ElicitationResponse,
+        )
+
+        # Set up elicitation callback if LangGraph is available and user
+        # didn't provide their own
+        elicitation_callbacks: Callbacks | None = None
+        elicitation_state: _ElicitationState | None = None
+
+        if callbacks is None or callbacks.on_elicitation is None:
+            elicitation_callbacks, elicitation_state = (
+                _create_elicitation_callback_and_state()
             )
-            if callbacks is not None
+
+        # Merge user callbacks with elicitation callback
+        if callbacks is not None and elicitation_callbacks is not None:
+            effective_callbacks = Callbacks(
+                on_logging_message=callbacks.on_logging_message,
+                on_progress=callbacks.on_progress,
+                on_elicitation=elicitation_callbacks.on_elicitation,
+            )
+        elif elicitation_callbacks is not None:
+            effective_callbacks = elicitation_callbacks
+        else:
+            effective_callbacks = callbacks
+
+        context = CallbackContext(server_name=server_name, tool_name=tool.name)
+        mcp_callbacks = (
+            effective_callbacks.to_mcp_format(context=context)
+            if effective_callbacks is not None
             else _MCPCallbacks()
         )
 
@@ -473,7 +437,6 @@ def convert_mcp_tool_to_langchain_tool(
 
             Raises:
                 ValueError: If neither session nor connection provided.
-                RuntimeError: If tool call returns None.
             """
             tool_name = request.name
             tool_args = request.args
@@ -497,18 +460,6 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
-            # Create elicitation state if LangGraph is available
-            # This enables automatic elicitation support when running in a LG context
-            elicitation_state: dict[str, Any] | None = None
-            elicitation_callback = None
-            if LANGGRAPH_PRESENT:
-                elicitation_state = {}
-                elicitation_callback = _create_elicitation_callback(
-                    server_name=server_name or "unknown",
-                    tool_name=tool_name,
-                    state=elicitation_state,
-                )
-
             captured_exception = None
 
             if session is None:
@@ -520,16 +471,13 @@ def convert_mcp_tool_to_langchain_tool(
                 async with create_session(
                     effective_connection,
                     mcp_callbacks=mcp_callbacks,
-                    elicitation_callback=elicitation_callback,
                 ) as tool_session:
                     await tool_session.initialize()
                     try:
-                        call_tool_result = await _execute_tool_with_elicitation(
-                            tool_session,
+                        call_tool_result = await tool_session.call_tool(
                             tool_name,
                             tool_args,
-                            mcp_callbacks.progress_callback,
-                            elicitation_state,
+                            progress_callback=mcp_callbacks.progress_callback,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -556,6 +504,8 @@ def convert_mcp_tool_to_langchain_tool(
 
             return call_tool_result
 
+        import asyncio  # noqa: PLC0415
+
         # Build and execute the interceptor chain
         handler = _build_interceptor_chain(execute_tool, tool_interceptors)
         request = MCPToolCallRequest(
@@ -565,7 +515,68 @@ def convert_mcp_tool_to_langchain_tool(
             headers=None,
             runtime=runtime,
         )
-        call_tool_result = await handler(request)
+
+        # Execute tool with elicitation handling if state is available
+        if elicitation_state is not None and LANGGRAPH_PRESENT:
+            # Reset state for this call
+            elicitation_state.reset()
+
+            # Create task for tool execution
+            tool_task = asyncio.create_task(handler(request))
+
+            # Wait for either tool completion or elicitation request
+            request_wait = asyncio.create_task(elicitation_state.request_event.wait())
+
+            done, pending = await asyncio.wait(
+                [tool_task, request_wait],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if request_wait in done and tool_task in pending:
+                # Elicitation requested - cancel the pending tool task first
+                # We'll create a new one after getting the user's response
+                tool_task.cancel()
+                try:
+                    await tool_task
+                except asyncio.CancelledError:
+                    pass
+
+                # Call interrupt in LangGraph context - this pauses execution
+                # When we reach here after resume, interrupt() returns the response
+                elicit_request = elicitation_state.pending_request
+                response = interrupt(elicit_request)
+
+                # Convert response to ElicitResult
+                if isinstance(response, ElicitationResponse):
+                    elicit_result = response.to_result()
+                elif isinstance(response, ElicitResult):
+                    elicit_result = response
+                elif isinstance(response, dict):
+                    elicit_result = ElicitResult(
+                        action=response.get("action", "cancel"),
+                        content=response.get("content"),
+                    )
+                else:
+                    elicit_result = ElicitResult(action="cancel")
+
+                # Set response and signal the callback to continue
+                elicitation_state.response = elicit_result
+                elicitation_state.response_event.set()
+
+                # Re-execute the tool - now the callback will return the response
+                call_tool_result = await handler(request)
+            else:
+                # Tool completed without elicitation
+                # Cancel the request wait task
+                request_wait.cancel()
+                try:
+                    await request_wait
+                except asyncio.CancelledError:
+                    pass
+                call_tool_result = tool_task.result()
+        else:
+            # No elicitation handling - just execute the tool
+            call_tool_result = await handler(request)
 
         return _convert_call_tool_result(call_tool_result)
 

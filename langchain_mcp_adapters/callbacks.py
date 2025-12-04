@@ -1,17 +1,24 @@
 """Types for callbacks."""
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
+from mcp.client.session import ElicitationFnT as MCPElicitationFnT
 from mcp.client.session import LoggingFnT as MCPLoggingFnT
 from mcp.shared.session import ProgressFnT as MCPProgressFnT
+from mcp.types import (
+    ElicitResult,
+)
 from mcp.types import (
     LoggingMessageNotificationParams as MCPLoggingMessageNotificationParams,
 )
 
+from langchain_mcp_adapters.elicitation import ElicitationRequest
+
 # Type aliases to avoid direct MCP type dependencies
 LoggingFnT = MCPLoggingFnT
 ProgressFnT = MCPProgressFnT
+ElicitationFnT = MCPElicitationFnT
 LoggingMessageNotificationParams = MCPLoggingMessageNotificationParams
 
 
@@ -57,12 +64,30 @@ class ProgressCallback(Protocol):
         ...
 
 
+@runtime_checkable
+class ElicitationCallback(Protocol):
+    """Callback for handling elicitation requests from MCP servers.
+
+    When an MCP server requests user input during tool execution, this callback
+    is invoked. The callback should return an ElicitResult with the user's response.
+    """
+
+    async def __call__(
+        self,
+        request: ElicitationRequest,
+        context: CallbackContext,
+    ) -> ElicitResult:
+        """Handle an elicitation request and return the user's response."""
+        ...
+
+
 @dataclass
 class _MCPCallbacks:
     """Callbacks compatible with the MCP SDK. For internal use only."""
 
     logging_callback: LoggingFnT | None = None
     progress_callback: ProgressFnT | None = None
+    elicitation_callback: ElicitationFnT | None = None
 
 
 @dataclass
@@ -71,6 +96,7 @@ class Callbacks:
 
     on_logging_message: LoggingMessageCallback | None = None
     on_progress: ProgressCallback | None = None
+    on_elicitation: ElicitationCallback | None = None
 
     def to_mcp_format(self, *, context: CallbackContext) -> _MCPCallbacks:
         """Convert the LangChain MCP client callbacks to MCP SDK callbacks.
@@ -95,7 +121,24 @@ class Callbacks:
         else:
             mcp_progress_callback = None
 
+        if (on_elicitation := self.on_elicitation) is not None:
+
+            async def mcp_elicitation_callback(
+                ctx: Any,  # noqa: ANN401, ARG001
+                params: Any,  # noqa: ANN401
+            ) -> ElicitResult:
+                request = ElicitationRequest(
+                    message=params.message,
+                    requested_schema=params.requestedSchema or {},
+                    server_name=context.server_name,
+                    tool_name=context.tool_name or "unknown",
+                )
+                return await on_elicitation(request, context)
+        else:
+            mcp_elicitation_callback = None
+
         return _MCPCallbacks(
             logging_callback=mcp_logging_callback,
             progress_callback=mcp_progress_callback,
+            elicitation_callback=mcp_elicitation_callback,
         )
