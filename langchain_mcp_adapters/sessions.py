@@ -6,7 +6,6 @@ MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -22,6 +21,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import httpx
+
+    from langchain_mcp_adapters.callbacks import _MCPCallbacks
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -69,7 +70,17 @@ class StdioConnection(TypedDict):
     """Command line arguments to pass to the executable."""
 
     env: NotRequired[dict[str, str] | None]
-    """The environment to use when spawning the process."""
+    """The environment to use when spawning the process.
+
+    If not specified or set to None, a subset of the default environment
+    variables from the current process will be used.
+
+    Please refer to the MCP SDK documentation for details on which
+    environment variables are included by default. The behavior
+    varies by operating system.
+
+    https://github.com/modelcontextprotocol/python-sdk/blob/c47c767ff437ee88a19e6b9001e2472cb6f7d5ed/src/mcp/client/stdio/__init__.py#L51
+    """
 
     cwd: NotRequired[str | Path | None]
     """The working directory to use when spawning the process."""
@@ -178,7 +189,7 @@ Connection = (
 
 
 @asynccontextmanager
-async def _create_stdio_session(  # noqa: PLR0913
+async def _create_stdio_session(
     *,
     command: str,
     args: list[str],
@@ -196,6 +207,8 @@ async def _create_stdio_session(  # noqa: PLR0913
         command: Command to execute.
         args: Arguments for the command.
         env: Environment variables for the command.
+            If not specified, inherits a subset of the current environment.
+            The details are implemented in the MCP sdk.
         cwd: Working directory for the command.
         encoding: Character encoding.
         encoding_error_handler: How to handle encoding errors.
@@ -204,13 +217,6 @@ async def _create_stdio_session(  # noqa: PLR0913
     Yields:
         An initialized ClientSession.
     """
-    # NOTE: execution commands (e.g., `uvx` / `npx`) require PATH envvar to be set.
-    # To address this, we automatically inject existing PATH envvar into the `env`,
-    # if it's not already set.
-    env = env or {}
-    if "PATH" not in env:
-        env["PATH"] = os.environ.get("PATH", "")
-
     server_params = StdioServerParameters(
         command=command,
         args=args,
@@ -229,7 +235,7 @@ async def _create_stdio_session(  # noqa: PLR0913
 
 
 @asynccontextmanager
-async def _create_sse_session(  # noqa: PLR0913
+async def _create_sse_session(
     *,
     url: str,
     headers: dict[str, Any] | None = None,
@@ -269,7 +275,7 @@ async def _create_sse_session(  # noqa: PLR0913
 
 
 @asynccontextmanager
-async def _create_streamable_http_session(  # noqa: PLR0913
+async def _create_streamable_http_session(
     *,
     url: str,
     headers: dict[str, Any] | None = None,
@@ -335,7 +341,7 @@ async def _create_websocket_session(
         ImportError: If websockets package is not installed.
     """
     try:
-        from mcp.client.websocket import websocket_client
+        from mcp.client.websocket import websocket_client  # noqa: PLC0415
     except ImportError:
         msg = (
             "Could not import websocket_client. "
@@ -352,11 +358,14 @@ async def _create_websocket_session(
 
 
 @asynccontextmanager
-async def create_session(connection: Connection) -> AsyncIterator[ClientSession]:  # noqa: C901
+async def create_session(
+    connection: Connection, *, mcp_callbacks: _MCPCallbacks | None = None
+) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
+        mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
 
     Raises:
         ValueError: If transport is not recognized
@@ -376,6 +385,16 @@ async def create_session(connection: Connection) -> AsyncIterator[ClientSession]
 
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
+
+    if mcp_callbacks is not None:
+        params["session_kwargs"] = params.get("session_kwargs", {})
+        # right now the only callback supported on the ClientSession
+        # is the logging callback, but long term we'll also want to
+        # support sampling, elicitation, list roots, etc.
+        if mcp_callbacks.logging_callback is not None:
+            params["session_kwargs"]["logging_callback"] = (
+                mcp_callbacks.logging_callback
+            )
 
     if transport == "sse":
         if "url" not in params:

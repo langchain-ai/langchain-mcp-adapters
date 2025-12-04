@@ -1,38 +1,51 @@
-from typing import Annotated
+import typing
+from collections.abc import Callable, Sequence
+from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_core.messages import ToolMessage
+from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
+from mcp.server import FastMCP
 from mcp.types import (
+    AudioContent,
+    BlobResourceContents,
     CallToolResult,
     EmbeddedResource,
     ImageContent,
+    ResourceLink,
     TextContent,
     TextResourceContents,
+    ToolAnnotations,
 )
 from mcp.types import Tool as MCPTool
 from pydantic import BaseModel
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallResult
 from langchain_mcp_adapters.tools import (
+    MCPToolArtifact,
     _convert_call_tool_result,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
     to_fastmcp,
 )
-from tests.utils import run_streamable_http
+from tests.utils import IsLangChainID, run_streamable_http
 
 
 def test_convert_empty_text_content():
     # Test with a single text content
     result = CallToolResult(content=[], isError=False)
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == ""
-    assert non_text_content is None
+    assert content == []
+    assert artifact is None
 
 
 def test_convert_single_text_content():
@@ -41,10 +54,10 @@ def test_convert_single_text_content():
         content=[TextContent(type="text", text="test result")], isError=False
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == "test result"
-    assert non_text_content is None
+    assert content == [{"type": "text", "text": "test result", "id": IsLangChainID}]
+    assert artifact is None
 
 
 def test_convert_multiple_text_contents():
@@ -57,14 +70,17 @@ def test_convert_multiple_text_contents():
         isError=False,
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == ["result 1", "result 2"]
-    assert non_text_content is None
+    assert content == [
+        {"type": "text", "text": "result 1", "id": IsLangChainID},
+        {"type": "text", "text": "result 2", "id": IsLangChainID},
+    ]
+    assert artifact is None
 
 
 def test_convert_with_non_text_content():
-    # Test with non-text content
+    # Test with non-text content (now converted to LangChain content blocks)
     image_content = ImageContent(type="image", mimeType="image/png", data="base64data")
     resource_content = EmbeddedResource(
         type="resource",
@@ -82,10 +98,25 @@ def test_convert_with_non_text_content():
         isError=False,
     )
 
-    text_content, non_text_content = _convert_call_tool_result(result)
+    content, artifact = _convert_call_tool_result(result)
 
-    assert text_content == "text result"
-    assert non_text_content == [image_content, resource_content]
+    # With mixed content, we get a list of LangChain content blocks
+    assert content == [
+        {"type": "text", "text": "text result", "id": IsLangChainID},
+        {
+            "type": "image",
+            "base64": "base64data",
+            "mime_type": "image/png",
+            "id": IsLangChainID,
+        },
+        {
+            "type": "text",
+            "text": "hi",
+            "id": IsLangChainID,
+        },  # EmbeddedResource with text -> text block
+    ]
+    # No structuredContent in this result
+    assert artifact is None
 
 
 def test_convert_with_error():
@@ -100,7 +131,278 @@ def test_convert_with_error():
     assert str(exc_info.value) == "error message"
 
 
-@pytest.mark.asyncio
+def test_convert_with_structured_content():
+    """Test that structuredContent is returned as MCPToolArtifact."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="text result")],
+        isError=False,
+        structuredContent={"key": "value", "nested": {"data": 123}},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    assert artifact == MCPToolArtifact(
+        structured_content={"key": "value", "nested": {"data": 123}}
+    )
+
+
+def test_convert_image_content():
+    """Test ImageContent conversion to LangChain image block."""
+    result = CallToolResult(
+        content=[
+            ImageContent(type="image", mimeType="image/jpeg", data="jpeg_base64_data")
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    # Single non-text content returns as a list of content blocks
+    assert content == [
+        {
+            "type": "image",
+            "base64": "jpeg_base64_data",
+            "mime_type": "image/jpeg",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link():
+    """Test ResourceLink conversion to LangChain file block for non-image types."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="file:///path/to/document.pdf",
+                name="document.pdf",
+                mimeType="application/pdf",
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "file",
+            "url": "file:///path/to/document.pdf",
+            "mime_type": "application/pdf",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link_image():
+    """Test ResourceLink with image mime type converts to image block with URL."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="https://example.com/photo.png",
+                name="photo.png",
+                mimeType="image/png",
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "image",
+            "url": "https://example.com/photo.png",
+            "mime_type": "image/png",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link_image_jpeg():
+    """Test ResourceLink with JPEG image mime type converts to image block."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="file:///photos/vacation.jpg",
+                name="vacation.jpg",
+                mimeType="image/jpeg",
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "image",
+            "url": "file:///photos/vacation.jpg",
+            "mime_type": "image/jpeg",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link_text():
+    """Test ResourceLink with text mime type converts to file block (can't inline)."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="file:///docs/readme.txt",
+                name="readme.txt",
+                mimeType="text/plain",
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    # Text ResourceLinks become file blocks since we only have URL, not content
+    assert content == [
+        {
+            "type": "file",
+            "url": "file:///docs/readme.txt",
+            "mime_type": "text/plain",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link_no_mime_type():
+    """Test ResourceLink without mime type converts to file block."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="file:///data/unknown",
+                name="unknown",
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "file",
+            "url": "file:///data/unknown",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_embedded_resource_blob_image():
+    """Test EmbeddedResource with blob image converts to image block."""
+    result = CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="resource://image",
+                    blob="png_base64_data",
+                    mimeType="image/png",
+                ),
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "image",
+            "base64": "png_base64_data",
+            "mime_type": "image/png",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_embedded_resource_blob_file():
+    """Test EmbeddedResource with non-image blob converts to file block."""
+    result = CallToolResult(
+        content=[
+            EmbeddedResource(
+                type="resource",
+                resource=BlobResourceContents(
+                    uri="resource://data",
+                    blob="pdf_base64_data",
+                    mimeType="application/pdf",
+                ),
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "file",
+            "base64": "pdf_base64_data",
+            "mime_type": "application/pdf",
+            "id": IsLangChainID,
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_audio_content_raises():
+    """Test that AudioContent raises NotImplementedError."""
+    result = CallToolResult(
+        content=[AudioContent(type="audio", mimeType="audio/wav", data="audio_data")],
+        isError=False,
+    )
+
+    with pytest.raises(NotImplementedError) as exc_info:
+        _convert_call_tool_result(result)
+
+    assert "AudioContent conversion" in str(exc_info.value)
+    assert "audio/wav" in str(exc_info.value)
+
+
+def test_convert_mixed_content_with_structured_content():
+    """Test mixed content with structuredContent returns both."""
+    result = CallToolResult(
+        content=[
+            TextContent(type="text", text="Here's the analysis"),
+            ImageContent(type="image", mimeType="image/png", data="chart_data"),
+        ],
+        isError=False,
+        structuredContent={"analysis": {"score": 0.95, "confidence": "high"}},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {"type": "text", "text": "Here's the analysis", "id": IsLangChainID},
+        {
+            "type": "image",
+            "base64": "chart_data",
+            "mime_type": "image/png",
+            "id": IsLangChainID,
+        },
+    ]
+    assert artifact == MCPToolArtifact(
+        structured_content={"analysis": {"score": 0.95, "confidence": "high"}}
+    )
+
+
 async def test_convert_mcp_tool_to_langchain_tool():
     tool_input_schema = {
         "properties": {
@@ -139,16 +441,17 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
     )
 
     # Verify result
-    assert result == ToolMessage(
-        content="tool result", name="test_tool", tool_call_id="1"
-    )
+    assert result.name == "test_tool"
+    assert result.tool_call_id == "1"
+    assert result.content == [
+        {"type": "text", "text": "tool result", "id": IsLangChainID}
+    ]
 
 
-@pytest.mark.asyncio
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
@@ -176,7 +479,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
@@ -204,29 +507,32 @@ async def test_load_mcp_tools():
     result1 = await tools[0].ainvoke(
         {"args": {"param1": "test1", "param2": 1}, "id": "1", "type": "tool_call"},
     )
-    assert result1 == ToolMessage(
-        content="tool1 result with {'param1': 'test1', 'param2': 1}",
-        name="tool1",
-        tool_call_id="1",
-    )
+    assert result1.name == "tool1"
+    assert result1.tool_call_id == "1"
+    assert result1.content == [
+        {
+            "type": "text",
+            "text": "tool1 result with {'param1': 'test1', 'param2': 1}",
+            "id": IsLangChainID,
+        }
+    ]
 
     # Test calling the second tool
     result2 = await tools[1].ainvoke(
         {"args": {"param1": "test2", "param2": 2}, "id": "2", "type": "tool_call"},
     )
-    assert result2 == ToolMessage(
-        content="tool2 result with {'param1': 'test2', 'param2': 2}",
-        name="tool2",
-        tool_call_id="2",
-    )
+    assert result2.name == "tool2"
+    assert result2.tool_call_id == "2"
+    assert result2.content == [
+        {
+            "type": "text",
+            "text": "tool2 result with {'param1': 'test2', 'param2': 2}",
+            "id": IsLangChainID,
+        }
+    ]
 
 
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
-    """Test load mcp tools with annotations."""
-    from mcp.server import FastMCP
-    from mcp.types import ToolAnnotations
-
+def _create_annotations_server():
     server = FastMCP(port=8181)
 
     @server.tool(
@@ -238,12 +544,17 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         """Get current time"""
         return "5:20:00 PM EST"
 
-    with run_streamable_http(server):
+    return server
+
+
+async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
+    """Test load mcp tools with annotations."""
+    with run_streamable_http(_create_annotations_server, 8181):
         # Initialize client without initial connections
         client = MultiServerMCPClient(
             {
                 "time": {
-                    "url": "http://localhost:8181/mcp/",
+                    "url": "http://localhost:8181/mcp",
                     "transport": "streamable_http",
                 }
             },
@@ -350,19 +661,22 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
         to_fastmcp(add_with_injection)
 
 
-# Tests for httpx_client_factory functionality
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
-    """Test load mcp tools with custom httpx client factory."""
-    import httpx
-    from mcp.server import FastMCP
-
+def _create_status_server():
     server = FastMCP(port=8182)
 
     @server.tool()
     def get_status() -> str:
         """Get server status"""
         return "Server is running"
+
+    return server
+
+
+# Tests for httpx_client_factory functionality
+
+
+async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -> None:
+    """Test load mcp tools with custom httpx client factory."""
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -379,12 +693,12 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
-    with run_streamable_http(server):
+    with run_streamable_http(_create_status_server, 8182):
         # Initialize client with custom httpx_client_factory
         client = MultiServerMCPClient(
             {
                 "status": {
-                    "url": "http://localhost:8182/mcp/",
+                    "url": "http://localhost:8182/mcp",
                     "transport": "streamable_http",
                     "httpx_client_factory": custom_httpx_client_factory,
                 },
@@ -398,23 +712,26 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
         # Test that the tool works correctly
         result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
-        assert result.content == "Server is running"
+        assert result.content == [
+            {"type": "text", "text": "Server is running", "id": IsLangChainID}
+        ]
 
 
-@pytest.mark.asyncio
-async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
-    socket_enabled,
-) -> None:
-    """Test load mcp tools with custom httpx client factory using SSE transport."""
-    import httpx
-    from mcp.server import FastMCP
-
+def _create_info_server():
     server = FastMCP(port=8183)
 
     @server.tool()
     def get_info() -> str:
         """Get server info"""
         return "SSE Server Info"
+
+    return server
+
+
+async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
+    socket_enabled,
+) -> None:
+    """Test load mcp tools with custom httpx client factory using SSE transport."""
 
     # Custom httpx client factory
     def custom_httpx_client_factory(
@@ -431,7 +748,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             limits=httpx.Limits(max_keepalive_connections=3, max_connections=5),
         )
 
-    with run_streamable_http(server):
+    with run_streamable_http(_create_info_server, 8183):
         # Initialize client with custom httpx_client_factory for SSE
         client = MultiServerMCPClient(
             {
@@ -454,3 +771,204 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
             # Expected to fail since server doesn't have SSE endpoint,
             # but the important thing is that httpx_client_factory was passed correctly
             pass
+
+
+async def test_convert_mcp_tool_metadata_variants():
+    """Verify metadata merging rules in convert_mcp_tool_to_langchain_tool."""
+    tool_input_schema = {
+        "properties": {},
+        "required": [],
+        "title": "EmptySchema",
+        "type": "object",
+    }
+
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")], isError=False
+    )
+
+    mcp_tool_none = MCPTool(
+        name="t_none",
+        description="",
+        inputSchema=tool_input_schema,
+    )
+    lc_tool_none = convert_mcp_tool_to_langchain_tool(session, mcp_tool_none)
+    assert lc_tool_none.metadata is None
+
+    mcp_tool_ann = MCPTool(
+        name="t_ann",
+        description="",
+        inputSchema=tool_input_schema,
+        annotations=ToolAnnotations(
+            title="Title", readOnlyHint=True, idempotentHint=False
+        ),
+    )
+    lc_tool_ann = convert_mcp_tool_to_langchain_tool(session, mcp_tool_ann)
+    assert lc_tool_ann.metadata == {
+        "title": "Title",
+        "readOnlyHint": True,
+        "idempotentHint": False,
+        "destructiveHint": None,
+        "openWorldHint": None,
+    }
+
+    mcp_tool_meta = MCPTool(
+        name="t_meta",
+        description="",
+        inputSchema=tool_input_schema,
+        _meta={"source": "unit-test", "version": 1},
+    )
+    lc_tool_meta = convert_mcp_tool_to_langchain_tool(session, mcp_tool_meta)
+    assert lc_tool_meta.metadata == {"_meta": {"source": "unit-test", "version": 1}}
+
+    mcp_tool_both = MCPTool(
+        name="t_both",
+        description="",
+        inputSchema=tool_input_schema,
+        annotations=ToolAnnotations(title="Both"),
+        _meta={"flag": True},
+    )
+
+    lc_tool_both = convert_mcp_tool_to_langchain_tool(session, mcp_tool_both)
+    assert lc_tool_both.metadata == {
+        "title": "Both",
+        "readOnlyHint": None,
+        "idempotentHint": None,
+        "destructiveHint": None,
+        "openWorldHint": None,
+        "_meta": {"flag": True},
+    }
+
+
+def _create_increment_server():
+    server = FastMCP(port=8183)
+
+    @server.tool()
+    def increment(value: int) -> str:
+        """Increment a counter"""
+        return f"Incremented to {value + 1}"
+
+    return server
+
+
+try:
+    import langchain.agents  # noqa: F401
+
+    LANGCHAIN_INSTALLED = True
+except ImportError:
+    LANGCHAIN_INSTALLED = False
+
+
+class FixedGenericFakeChatModel(GenericFakeChatModel):
+    def bind_tools(
+        self,
+        tools: Sequence[
+            typing.Dict[str, Any] | type | Callable | BaseTool  # noqa: UP006
+        ],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        """Override bind-tools."""
+        return self
+
+
+@pytest.mark.skipif(not LANGCHAIN_INSTALLED, reason="langchain not installed")
+async def test_mcp_tools_with_agent_and_command_interceptor(socket_enabled) -> None:
+    """Test Command objects from interceptors work end-to-end with create_agent.
+
+    This test verifies that:
+    1. MCP tools can be used with create_agent
+    2. Interceptors can return Command objects to short-circuit execution
+    3. Commands can update custom agent state
+    """
+    from langchain.agents import AgentState, create_agent  # noqa: PLC0415
+    from langchain.tools import ToolRuntime  # noqa: PLC0415
+    from langgraph.checkpoint.memory import MemorySaver  # noqa: PLC0415
+    from langgraph.types import Command  # noqa: PLC0415
+
+    # Interceptor that returns Command to update state
+    async def counter_interceptor(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], typing.Awaitable[MCPToolCallResult]],
+    ) -> Command:
+        # Instead of calling the tool, return a Command that updates state
+        tool_runtime: ToolRuntime = request.runtime
+        assert tool_runtime.tool_call_id == "call_1"
+        return Command(
+            update={
+                "counter": 42,
+                "messages": [
+                    ToolMessage(
+                        content="Counter updated!",
+                        tool_call_id=tool_runtime.tool_call_id,
+                    ),
+                    AIMessage(content="hello"),
+                ],
+            },
+            goto="__end__",
+        )
+
+    with run_streamable_http(_create_increment_server, 8183):
+        # Initialize client and connect to server
+        client = MultiServerMCPClient(
+            {
+                "increment": {
+                    "url": "http://localhost:8183/mcp",
+                    "transport": "streamable_http",
+                }
+            },
+            tool_interceptors=[counter_interceptor],
+        )
+
+        # Get tools from the server
+        tools = await client.get_tools(server_name="increment")
+        assert len(tools) == 1
+        original_tool = tools[0]
+        assert original_tool.name == "increment"
+
+        # Custom state schema with counter field
+        class CustomAgentState(AgentState):
+            counter: typing.NotRequired[int]
+
+        model = FixedGenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "increment",
+                                "args": {"value": 1},
+                                "id": "call_1",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(
+                        content="The counter has been incremented.",
+                    ),
+                ]
+            )
+        )
+        # Create agent with custom state
+        agent = create_agent(
+            model,
+            tools,
+            state_schema=CustomAgentState,
+            checkpointer=MemorySaver(),
+        )
+
+        # Run agent
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content="Increment the counter")], "counter": 0},
+            {"configurable": {"thread_id": "test_1"}},
+        )
+
+        # Verify Command updated the state
+        assert result["counter"] == 42
+        # Verify the Command's message was added
+        assert any(
+            isinstance(msg, ToolMessage) and msg.content == "Counter updated!"
+            for msg in result["messages"]
+        )

@@ -4,22 +4,24 @@ build-backend = "pdm.backend"
 
 [project]
 name = "langchain-mcp-adapters"
-version = "0.1.9"
+version = "0.1.14"
 description = "Make Anthropic Model Context Protocol (MCP) tools compatible with LangChain and LangGraph agents."
 authors = [
     { name = "Vadym Barda", email = "19161700+vbarda@users.noreply.github.com" },
 ]
 license = "MIT"
-repository = "https://www.github.com/langchain-ai/langchain-mcp-adapters"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "langchain-core>=0.3.36,<0.4",
+    "langchain-core>=0.3.36,<2.0.0",
     "mcp>=1.9.2",
     "typing-extensions>=4.14.0",
 ]
 
 [dependency-groups]
+integration = [
+    "langchain>=1.0.8",
+]
 test = [
     "pytest>=8.0.0",
     "ruff>=0.9.4",
@@ -29,7 +31,11 @@ test = [
     "types-setuptools>=69.0.0",
     "websockets>=15.0.1",
     "pytest-timeout>=2.4.0",
+    "dirty-equals>=0.9.0",
 ]
+
+[project.urls]
+repository = "https://www.github.com/langchain-ai/langchain-mcp-adapters"
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -51,7 +57,12 @@ target-version = "py310"
 [tool.ruff.lint]
 select = [ "ALL",]
 ignore = [
-  "COM812", # conflict with formatter
+    "COM812", # conflict with formatter
+    "C901", # Too complex
+    "PLR0913", # Too many arguments in function definition
+    "PLR0912", # Too many branches
+    "PLR0915", # Too many statements
+    "ERA001", # Commented out code should be removed
 ]
 
 
