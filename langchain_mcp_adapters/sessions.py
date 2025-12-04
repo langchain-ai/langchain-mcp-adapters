@@ -378,7 +378,7 @@ async def create_session(
         msg = (
             "Configuration error: Missing 'transport' key in server configuration. "
             "Each server must include 'transport' with one of: "
-            "'stdio', 'sse', 'websocket', 'streamable_http'. "
+            "'stdio', 'sse', 'websocket', 'http'. "
             "Please refer to the langchain-mcp-adapters documentation for more details."
         )
         raise ValueError(msg)
@@ -426,6 +426,6 @@ async def create_session(
     else:
         msg = (
             f"Unsupported transport: {transport}. "
-            f"Must be one of: 'stdio', 'sse', 'websocket', 'streamable_http'"
+            f"Must be one of: 'stdio', 'sse', 'websocket', 'http'"
         )
         raise ValueError(msg)

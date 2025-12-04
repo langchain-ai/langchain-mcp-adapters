@@ -345,7 +345,12 @@ def convert_mcp_tool_to_langchain_tool(
             if modified_headers is not None and connection is not None:
                 # Create a new connection config with updated headers
                 updated_connection = dict(connection)
-                if connection["transport"] in ("sse", "streamable_http"):
+                if connection["transport"] in (
+                    "sse",
+                    "http",
+                    "streamable_http",
+                    "streamable-http",
+                ):
                     existing_headers = connection.get("headers", {})
                     updated_connection["headers"] = {
                         **existing_headers,
