@@ -103,7 +103,7 @@ async def get_weather(location: str) -> str:
     return "It's always sunny in New York"
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    mcp.run(transport="http")
 ```
 
 ```bash
@@ -127,7 +127,7 @@ client = MultiServerMCPClient(
         "weather": {
             # Make sure you start your weather server on port 8000
             "url": "http://localhost:8000/mcp",
-            "transport": "streamable_http",
+            "transport": "http",
         }
     }
 )
@@ -193,7 +193,7 @@ from langchain.agents import create_agent
 client = MultiServerMCPClient(
     {
         "math": {
-            "transport": "streamable_http",
+            "transport": "http",
             "url": "http://localhost:3000/mcp"
         },
     }
@@ -208,7 +208,7 @@ math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 When connecting to MCP servers, you can include custom headers (e.g., for authentication or tracing) using the `headers` field in the connection configuration. This is supported for the following transports:
 
 - `sse`
-- `streamable_http`
+- `http` (or `streamable_http`)
 
 ### Example: passing headers with `MultiServerMCPClient`
 
@@ -219,7 +219,7 @@ from langchain.agents import create_agent
 client = MultiServerMCPClient(
     {
         "weather": {
-            "transport": "streamable_http",
+            "transport": "http",
             "url": "http://localhost:8000/mcp",
             "headers": {
                 "Authorization": "Bearer YOUR_TOKEN",
@@ -233,7 +233,7 @@ agent = create_agent("openai:gpt-4.1", tools)
 response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
-> Only `sse` and `streamable_http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
+> Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
 ## Using with LangGraph StateGraph
 
@@ -256,7 +256,7 @@ client = MultiServerMCPClient(
         "weather": {
             # make sure you start your weather server on port 8000
             "url": "http://localhost:8000/mcp",
-            "transport": "streamable_http",
+            "transport": "http",
         }
     }
 )
@@ -299,7 +299,7 @@ async def make_graph():
             "weather": {
                 # make sure you start your weather server on port 8000
                 "url": "http://localhost:8000/mcp",
-                "transport": "streamable_http",
+                "transport": "http",
             },
             # ATTENTION: MCP's stdio transport was designed primarily to support applications running on a user's machine.
             # Before using stdio in a web server context, evaluate whether there's a more appropriate solution.
