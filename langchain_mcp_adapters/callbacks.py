@@ -7,19 +7,21 @@ from mcp.client.session import ElicitationFnT as MCPElicitationFnT
 from mcp.client.session import LoggingFnT as MCPLoggingFnT
 from mcp.shared.session import ProgressFnT as MCPProgressFnT
 from mcp.types import (
+    ElicitRequestParams as MCPElicitRequestParams,
+)
+from mcp.types import (
     ElicitResult,
 )
 from mcp.types import (
     LoggingMessageNotificationParams as MCPLoggingMessageNotificationParams,
 )
 
-from langchain_mcp_adapters.elicitation import ElicitationRequest
-
 # Type aliases to avoid direct MCP type dependencies
 LoggingFnT = MCPLoggingFnT
 ProgressFnT = MCPProgressFnT
 ElicitationFnT = MCPElicitationFnT
 LoggingMessageNotificationParams = MCPLoggingMessageNotificationParams
+ElicitRequestParams = MCPElicitRequestParams
 
 
 @dataclass
@@ -66,15 +68,14 @@ class ProgressCallback(Protocol):
 
 @runtime_checkable
 class ElicitationCallback(Protocol):
-    """Callback for handling elicitation requests from MCP servers.
+    """Light wrapper around the mcp.client.session.ElicitationFnT.
 
-    When an MCP server requests user input during tool execution, this callback
-    is invoked. The callback should return an ElicitResult with the user's response.
+    Injects callback context as the last argument.
     """
 
     async def __call__(
         self,
-        request: ElicitationRequest,
+        params: ElicitRequestParams,
         context: CallbackContext,
     ) -> ElicitResult:
         """Handle an elicitation request and return the user's response."""
@@ -125,15 +126,9 @@ class Callbacks:
 
             async def mcp_elicitation_callback(
                 ctx: Any,  # noqa: ANN401, ARG001
-                params: Any,  # noqa: ANN401
+                params: ElicitRequestParams,
             ) -> ElicitResult:
-                request = ElicitationRequest(
-                    message=params.message,
-                    requested_schema=params.requestedSchema or {},
-                    server_name=context.server_name,
-                    tool_name=context.tool_name or "unknown",
-                )
-                return await on_elicitation(request, context)
+                return await on_elicitation(params, context)
         else:
             mcp_elicitation_callback = None
 

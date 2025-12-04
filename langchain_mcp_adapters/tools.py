@@ -312,7 +312,7 @@ def _create_elicitation_callback_and_state() -> (
     if not LANGGRAPH_PRESENT:
         return None, None
 
-    from mcp.types import ElicitResult  # noqa: PLC0415
+    from mcp.types import ElicitRequestParams, ElicitResult  # noqa: PLC0415
 
     from langchain_mcp_adapters.elicitation import (  # noqa: PLC0415
         ElicitationRequest,
@@ -321,9 +321,17 @@ def _create_elicitation_callback_and_state() -> (
     state = _ElicitationState()
 
     async def elicitation_handler(
-        request: ElicitationRequest,
-        context: CallbackContext,  # noqa: ARG001
+        params: ElicitRequestParams,
+        context: CallbackContext,
     ) -> ElicitResult:
+        # Create an ElicitationRequest that bundles the params with context
+        # for the interrupt value
+        request = ElicitationRequest(
+            message=params.message,
+            requested_schema=params.requestedSchema,
+            server_name=context.server_name,
+            tool_name=context.tool_name or "unknown",
+        )
         # Store the request and signal that we have a pending elicitation
         state.pending_request = request
         state.request_event.set()
