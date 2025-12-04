@@ -402,7 +402,7 @@ async def create_session(
             raise ValueError(msg)
         async with _create_sse_session(**params) as session:
             yield session
-    elif transport == "streamable_http":
+    elif transport in {"streamable_http", "streamable-http", "http"}:
         if "url" not in params:
             msg = "'url' parameter is required for Streamable HTTP connection"
             raise ValueError(msg)
