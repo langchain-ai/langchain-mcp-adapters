@@ -1,10 +1,11 @@
 """Types for callbacks."""
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from mcp.client.session import ElicitationFnT as MCPElicitationFnT
 from mcp.client.session import LoggingFnT as MCPLoggingFnT
+from mcp.shared.context import RequestContext as MCPRequestContext
 from mcp.shared.session import ProgressFnT as MCPProgressFnT
 from mcp.types import (
     ElicitRequestParams as MCPElicitRequestParams,
@@ -125,7 +126,7 @@ class Callbacks:
         if (on_elicitation := self.on_elicitation) is not None:
 
             async def mcp_elicitation_callback(
-                ctx: Any,  # noqa: ANN401, ARG001
+                ctx: MCPRequestContext,  # noqa: ARG001
                 params: ElicitRequestParams,
             ) -> ElicitResult:
                 return await on_elicitation(params, context)
