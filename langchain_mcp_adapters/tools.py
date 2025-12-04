@@ -577,6 +577,7 @@ def convert_mcp_tool_to_langchain_tool(
                 # Tool completed without elicitation
                 # Cancel the request wait task
                 request_wait.cancel()
+
                 try:
                     await request_wait
                 except asyncio.CancelledError:

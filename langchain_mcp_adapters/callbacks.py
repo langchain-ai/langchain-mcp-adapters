@@ -11,7 +11,7 @@ from mcp.types import (
     ElicitRequestParams as MCPElicitRequestParams,
 )
 from mcp.types import (
-    ElicitResult,
+    ElicitResult as MCPElicitResult,
 )
 from mcp.types import (
     LoggingMessageNotificationParams as MCPLoggingMessageNotificationParams,
@@ -78,7 +78,7 @@ class ElicitationCallback(Protocol):
         self,
         params: ElicitRequestParams,
         context: CallbackContext,
-    ) -> ElicitResult:
+    ) -> MCPElicitResult:
         """Handle an elicitation request and return the user's response."""
         ...
 
@@ -128,7 +128,7 @@ class Callbacks:
             async def mcp_elicitation_callback(
                 ctx: MCPRequestContext,  # noqa: ARG001
                 params: ElicitRequestParams,
-            ) -> ElicitResult:
+            ) -> MCPElicitResult:
                 return await on_elicitation(params, context)
         else:
             mcp_elicitation_callback = None
