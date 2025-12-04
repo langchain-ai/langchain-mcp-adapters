@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict, get_args
 
@@ -49,11 +50,12 @@ from langchain_mcp_adapters.sessions import Connection, create_session
 
 try:
     # langgraph installed
-    from langgraph.types import Command
+    from langgraph.types import Command, interrupt
 
     LANGGRAPH_PRESENT = True
 except ImportError:
     LANGGRAPH_PRESENT = False
+    interrupt = None  # type: ignore[assignment]
 
 # Type alias for LangChain content blocks used in ToolMessage
 ToolMessageContentBlock = TextContentBlock | ImageContentBlock | FileContentBlock
@@ -269,6 +271,110 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     return all_tools
 
 
+async def _execute_tool_with_elicitation(
+    tool_session: ClientSession,
+    tool_name: str,
+    tool_args: dict[str, Any],
+    progress_callback: Any,  # noqa: ANN401
+    elicitation_bridge: Any | None,  # noqa: ANN401
+) -> MCPToolCallResult:
+    """Execute a tool with elicitation support.
+
+    This function handles the coordination between tool execution and
+    elicitation by polling for pending elicitation requests while waiting
+    for the tool call to complete.
+
+    The elicitation bridge receives requests from the MCP SDK's receive loop
+    (Task B). This function runs in the tool execution task (Task A) where
+    LangGraph's interrupt() has proper context.
+
+    Args:
+        tool_session: The MCP client session.
+        tool_name: Name of the tool to call.
+        tool_args: Arguments to pass to the tool.
+        progress_callback: Optional progress callback.
+        elicitation_bridge: Bridge for coordinating elicitation requests.
+
+    Returns:
+        The CallToolResult from the MCP server.
+    """
+    if elicitation_bridge is None:
+        # No elicitation support - just call the tool directly
+        return await tool_session.call_tool(
+            tool_name,
+            tool_args,
+            progress_callback=progress_callback,
+        )
+
+    # Import here to avoid circular imports and only when needed
+    from langchain_mcp_adapters.elicitation import ElicitationResponse
+
+    # Start the tool call in a task so we can monitor for elicitation
+    result_holder: list[MCPToolCallResult] = []
+    exception_holder: list[Exception] = []
+    done_event = asyncio.Event()
+
+    async def do_call() -> None:
+        try:
+            result = await tool_session.call_tool(
+                tool_name,
+                tool_args,
+                progress_callback=progress_callback,
+            )
+            result_holder.append(result)
+        except Exception as e:  # noqa: BLE001
+            exception_holder.append(e)
+        finally:
+            done_event.set()
+
+    # Start the tool call in a task
+    task = asyncio.create_task(do_call())
+
+    try:
+        # Poll for completion or elicitation
+        while not done_event.is_set():
+            # Check if there's a pending elicitation
+            if elicitation_bridge.has_pending_elicitation():
+                request = elicitation_bridge.get_pending_request()
+                if request is not None:
+                    # Call interrupt in THIS task (Task A) - LangGraph context is here!
+                    # The interrupt() function will pause graph execution and return
+                    # when the user resumes with Command(resume=response)
+                    response = interrupt(request)
+
+                    # Convert the response if it's a dict (from Command(resume=...))
+                    if isinstance(response, dict):
+                        response = ElicitationResponse(
+                            action=response.get("action", "cancel"),
+                            content=response.get("content"),
+                        )
+                    elif not isinstance(response, ElicitationResponse):
+                        # If response is not the expected type, treat as cancel
+                        response = ElicitationResponse.cancel()
+
+                    # Send response back to the bridge (which unblocks Task B)
+                    await elicitation_bridge.set_response(response)
+
+            # Small sleep to avoid busy-waiting (10ms)
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=0.01)
+            except asyncio.TimeoutError:
+                pass
+
+        # Tool call completed
+        if exception_holder:
+            raise exception_holder[0]
+        return result_holder[0]
+
+    except BaseException:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        raise
+
+
 def convert_mcp_tool_to_langchain_tool(
     session: ClientSession | None,
     tool: MCPTool,
@@ -281,6 +387,11 @@ def convert_mcp_tool_to_langchain_tool(
     """Convert an MCP tool to a LangChain tool.
 
     NOTE: this tool can be executed only in a context of an active MCP client session.
+
+    When LangGraph is installed, elicitation is automatically supported. If an MCP
+    server requests user input via elicitation during tool execution, a LangGraph
+    interrupt will be triggered. The graph execution will pause, allowing the user
+    to provide a response via `Command(resume=ElicitationResponse(...))`.
 
     Args:
         session: MCP client session
@@ -358,6 +469,17 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
+            # Create elicitation bridge if LangGraph is available
+            # This enables automatic elicitation support when running in a LangGraph context
+            elicitation_bridge = None
+            if LANGGRAPH_PRESENT:
+                from langchain_mcp_adapters.elicitation import ElicitationBridge
+
+                elicitation_bridge = ElicitationBridge(
+                    server_name=server_name or "unknown",
+                    tool_name=tool_name,
+                )
+
             captured_exception = None
 
             if session is None:
@@ -367,14 +489,18 @@ def convert_mcp_tool_to_langchain_tool(
                     raise ValueError(msg)
 
                 async with create_session(
-                    effective_connection, mcp_callbacks=mcp_callbacks
+                    effective_connection,
+                    mcp_callbacks=mcp_callbacks,
+                    elicitation_bridge=elicitation_bridge,
                 ) as tool_session:
                     await tool_session.initialize()
                     try:
-                        call_tool_result = await tool_session.call_tool(
+                        call_tool_result = await _execute_tool_with_elicitation(
+                            tool_session,
                             tool_name,
                             tool_args,
-                            progress_callback=mcp_callbacks.progress_callback,
+                            mcp_callbacks.progress_callback,
+                            elicitation_bridge,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -389,6 +515,10 @@ def convert_mcp_tool_to_langchain_tool(
                 if captured_exception is not None:
                     raise captured_exception
             else:
+                # For persistent sessions, elicitation is not supported
+                # because we can't inject the callback after session creation.
+                # The tool will work, but elicitation requests will fail with
+                # "Elicitation not supported" from the MCP SDK default handler.
                 call_tool_result = await session.call_tool(
                     tool_name,
                     tool_args,
@@ -434,6 +564,10 @@ async def load_mcp_tools(
     server_name: str | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
+
+    When LangGraph is installed, elicitation is automatically supported. If an MCP
+    server requests user input via elicitation during tool execution, a LangGraph
+    interrupt will be triggered.
 
     Args:
         session: The MCP client session. If `None`, connection must be provided.
