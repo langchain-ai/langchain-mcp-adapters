@@ -76,6 +76,7 @@ class ElicitationCallback(Protocol):
 
     async def __call__(
         self,
+        ctx: MCPRequestContext,
         params: ElicitRequestParams,
         context: CallbackContext,
     ) -> MCPElicitResult:
@@ -129,7 +130,7 @@ class Callbacks:
                 ctx: MCPRequestContext,  # noqa: ARG001
                 params: ElicitRequestParams,
             ) -> MCPElicitResult:
-                return await on_elicitation(params, context)
+                return await on_elicitation(ctx, params, context)
         else:
             mcp_elicitation_callback = None
 
