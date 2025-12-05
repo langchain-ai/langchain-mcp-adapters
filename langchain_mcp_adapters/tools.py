@@ -270,72 +270,67 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     return all_tools
 
 
-class _ElicitationRequested(Exception):
-    """Raised by the elicitation callback to signal that user input is needed.
-
-    This exception breaks out of the MCP tool execution so we can call
-    LangGraph's interrupt() at the appropriate level.
-    """
-
-    def __init__(self, request: Any) -> None:
-        self.request = request
-        super().__init__("Elicitation requested")
-
-
 class _ElicitationCoordinator:
     """Coordinates elicitation between MCP callbacks and LangGraph interrupts.
 
-    This class provides a clean two-phase approach to handling elicitation:
+    The fundamental constraint is that MCP elicitation callbacks must return
+    a valid response - they cannot raise exceptions. This means we need async
+    coordination between:
+    1. The callback (running inside MCP SDK) - must block until response ready
+    2. The tool execution (where LangGraph context exists) - must call interrupt()
 
-    Phase 1 (no response available):
-        - MCP callback raises _ElicitationRequested with the request
-        - Tool execution catches this and calls interrupt()
-        - Graph pauses, user provides response
-
-    Phase 2 (response available after resume):
-        - Coordinator is created with the response pre-loaded
-        - MCP callback returns the response immediately
-        - Tool execution completes normally
+    Flow:
+    1. Tool execution starts, callback is registered
+    2. MCP server calls elicitation callback
+    3. Callback stores request and signals request_ready
+    4. Tool execution sees request, calls interrupt() - graph pauses
+    5. User resumes with response
+    6. Tool execution stores response and signals response_ready
+    7. Callback wakes up and returns the response to MCP SDK
+    8. Tool execution completes
     """
 
-    def __init__(self, response: Any | None = None) -> None:
-        """Initialize the coordinator.
+    def __init__(self) -> None:
+        """Initialize the coordinator with fresh events."""
+        import asyncio  # noqa: PLC0415
 
-        Args:
-            response: Pre-loaded response for Phase 2, or None for Phase 1.
-        """
-        self._response = response
+        self.pending_request: Any = None
+        self.response: Any = None
+        self.request_ready = asyncio.Event()
+        self.response_ready = asyncio.Event()
 
-    def create_callback(self, context: CallbackContext) -> Callbacks:
+    def create_callback(self) -> Callbacks:
         """Create an elicitation callback for MCP.
 
         Returns:
             Callbacks instance with the elicitation handler configured.
         """
+        from mcp.shared.context import RequestContext as MCPRequestContext  # noqa: PLC0415
         from mcp.types import ElicitRequestParams, ElicitResult  # noqa: PLC0415
 
         from langchain_mcp_adapters.elicitation import (  # noqa: PLC0415
             ElicitationRequest,
         )
 
-        response = self._response
-
         async def elicitation_handler(
+            mcp_ctx: MCPRequestContext,  # noqa: ARG001
             params: ElicitRequestParams,
-            ctx: CallbackContext,
+            callback_context: CallbackContext,
         ) -> ElicitResult:
-            if response is not None:
-                # Phase 2: We have a response, return it immediately
-                return response
-
-            # Phase 1: No response yet, raise exception to trigger interrupt
-            request = ElicitationRequest(
+            # Store the request and signal that we need user input
+            self.pending_request = ElicitationRequest(
                 message=params.message,
                 requested_schema=params.requestedSchema,
-                server_name=ctx.server_name,
-                tool_name=ctx.tool_name or "unknown",
+                server_name=callback_context.server_name,
+                tool_name=callback_context.tool_name or "unknown",
             )
-            raise _ElicitationRequested(request)
+            self.request_ready.set()
+
+            # Wait for the response (tool execution will provide it after interrupt)
+            await self.response_ready.wait()
+
+            # Return the response to MCP SDK
+            return self.response
 
         return Callbacks(on_elicitation=elicitation_handler)
 
@@ -396,7 +391,7 @@ def convert_mcp_tool_to_langchain_tool(
             ElicitationResponse,
         )
 
-        context = CallbackContext(server_name=server_name, tool_name=tool.name)
+        context = CallbackContext(server_name=server_name or "unknown", tool_name=tool.name)
 
         # Determine if we should handle elicitation (LangGraph present, no user callback)
         use_elicitation = (
@@ -437,6 +432,7 @@ def convert_mcp_tool_to_langchain_tool(
                     msg = "Either session or connection must be provided"
                     raise ValueError(msg)
 
+                call_tool_result: MCPToolCallResult | None = None
                 async with create_session(
                     effective_connection,
                     mcp_callbacks=mcp_callbacks,
@@ -454,15 +450,17 @@ def convert_mcp_tool_to_langchain_tool(
                 # Re-raise outside context manager (MCP SDK workaround)
                 if captured_exception is not None:
                     raise captured_exception
+
+                # This should never happen if no exception was raised
+                assert call_tool_result is not None
+                return call_tool_result
             else:
                 # Persistent sessions don't support elicitation callbacks
-                call_tool_result = await session.call_tool(
+                return await session.call_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
                 )
-
-            return call_tool_result
 
         request = MCPToolCallRequest(
             name=tool.name,
@@ -473,9 +471,10 @@ def convert_mcp_tool_to_langchain_tool(
         )
 
         if use_elicitation:
-            # Phase 1: Try to execute with elicitation callback that raises on request
-            coordinator = _ElicitationCoordinator(response=None)
-            elicitation_callbacks = coordinator.create_callback(context)
+            import asyncio  # noqa: PLC0415
+
+            coordinator = _ElicitationCoordinator()
+            elicitation_callbacks = coordinator.create_callback()
 
             # Merge with user callbacks (preserving logging/progress)
             if callbacks is not None:
@@ -494,12 +493,40 @@ def convert_mcp_tool_to_langchain_tool(
 
             handler = _build_interceptor_chain(execute_tool, tool_interceptors)
 
-            try:
-                call_tool_result = await handler(request)
-            except _ElicitationRequested as e:
-                # Elicitation was requested - call interrupt to pause graph
-                response = interrupt(e.request)
+            # Run tool execution, watching for elicitation requests
+            tool_task = asyncio.create_task(handler(request))
+            request_task = asyncio.create_task(coordinator.request_ready.wait())
 
+            done, pending = await asyncio.wait(
+                [tool_task, request_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if request_task in done and tool_task in pending:
+                # Elicitation was requested - call interrupt to pause graph
+                # The callback is now waiting on response_ready
+                #
+                # NOTE: interrupt() will either:
+                # 1. Raise GraphInterrupt (first execution) - graph pauses
+                # 2. Return the resume value (re-execution after resume)
+                #
+                # On first execution, we need to cancel the pending tool_task
+                # before interrupt raises, otherwise it becomes orphaned.
+                try:
+                    response = interrupt(coordinator.pending_request)
+                except BaseException:
+                    # interrupt() raised (first execution) - cancel orphaned task
+                    tool_task.cancel()
+                    # Signal the callback to unblock (it will be cancelled anyway)
+                    coordinator.response = ElicitResult(action="cancel")
+                    coordinator.response_ready.set()
+                    try:
+                        await tool_task
+                    except asyncio.CancelledError:
+                        pass
+                    raise
+
+                # If we get here, interrupt() returned the resume value (re-execution)
                 # Convert response to ElicitResult
                 if isinstance(response, ElicitationResponse):
                     elicit_result = response.to_result()
@@ -513,30 +540,20 @@ def convert_mcp_tool_to_langchain_tool(
                 else:
                     elicit_result = ElicitResult(action="cancel")
 
-                # Phase 2: Re-execute with the response pre-loaded
-                coordinator_with_response = _ElicitationCoordinator(
-                    response=elicit_result
-                )
-                elicitation_callbacks_2 = coordinator_with_response.create_callback(
-                    context
-                )
+                # Provide response to the waiting callback
+                coordinator.response = elicit_result
+                coordinator.response_ready.set()
 
-                if callbacks is not None:
-                    effective_callbacks_2 = Callbacks(
-                        on_logging_message=callbacks.on_logging_message,
-                        on_progress=callbacks.on_progress,
-                        on_elicitation=elicitation_callbacks_2.on_elicitation,
-                    )
-                else:
-                    effective_callbacks_2 = elicitation_callbacks_2
-
-                mcp_callbacks_2 = effective_callbacks_2.to_mcp_format(context=context)
-
-                async def execute_tool_2(req: MCPToolCallRequest) -> MCPToolCallResult:
-                    return await execute_with_callbacks(mcp_callbacks_2, req)
-
-                handler_2 = _build_interceptor_chain(execute_tool_2, tool_interceptors)
-                call_tool_result = await handler_2(request)
+                # Now wait for tool to complete
+                call_tool_result = await tool_task
+            else:
+                # Tool completed without elicitation
+                request_task.cancel()
+                try:
+                    await request_task
+                except asyncio.CancelledError:
+                    pass
+                call_tool_result = tool_task.result()
         else:
             # No elicitation handling - just execute with user callbacks
             mcp_callbacks = (
