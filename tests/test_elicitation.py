@@ -3,7 +3,6 @@
 import os
 from pathlib import Path
 
-import pytest
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.shared.context import RequestContext
 from mcp.types import ElicitRequestParams, ElicitResult
@@ -22,9 +21,15 @@ class UserDetails(BaseModel):
 def _create_elicitation_server():
     server = FastMCP(port=8184)
 
+    # Track how many times code before elicit runs (should be exactly once)
+    server._pre_elicit_call_count = 0
+
     @server.tool()
     async def create_profile(name: str, ctx: Context) -> str:
         """Create a user profile with elicitation."""
+        # This code should only run once, not be re-executed after elicitation
+        server._pre_elicit_call_count += 1
+
         result = await ctx.elicit(
             message=f"Please provide details for {name}'s profile:",
             schema=UserDetails,
@@ -32,11 +37,12 @@ def _create_elicitation_server():
         if result.action == "accept" and result.data:
             return (
                 f"Created profile for {name}: "
-                f"email={result.data.email}, age={result.data.age}"
+                f"email={result.data.email}, age={result.data.age}, "
+                f"pre_elicit_calls={server._pre_elicit_call_count}"
             )
         if result.action == "decline":
-            return f"User declined. Created minimal profile for {name}."
-        return "Profile creation cancelled."
+            return f"User declined. Created minimal profile for {name}. pre_elicit_calls={server._pre_elicit_call_count}"
+        return f"Profile creation cancelled. pre_elicit_calls={server._pre_elicit_call_count}"
 
     return server
 
@@ -63,7 +69,7 @@ async def test_elicitation_callback_accept(socket_enabled) -> None:
             {
                 "test": {
                     "url": "http://localhost:8184/mcp",
-                    "transport": "streamable_http",
+                    "transport": "http",
                 }
             },
             callbacks=Callbacks(on_elicitation=on_elicitation),
@@ -89,6 +95,9 @@ async def test_elicitation_callback_accept(socket_enabled) -> None:
         assert "alice@example.com" in str(result.content)
         assert "28" in str(result.content)
 
+        # Verify code before ctx.elicit only ran once (not re-executed after elicitation)
+        assert "pre_elicit_calls=1" in str(result.content)
+
 
 async def test_elicitation_callback_decline(socket_enabled) -> None:
     """Test elicitation callback with user declining."""
@@ -105,7 +114,7 @@ async def test_elicitation_callback_decline(socket_enabled) -> None:
             {
                 "test": {
                     "url": "http://localhost:8184/mcp",
-                    "transport": "streamable_http",
+                    "transport": "http",
                 }
             },
             callbacks=Callbacks(on_elicitation=on_elicitation),
@@ -117,6 +126,8 @@ async def test_elicitation_callback_decline(socket_enabled) -> None:
         )
 
         assert "declined" in str(result.content).lower()
+        # Verify code before ctx.elicit only ran once
+        assert "pre_elicit_calls=1" in str(result.content)
 
 
 async def test_elicitation_callback_cancel(socket_enabled) -> None:
@@ -134,7 +145,7 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
             {
                 "test": {
                     "url": "http://localhost:8184/mcp",
-                    "transport": "streamable_http",
+                    "transport": "http",
                 }
             },
             callbacks=Callbacks(on_elicitation=on_elicitation),
@@ -146,6 +157,8 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
         )
 
         assert "cancelled" in str(result.content).lower()
+        # Verify code before ctx.elicit only ran once
+        assert "pre_elicit_calls=1" in str(result.content)
 
 
 # --- STDIO Transport Tests ---
@@ -202,6 +215,9 @@ async def test_elicitation_callback_accept_stdio() -> None:
     assert "stdio@example.com" in str(result.content)
     assert "35" in str(result.content)
 
+    # Verify code before ctx.elicit only ran once (not re-executed after elicitation)
+    assert "pre_elicit_calls=1" in str(result.content)
+
 
 async def test_elicitation_callback_decline_stdio() -> None:
     """Test elicitation callback with user declining via stdio transport."""
@@ -232,6 +248,8 @@ async def test_elicitation_callback_decline_stdio() -> None:
     )
 
     assert "declined" in str(result.content).lower()
+    # Verify code before ctx.elicit only ran once
+    assert "pre_elicit_calls=1" in str(result.content)
 
 
 async def test_elicitation_callback_cancel_stdio() -> None:
@@ -263,122 +281,5 @@ async def test_elicitation_callback_cancel_stdio() -> None:
     )
 
     assert "cancelled" in str(result.content).lower()
-
-
-# --- HTTP Transport Tests (alias for streamable_http) ---
-
-
-@pytest.mark.parametrize("transport", ["http", "streamable-http"])
-async def test_elicitation_callback_accept_http_variants(
-    socket_enabled, transport
-) -> None:
-    """Test elicitation callback with user accepting via http transport variants."""
-    elicitation_requests: list[
-        tuple[RequestContext, ElicitRequestParams, CallbackContext]
-    ] = []
-
-    async def on_elicitation(
-        mcp_context: RequestContext,
-        params: ElicitRequestParams,
-        context: CallbackContext,
-    ) -> ElicitResult:
-        elicitation_requests.append((mcp_context, params, context))
-        return ElicitResult(
-            action="accept",
-            content={"email": "http@example.com", "age": 42},
-        )
-
-    with run_streamable_http(_create_elicitation_server, 8184):
-        client = MultiServerMCPClient(
-            {
-                "test": {
-                    "url": "http://localhost:8184/mcp",
-                    "transport": transport,
-                }
-            },
-            callbacks=Callbacks(on_elicitation=on_elicitation),
-        )
-
-        tools = await client.get_tools()
-        assert len(tools) == 1
-        assert tools[0].name == "create_profile"
-
-        # Call the tool
-        result = await tools[0].ainvoke(
-            {"args": {"name": "HttpUser"}, "id": "call_http_1", "type": "tool_call"}
-        )
-
-        # Verify elicitation callback was called
-        assert len(elicitation_requests) == 1
-        _, params, context = elicitation_requests[0]
-        assert "HttpUser" in params.message
-        assert context.server_name == "test"
-        assert context.tool_name == "create_profile"
-
-        # Verify result
-        assert "http@example.com" in str(result.content)
-        assert "42" in str(result.content)
-
-
-@pytest.mark.parametrize("transport", ["http", "streamable-http"])
-async def test_elicitation_callback_decline_http_variants(
-    socket_enabled, transport
-) -> None:
-    """Test elicitation callback with user declining via http transport variants."""
-
-    async def on_elicitation(
-        mcp_context: RequestContext,
-        params: ElicitRequestParams,
-        context: CallbackContext,
-    ) -> ElicitResult:
-        return ElicitResult(action="decline")
-
-    with run_streamable_http(_create_elicitation_server, 8184):
-        client = MultiServerMCPClient(
-            {
-                "test": {
-                    "url": "http://localhost:8184/mcp",
-                    "transport": transport,
-                }
-            },
-            callbacks=Callbacks(on_elicitation=on_elicitation),
-        )
-
-        tools = await client.get_tools()
-        result = await tools[0].ainvoke(
-            {"args": {"name": "HttpDecline"}, "id": "call_http_2", "type": "tool_call"}
-        )
-
-        assert "declined" in str(result.content).lower()
-
-
-@pytest.mark.parametrize("transport", ["http", "streamable-http"])
-async def test_elicitation_callback_cancel_http_variants(
-    socket_enabled, transport
-) -> None:
-    """Test elicitation callback with user cancelling via http transport variants."""
-
-    async def on_elicitation(
-        mcp_context: RequestContext,
-        params: ElicitRequestParams,
-        context: CallbackContext,
-    ) -> ElicitResult:
-        return ElicitResult(action="cancel")
-
-    with run_streamable_http(_create_elicitation_server, 8184):
-        client = MultiServerMCPClient(
-            {
-                "test": {
-                    "url": "http://localhost:8184/mcp",
-                    "transport": transport,
-                }
-            },
-            callbacks=Callbacks(on_elicitation=on_elicitation),
-        )
-
-        tools = await client.get_tools()
-        result = await tools[0].ainvoke(
-            {"args": {"name": "HttpCancel"}, "id": "call_http_3", "type": "tool_call"}
-        )
-
-        assert "cancelled" in str(result.content).lower()
+    # Verify code before ctx.elicit only ran once
+    assert "pre_elicit_calls=1" in str(result.content)
