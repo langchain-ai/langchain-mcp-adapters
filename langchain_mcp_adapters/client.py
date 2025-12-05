@@ -46,6 +46,11 @@ class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers.
 
     Loads LangChain-compatible tools, prompts and resources from MCP servers.
+
+    When LangGraph is installed, elicitation is automatically supported. If an MCP
+    server requests user input via elicitation during tool execution, a LangGraph
+    interrupt will be triggered. The graph execution will pause, allowing the user
+    to provide a response via `Command(resume=ElicitationResponse(...))`.
     """
 
     def __init__(
