@@ -30,18 +30,22 @@ def _create_elicitation_server():
             schema=UserDetails,
         )
         if result.action == "accept" and result.data:
-            return f"Created profile for {name}: email={result.data.email}, age={result.data.age}"
-        elif result.action == "decline":
+            return (
+                f"Created profile for {name}: "
+                f"email={result.data.email}, age={result.data.age}"
+            )
+        if result.action == "decline":
             return f"User declined. Created minimal profile for {name}."
-        else:
-            return "Profile creation cancelled."
+        return "Profile creation cancelled."
 
     return server
 
 
 async def test_elicitation_callback_accept(socket_enabled) -> None:
     """Test elicitation callback with user accepting and providing data."""
-    elicitation_requests: list[tuple[RequestContext, ElicitRequestParams, CallbackContext]] = []
+    elicitation_requests: list[
+        tuple[RequestContext, ElicitRequestParams, CallbackContext]
+    ] = []
 
     async def on_elicitation(
         mcp_context: RequestContext,
@@ -150,9 +154,7 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
 async def test_elicitation_callback_accept_stdio() -> None:
     """Test elicitation callback with user accepting via stdio transport."""
     current_dir = Path(__file__).parent
-    elicitation_server_path = os.path.join(
-        current_dir, "servers/elicitation_server.py"
-    )
+    elicitation_server_path = os.path.join(current_dir, "servers/elicitation_server.py")
 
     elicitation_requests: list[
         tuple[RequestContext, ElicitRequestParams, CallbackContext]
@@ -204,9 +206,7 @@ async def test_elicitation_callback_accept_stdio() -> None:
 async def test_elicitation_callback_decline_stdio() -> None:
     """Test elicitation callback with user declining via stdio transport."""
     current_dir = Path(__file__).parent
-    elicitation_server_path = os.path.join(
-        current_dir, "servers/elicitation_server.py"
-    )
+    elicitation_server_path = os.path.join(current_dir, "servers/elicitation_server.py")
 
     async def on_elicitation(
         mcp_context: RequestContext,
@@ -237,9 +237,7 @@ async def test_elicitation_callback_decline_stdio() -> None:
 async def test_elicitation_callback_cancel_stdio() -> None:
     """Test elicitation callback with user cancelling via stdio transport."""
     current_dir = Path(__file__).parent
-    elicitation_server_path = os.path.join(
-        current_dir, "servers/elicitation_server.py"
-    )
+    elicitation_server_path = os.path.join(current_dir, "servers/elicitation_server.py")
 
     async def on_elicitation(
         mcp_context: RequestContext,

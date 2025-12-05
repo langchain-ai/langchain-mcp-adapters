@@ -1,8 +1,7 @@
 """Simple MCP server with elicitation support for testing."""
 
-from pydantic import BaseModel
-
 from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel
 
 mcp = FastMCP("Elicitation Test Server")
 
@@ -21,11 +20,13 @@ async def create_profile(name: str, ctx: Context) -> str:
     )
 
     if result.action == "accept" and result.data:
-        return f"Created profile for {name}: email={result.data.email}, age={result.data.age}"
-    elif result.action == "decline":
+        return (
+            f"Created profile for {name}: "
+            f"email={result.data.email}, age={result.data.age}"
+        )
+    if result.action == "decline":
         return f"User declined. Created minimal profile for {name}."
-    else:
-        return "Profile creation cancelled."
+    return "Profile creation cancelled."
 
 
 if __name__ == "__main__":
