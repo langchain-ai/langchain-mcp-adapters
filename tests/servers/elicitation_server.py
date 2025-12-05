@@ -1,0 +1,32 @@
+"""Simple MCP server with elicitation support for testing."""
+
+from pydantic import BaseModel
+
+from mcp.server.fastmcp import Context, FastMCP
+
+mcp = FastMCP("Elicitation Test Server")
+
+
+class UserDetails(BaseModel):
+    email: str
+    age: int
+
+
+@mcp.tool()
+async def create_profile(name: str, ctx: Context) -> str:
+    """Create a user profile. Asks for additional details via elicitation."""
+    result = await ctx.elicit(
+        message=f"Please provide details for {name}'s profile:",
+        schema=UserDetails,
+    )
+
+    if result.action == "accept" and result.data:
+        return f"Created profile for {name}: email={result.data.email}, age={result.data.age}"
+    elif result.action == "decline":
+        return f"User declined. Created minimal profile for {name}."
+    else:
+        return "Profile creation cancelled."
+
+
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http")
