@@ -29,4 +29,7 @@ async def create_profile(name: str, ctx: Context) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    import sys
+
+    transport = sys.argv[1] if len(sys.argv) > 1 else "streamable-http"
+    mcp.run(transport=transport)
