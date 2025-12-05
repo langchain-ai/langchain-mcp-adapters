@@ -388,12 +388,13 @@ async def create_session(
 
     if mcp_callbacks is not None:
         params["session_kwargs"] = params.get("session_kwargs", {})
-        # right now the only callback supported on the ClientSession
-        # is the logging callback, but long term we'll also want to
-        # support sampling, elicitation, list roots, etc.
         if mcp_callbacks.logging_callback is not None:
             params["session_kwargs"]["logging_callback"] = (
                 mcp_callbacks.logging_callback
+            )
+        if mcp_callbacks.elicitation_callback is not None:
+            params["session_kwargs"]["elicitation_callback"] = (
+                mcp_callbacks.elicitation_callback
             )
 
     if transport == "sse":
