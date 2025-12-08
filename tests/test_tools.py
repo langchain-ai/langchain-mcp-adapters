@@ -1112,3 +1112,78 @@ async def test_multi_server_client_with_tool_name_prefix(socket_enabled) -> None
         tools_with_prefix = await client_with_prefix.get_tools()
         assert len(tools_with_prefix) == 1
         assert tools_with_prefix[0].name == "weather_search"
+
+
+@pytest.mark.skipif(not LANGCHAIN_INSTALLED, reason="langchain not installed")
+async def test_prefixed_tool_invokes_correct_server_tool(socket_enabled) -> None:
+    """Test that prefixed tools correctly call the original tool name on the server.
+
+    When tool_name_prefix=True, the LangChain tool is named "server_toolname"
+    (e.g., "weather_search"). When an LLM calls this prefixed tool name, it should
+    correctly map back to the original tool name "search" on the MCP server.
+    """
+    from langchain.agents import AgentState, create_agent  # noqa: PLC0415
+    from langgraph.checkpoint.memory import MemorySaver  # noqa: PLC0415
+
+    with run_streamable_http(_create_search_server, 8184):
+        client = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8184/mcp",
+                    "transport": "streamable_http",
+                }
+            },
+            tool_name_prefix=True,
+        )
+        tools = await client.get_tools()
+        assert len(tools) == 1
+        tool = tools[0]
+
+        # The LangChain tool should have the prefixed name
+        assert tool.name == "weather_search"
+
+        # Simulate an LLM calling the prefixed tool name "weather_search"
+        # This is what happens in practice - the LLM sees the tool as "weather_search"
+        # and emits a tool call with that name
+        model = FixedGenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "weather_search",  # LLM calls the prefixed name
+                                "args": {"query": "sunny days"},
+                                "id": "call_1",
+                                "type": "tool_call",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="Here are the search results."),
+                ]
+            )
+        )
+
+        agent = create_agent(
+            model,
+            tools,
+            state_schema=AgentState,
+            checkpointer=MemorySaver(),
+        )
+
+        # Run the agent - this should successfully call the "search" tool on the server
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content="Search for sunny days")]},
+            {"configurable": {"thread_id": "test_prefix"}},
+        )
+
+        # Verify the tool was called and returned results
+        # If the mapping didn't work, we'd get an error because "weather_search"
+        # doesn't exist on the server
+        tool_messages = [
+            msg for msg in result["messages"] if isinstance(msg, ToolMessage)
+        ]
+        assert len(tool_messages) == 1
+        assert tool_messages[0].content == [
+            {"type": "text", "text": "Results for: sunny days", "id": IsLangChainID}
+        ]

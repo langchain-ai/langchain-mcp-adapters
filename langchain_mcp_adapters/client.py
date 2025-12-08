@@ -64,7 +64,7 @@ class MultiServerMCPClient:
             callbacks: Optional callbacks for handling notifications and events.
             tool_interceptors: Optional list of tool call interceptors for modifying
                 requests and responses.
-            tool_name_prefix: If `True`, tool names will be prefixed with the server name
+            tool_name_prefix: If `True`, tool names are prefixed with the server name
                 using an underscore separator (e.g., `"weather_search"` instead of
                 `"search"`). This helps avoid conflicts when multiple servers have tools
                 with the same name. Defaults to `False`.

@@ -292,7 +292,7 @@ def convert_mcp_tool_to_langchain_tool(
         tool_interceptors: Optional list of interceptors for tool call processing
         server_name: Name of the server this tool belongs to
         tool_name_prefix: If `True` and `server_name` is provided, the tool name will be
-            prefixed with the server name (e.g., `"weather_search"` instead of `"search"`)
+            prefixed w/ server name (e.g., `"weather_search"` instead of `"search"`)
 
     Returns:
         a LangChain tool
@@ -451,7 +451,7 @@ async def load_mcp_tools(
         tool_interceptors: Optional list of interceptors for tool call processing.
         server_name: Name of the server these tools belong to.
         tool_name_prefix: If `True` and `server_name` is provided, tool names will be
-            prefixed with the server name (e.g., `"weather_search"` instead of `"search"`).
+            prefixed w/ server name (e.g., `"weather_search"` instead of `"search"`).
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
