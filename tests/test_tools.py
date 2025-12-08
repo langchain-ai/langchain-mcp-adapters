@@ -992,3 +992,123 @@ async def test_mcp_tools_with_agent_and_command_interceptor(socket_enabled) -> N
             isinstance(msg, ToolMessage) and msg.content == "Counter updated!"
             for msg in result["messages"]
         )
+
+
+# Tests for tool_name_prefix functionality
+
+
+async def test_convert_mcp_tool_with_prefix():
+    """Test that tool names are prefixed when tool_name_prefix is True."""
+    tool_input_schema = {
+        "properties": {"query": {"title": "Query", "type": "string"}},
+        "required": ["query"],
+        "title": "SearchSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="search",
+        description="Search for items",
+        inputSchema=tool_input_schema,
+    )
+
+    # Without prefix
+    lc_tool_no_prefix = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, server_name="weather"
+    )
+    assert lc_tool_no_prefix.name == "search"
+
+    # With prefix enabled but no server_name
+    lc_tool_prefix_no_server = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, tool_name_prefix=True
+    )
+    assert lc_tool_prefix_no_server.name == "search"
+
+    # With prefix enabled and server_name
+    lc_tool_with_prefix = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, server_name="weather", tool_name_prefix=True
+    )
+    assert lc_tool_with_prefix.name == "weather_search"
+
+
+async def test_load_mcp_tools_with_prefix():
+    """Test that load_mcp_tools correctly prefixes tool names."""
+    tool_input_schema = {
+        "properties": {"query": {"title": "Query", "type": "string"}},
+        "required": ["query"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    mcp_tools = [
+        MCPTool(
+            name="search",
+            description="Search tool",
+            inputSchema=tool_input_schema,
+        ),
+        MCPTool(
+            name="lookup",
+            description="Lookup tool",
+            inputSchema=tool_input_schema,
+        ),
+    ]
+    session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
+
+    # Without prefix
+    tools_no_prefix = await load_mcp_tools(session, server_name="weather")
+    assert tools_no_prefix[0].name == "search"
+    assert tools_no_prefix[1].name == "lookup"
+
+    # With prefix
+    tools_with_prefix = await load_mcp_tools(
+        session, server_name="weather", tool_name_prefix=True
+    )
+    assert tools_with_prefix[0].name == "weather_search"
+    assert tools_with_prefix[1].name == "weather_lookup"
+
+
+def _create_search_server():
+    server = FastMCP(port=8184)
+
+    @server.tool()
+    def search(query: str) -> str:
+        """Search for items"""
+        return f"Results for: {query}"
+
+    return server
+
+
+async def test_multi_server_client_with_tool_name_prefix(socket_enabled) -> None:
+    """Test MultiServerMCPClient with tool_name_prefix option."""
+    with run_streamable_http(_create_search_server, 8184):
+        # Without prefix (default)
+        client_no_prefix = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8184/mcp",
+                    "transport": "streamable_http",
+                }
+            },
+        )
+        tools_no_prefix = await client_no_prefix.get_tools()
+        assert len(tools_no_prefix) == 1
+        assert tools_no_prefix[0].name == "search"
+
+        # With prefix
+        client_with_prefix = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8184/mcp",
+                    "transport": "streamable_http",
+                }
+            },
+            tool_name_prefix=True,
+        )
+        tools_with_prefix = await client_with_prefix.get_tools()
+        assert len(tools_with_prefix) == 1
+        assert tools_with_prefix[0].name == "weather_search"
