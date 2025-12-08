@@ -1127,8 +1127,8 @@ async def test_parallel_tool_invocation_across_multiple_servers(socket_enabled) 
         ]
 
 
-async def test_parallel_direct_tool_invocation_across_servers(socket_enabled) -> None:
-    """Test direct parallel invocation of tools from multiple servers.
+async def test_get_tools_with_name_conflict(socket_enabled) -> None:
+    """Test fetching tools with name conflict using tool_name_prefix.
 
     This test verifies that:
     1. Without tool_name_prefix, both servers would have conflicting "search" tool names
