@@ -1,12 +1,8 @@
 import contextlib
-import inspect
 import multiprocessing
 import socket
-import tempfile
-import textwrap
 import time
 from collections.abc import Generator
-from pathlib import Path
 
 import uvicorn
 from dirty_equals import IsStr
@@ -102,54 +98,3 @@ def run_streamable_http(
             raise RuntimeError(
                 "Server process is still alive after attempting to terminate it"
             )
-
-
-def _run_stdio_server(server_factory) -> None:
-    """Run a FastMCP server with stdio transport (used in subprocess)."""
-    server = server_factory()
-    server.run(transport="stdio")
-
-
-@contextlib.contextmanager
-def run_stdio(server_factory) -> Generator[tuple[str, list[str]], None, None]:
-    """Context manager that yields command/args to launch a server with stdio transport.
-
-    This creates a temporary Python script that runs the server factory, then yields
-    the command and args needed to launch it. The temp file is cleaned up on exit.
-
-    Usage:
-        with run_stdio(my_server_factory) as (command, args):
-            client = MultiServerMCPClient({
-                "test": {"command": command, "args": args, "transport": "stdio"}
-            })
-
-    Args:
-        server_factory: A callable that returns a FastMCP server instance.
-
-    Yields:
-        A tuple of (command, args) to pass to the MCP client config.
-    """
-    # Get the source code of the server factory function
-    source = inspect.getsource(server_factory)
-
-    # Build a standalone script that recreates and runs the server
-    script_content = textwrap.dedent("""\
-        from mcp.server.fastmcp import Context, FastMCP
-        from pydantic import BaseModel
-
-        {source}
-
-        if __name__ == "__main__":
-            server = {func_name}()
-            server.run(transport="stdio")
-    """).format(source=source, func_name=server_factory.__name__)
-
-    # Write to a temp file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write(script_content)
-        temp_path = f.name
-
-    try:
-        yield ("python3", [temp_path])
-    finally:
-        Path(temp_path).unlink()
