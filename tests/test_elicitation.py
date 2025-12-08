@@ -1,8 +1,5 @@
 """Tests for MCP elicitation callback support."""
 
-import os
-from pathlib import Path
-
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.shared.context import RequestContext
 from mcp.types import ElicitRequestParams, ElicitResult
@@ -10,15 +7,14 @@ from pydantic import BaseModel
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from tests.utils import run_streamable_http
-
-
-class UserDetails(BaseModel):
-    email: str
-    age: int
+from tests.utils import run_stdio, run_streamable_http
 
 
 def _create_elicitation_server():
+    class UserDetails(BaseModel):
+        email: str
+        age: int
+
     server = FastMCP(port=8184)
 
     # Track how many times code before elicit runs (should be exactly once)
@@ -41,8 +37,14 @@ def _create_elicitation_server():
                 f"pre_elicit_calls={server._pre_elicit_call_count}"
             )
         if result.action == "decline":
-            return f"User declined. Created minimal profile for {name}. pre_elicit_calls={server._pre_elicit_call_count}"
-        return f"Profile creation cancelled. pre_elicit_calls={server._pre_elicit_call_count}"
+            return (
+                f"User declined. Created minimal profile for {name}. "
+                f"pre_elicit_calls={server._pre_elicit_call_count}"
+            )
+        return (
+            f"Profile creation cancelled. "
+            f"pre_elicit_calls={server._pre_elicit_call_count}"
+        )
 
     return server
 
@@ -95,7 +97,8 @@ async def test_elicitation_callback_accept(socket_enabled) -> None:
         assert "alice@example.com" in str(result.content)
         assert "28" in str(result.content)
 
-        # Verify code before ctx.elicit only ran once (not re-executed after elicitation)
+        # Verify code before ctx.elicit only ran once
+        # (not re-executed after elicitation)
         assert "pre_elicit_calls=1" in str(result.content)
 
 
@@ -166,9 +169,6 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
 
 async def test_elicitation_callback_accept_stdio() -> None:
     """Test elicitation callback with user accepting via stdio transport."""
-    current_dir = Path(__file__).parent
-    elicitation_server_path = os.path.join(current_dir, "servers/elicitation_server.py")
-
     elicitation_requests: list[
         tuple[RequestContext, ElicitRequestParams, CallbackContext]
     ] = []
@@ -184,45 +184,45 @@ async def test_elicitation_callback_accept_stdio() -> None:
             content={"email": "stdio@example.com", "age": 35},
         )
 
-    client = MultiServerMCPClient(
-        {
-            "test": {
-                "command": "python3",
-                "args": [elicitation_server_path, "stdio"],
-                "transport": "stdio",
-            }
-        },
-        callbacks=Callbacks(on_elicitation=on_elicitation),
-    )
+    with run_stdio(_create_elicitation_server) as (command, args):
+        client = MultiServerMCPClient(
+            {
+                "test": {
+                    "command": command,
+                    "args": args,
+                    "transport": "stdio",
+                }
+            },
+            callbacks=Callbacks(on_elicitation=on_elicitation),
+        )
 
-    tools = await client.get_tools()
-    assert len(tools) == 1
-    assert tools[0].name == "create_profile"
+        tools = await client.get_tools()
+        assert len(tools) == 1
+        assert tools[0].name == "create_profile"
 
-    # Call the tool
-    result = await tools[0].ainvoke(
-        {"args": {"name": "StdioUser"}, "id": "call_stdio_1", "type": "tool_call"}
-    )
+        # Call the tool
+        result = await tools[0].ainvoke(
+            {"args": {"name": "StdioUser"}, "id": "call_stdio_1", "type": "tool_call"}
+        )
 
-    # Verify elicitation callback was called
-    assert len(elicitation_requests) == 1
-    _, params, context = elicitation_requests[0]
-    assert "StdioUser" in params.message
-    assert context.server_name == "test"
-    assert context.tool_name == "create_profile"
+        # Verify elicitation callback was called
+        assert len(elicitation_requests) == 1
+        _, params, context = elicitation_requests[0]
+        assert "StdioUser" in params.message
+        assert context.server_name == "test"
+        assert context.tool_name == "create_profile"
 
-    # Verify result
-    assert "stdio@example.com" in str(result.content)
-    assert "35" in str(result.content)
+        # Verify result
+        assert "stdio@example.com" in str(result.content)
+        assert "35" in str(result.content)
 
-    # Verify code before ctx.elicit only ran once (not re-executed after elicitation)
-    assert "pre_elicit_calls=1" in str(result.content)
+        # Verify code before ctx.elicit only ran once
+        # (not re-executed after elicitation)
+        assert "pre_elicit_calls=1" in str(result.content)
 
 
 async def test_elicitation_callback_decline_stdio() -> None:
     """Test elicitation callback with user declining via stdio transport."""
-    current_dir = Path(__file__).parent
-    elicitation_server_path = os.path.join(current_dir, "servers/elicitation_server.py")
 
     async def on_elicitation(
         mcp_context: RequestContext,
@@ -231,31 +231,34 @@ async def test_elicitation_callback_decline_stdio() -> None:
     ) -> ElicitResult:
         return ElicitResult(action="decline")
 
-    client = MultiServerMCPClient(
-        {
-            "test": {
-                "command": "python3",
-                "args": [elicitation_server_path, "stdio"],
-                "transport": "stdio",
+    with run_stdio(_create_elicitation_server) as (command, args):
+        client = MultiServerMCPClient(
+            {
+                "test": {
+                    "command": command,
+                    "args": args,
+                    "transport": "stdio",
+                }
+            },
+            callbacks=Callbacks(on_elicitation=on_elicitation),
+        )
+
+        tools = await client.get_tools()
+        result = await tools[0].ainvoke(
+            {
+                "args": {"name": "StdioDecline"},
+                "id": "call_stdio_2",
+                "type": "tool_call",
             }
-        },
-        callbacks=Callbacks(on_elicitation=on_elicitation),
-    )
+        )
 
-    tools = await client.get_tools()
-    result = await tools[0].ainvoke(
-        {"args": {"name": "StdioDecline"}, "id": "call_stdio_2", "type": "tool_call"}
-    )
-
-    assert "declined" in str(result.content).lower()
-    # Verify code before ctx.elicit only ran once
-    assert "pre_elicit_calls=1" in str(result.content)
+        assert "declined" in str(result.content).lower()
+        # Verify code before ctx.elicit only ran once
+        assert "pre_elicit_calls=1" in str(result.content)
 
 
 async def test_elicitation_callback_cancel_stdio() -> None:
     """Test elicitation callback with user cancelling via stdio transport."""
-    current_dir = Path(__file__).parent
-    elicitation_server_path = os.path.join(current_dir, "servers/elicitation_server.py")
 
     async def on_elicitation(
         mcp_context: RequestContext,
@@ -264,22 +267,23 @@ async def test_elicitation_callback_cancel_stdio() -> None:
     ) -> ElicitResult:
         return ElicitResult(action="cancel")
 
-    client = MultiServerMCPClient(
-        {
-            "test": {
-                "command": "python3",
-                "args": [elicitation_server_path, "stdio"],
-                "transport": "stdio",
-            }
-        },
-        callbacks=Callbacks(on_elicitation=on_elicitation),
-    )
+    with run_stdio(_create_elicitation_server) as (command, args):
+        client = MultiServerMCPClient(
+            {
+                "test": {
+                    "command": command,
+                    "args": args,
+                    "transport": "stdio",
+                }
+            },
+            callbacks=Callbacks(on_elicitation=on_elicitation),
+        )
 
-    tools = await client.get_tools()
-    result = await tools[0].ainvoke(
-        {"args": {"name": "StdioCancel"}, "id": "call_stdio_3", "type": "tool_call"}
-    )
+        tools = await client.get_tools()
+        result = await tools[0].ainvoke(
+            {"args": {"name": "StdioCancel"}, "id": "call_stdio_3", "type": "tool_call"}
+        )
 
-    assert "cancelled" in str(result.content).lower()
-    # Verify code before ctx.elicit only ran once
-    assert "pre_elicit_calls=1" in str(result.content)
+        assert "cancelled" in str(result.content).lower()
+        # Verify code before ctx.elicit only ran once
+        assert "pre_elicit_calls=1" in str(result.content)
