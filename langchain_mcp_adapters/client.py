@@ -54,6 +54,7 @@ class MultiServerMCPClient:
         *,
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
+        tool_name_prefix: bool = False,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -63,6 +64,10 @@ class MultiServerMCPClient:
             callbacks: Optional callbacks for handling notifications and events.
             tool_interceptors: Optional list of tool call interceptors for modifying
                 requests and responses.
+            tool_name_prefix: If `True`, tool names are prefixed with the server name
+                using an underscore separator (e.g., `"weather_search"` instead of
+                `"search"`). This helps avoid conflicts when multiple servers have tools
+                with the same name. Defaults to `False`.
 
         !!! example "Basic usage (starting a new session on each tool call)"
 
@@ -104,6 +109,7 @@ class MultiServerMCPClient:
         )
         self.callbacks = callbacks or Callbacks()
         self.tool_interceptors = tool_interceptors or []
+        self.tool_name_prefix = tool_name_prefix
 
     @asynccontextmanager
     async def session(
@@ -171,6 +177,7 @@ class MultiServerMCPClient:
                 callbacks=self.callbacks,
                 server_name=server_name,
                 tool_interceptors=self.tool_interceptors,
+                tool_name_prefix=self.tool_name_prefix,
             )
 
         all_tools: list[BaseTool] = []
@@ -183,6 +190,7 @@ class MultiServerMCPClient:
                     callbacks=self.callbacks,
                     server_name=name,
                     tool_interceptors=self.tool_interceptors,
+                    tool_name_prefix=self.tool_name_prefix,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)

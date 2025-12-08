@@ -992,3 +992,188 @@ async def test_mcp_tools_with_agent_and_command_interceptor(socket_enabled) -> N
             isinstance(msg, ToolMessage) and msg.content == "Counter updated!"
             for msg in result["messages"]
         )
+
+
+# Tests for tool_name_prefix functionality
+
+
+def _create_weather_search_server():
+    """Create a weather server with a search tool."""
+    server = FastMCP(port=8185)
+
+    @server.tool()
+    def search(query: str) -> str:
+        """Search for weather information"""
+        return f"Weather results for: {query}"
+
+    return server
+
+
+def _create_flights_search_server():
+    """Create a flights server with a search tool."""
+    server = FastMCP(port=8186)
+
+    @server.tool()
+    def search(destination: str) -> str:
+        """Search for flights"""
+        return f"Flight results to: {destination}"
+
+    return server
+
+
+@pytest.mark.skipif(not LANGCHAIN_INSTALLED, reason="langchain not installed")
+async def test_parallel_tool_invocation_across_multiple_servers(socket_enabled) -> None:
+    """Test that two servers with identically named tools can be invoked in parallel.
+
+    This test verifies that:
+    1. Two MCP servers can each expose a tool with the same name (search)
+    2. With tool_name_prefix=True, they get unique LangChain names
+        (weather_search, flights_search)
+    3. When an LLM calls both tools in parallel,
+       each tool is routed to the correct server
+    4. The correct results come back from each server
+    """
+    from langchain.agents import AgentState, create_agent  # noqa: PLC0415
+    from langgraph.checkpoint.memory import MemorySaver  # noqa: PLC0415
+
+    with (
+        run_streamable_http(_create_weather_search_server, 8185),
+        run_streamable_http(_create_flights_search_server, 8186),
+    ):
+        client = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8185/mcp",
+                    "transport": "streamable_http",
+                },
+                "flights": {
+                    "url": "http://localhost:8186/mcp",
+                    "transport": "streamable_http",
+                },
+            },
+            tool_name_prefix=True,
+        )
+        tools = await client.get_tools()
+
+        # Verify we have both prefixed tools
+        assert len(tools) == 2
+        tool_names = {t.name for t in tools}
+        assert tool_names == {"weather_search", "flights_search"}
+
+        # Simulate an LLM calling both tools in parallel (common pattern for agents)
+        model = FixedGenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "weather_search",
+                                "args": {"query": "sunny in Paris"},
+                                "id": "call_weather",
+                                "type": "tool_call",
+                            },
+                            {
+                                "name": "flights_search",
+                                "args": {"destination": "Tokyo"},
+                                "id": "call_flights",
+                                "type": "tool_call",
+                            },
+                        ],
+                    ),
+                    AIMessage(content="Here are your results."),
+                ]
+            )
+        )
+
+        agent = create_agent(
+            model,
+            tools,
+            state_schema=AgentState,
+            checkpointer=MemorySaver(),
+        )
+
+        # Run the agent - both tools should be called in parallel
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content="Search weather and flights")]},
+            {"configurable": {"thread_id": "test_parallel"}},
+        )
+
+        # Verify both tools were called and returned correct results
+        tool_messages = [
+            msg for msg in result["messages"] if isinstance(msg, ToolMessage)
+        ]
+        assert len(tool_messages) == 2
+
+        # Create a mapping of tool_call_id to content for easier assertion
+        results_by_id = {msg.tool_call_id: msg.content for msg in tool_messages}
+
+        # Verify the weather search was routed to the weather server
+        assert results_by_id["call_weather"] == [
+            {
+                "type": "text",
+                "text": "Weather results for: sunny in Paris",
+                "id": IsLangChainID,
+            }
+        ]
+
+        # Verify the flights search was routed to the flights server
+        assert results_by_id["call_flights"] == [
+            {
+                "type": "text",
+                "text": "Flight results to: Tokyo",
+                "id": IsLangChainID,
+            }
+        ]
+
+
+async def test_get_tools_with_name_conflict(socket_enabled) -> None:
+    """Test fetching tools with name conflict using tool_name_prefix.
+
+    This test verifies that:
+    1. Without tool_name_prefix, both servers would have conflicting "search" tool names
+    2. With tool_name_prefix=True, tools get unique names
+        (weather_search, flights_search)
+    """
+    with (
+        run_streamable_http(_create_weather_search_server, 8185),
+        run_streamable_http(_create_flights_search_server, 8186),
+    ):
+        # First, verify that without prefix both tools would have the same name
+        client_no_prefix = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8185/mcp",
+                    "transport": "streamable_http",
+                },
+                "flights": {
+                    "url": "http://localhost:8186/mcp",
+                    "transport": "streamable_http",
+                },
+            },
+            tool_name_prefix=False,
+        )
+        tools_no_prefix = await client_no_prefix.get_tools()
+        # Both tools are named "search" without prefix
+        assert all(t.name == "search" for t in tools_no_prefix)
+
+        # Now test with prefix - tools should be disambiguated
+        client = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8185/mcp",
+                    "transport": "streamable_http",
+                },
+                "flights": {
+                    "url": "http://localhost:8186/mcp",
+                    "transport": "streamable_http",
+                },
+            },
+            tool_name_prefix=True,
+        )
+        tools = await client.get_tools()
+
+        # Verify we have both prefixed tools with unique names
+        assert len(tools) == 2
+        tool_names = {t.name for t in tools}
+        assert tool_names == {"weather_search", "flights_search"}
