@@ -5,15 +5,16 @@ to multiple MCP servers and loading tools, prompts, and resources from them.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, ToolException
 from mcp import ClientSession
+from pydantic import ValidationError
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
@@ -55,6 +56,10 @@ class MultiServerMCPClient:
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
+        handle_tool_error: bool | str | Callable[[ToolException], str] | None = False,
+        handle_validation_error: (
+            bool | str | Callable[[ValidationError], str] | None
+        ) = False,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -68,6 +73,8 @@ class MultiServerMCPClient:
                 using an underscore separator (e.g., `"weather_search"` instead of
                 `"search"`). This helps avoid conflicts when multiple servers have tools
                 with the same name. Defaults to `False`.
+            handle_tool_error: Optional error handler for tool execution errors.
+            handle_validation_error: Optional error handler for validation errors.
 
         !!! example "Basic usage (starting a new session on each tool call)"
 
@@ -110,6 +117,8 @@ class MultiServerMCPClient:
         self.callbacks = callbacks or Callbacks()
         self.tool_interceptors = tool_interceptors or []
         self.tool_name_prefix = tool_name_prefix
+        self.handle_tool_error = handle_tool_error
+        self.handle_validation_error = handle_validation_error
 
     @asynccontextmanager
     async def session(
@@ -178,6 +187,8 @@ class MultiServerMCPClient:
                 server_name=server_name,
                 tool_interceptors=self.tool_interceptors,
                 tool_name_prefix=self.tool_name_prefix,
+                handle_tool_error=self.handle_tool_error,
+                handle_validation_error=self.handle_validation_error,
             )
 
         all_tools: list[BaseTool] = []
@@ -191,6 +202,8 @@ class MultiServerMCPClient:
                     server_name=name,
                     tool_interceptors=self.tool_interceptors,
                     tool_name_prefix=self.tool_name_prefix,
+                    handle_tool_error=self.handle_tool_error,
+                    handle_validation_error=self.handle_validation_error,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
