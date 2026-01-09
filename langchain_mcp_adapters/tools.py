@@ -5,7 +5,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, TypedDict, get_args
+from typing import Annotated, Any, TypedDict, get_args
 
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
@@ -303,7 +303,7 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
-        runtime: Any = None,  # noqa: ANN401
+        runtime: Annotated[Any, InjectedToolArg()] = None,
         **arguments: dict[str, Any],
     ) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
         """Execute tool call with interceptor chain and return formatted result.
