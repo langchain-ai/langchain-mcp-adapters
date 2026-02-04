@@ -142,7 +142,7 @@ jobs:
           path: ${{ inputs.working-directory }}/dist/
 
       - name: Create Tag
-        uses: ncipollo/release-action@v1
+        uses: ncipollo/release-action@b7eabc95ff50cbeeedec83973935c8f306dfcd0b # v1.20.0
         with:
           artifacts: "dist/*"
           token: ${{ secrets.GITHUB_TOKEN }}
