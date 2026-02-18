@@ -6,7 +6,7 @@ to multiple MCP servers and loading tools, prompts, and resources from them.
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import AbstractAsyncContextManager
+from contextlib import AsyncExitStack
 from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Any
@@ -308,19 +308,35 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
             tool_name_prefix=tool_name_prefix,
         )
         self.sessions: dict[str, ClientSession] = {}
-        self._session_cms: dict[str, AbstractAsyncContextManager[ClientSession]] = {}
+        self._session_stack: AsyncExitStack | None = None
+
+    def _validate_server_name(self, server_name: str) -> None:
+        if server_name not in self.connections:
+            msg = (
+                f"Couldn't find a server with name '{server_name}', "
+                f"expected one of '{list(self.connections.keys())}'"
+            )
+            raise ValueError(msg)
 
     async def start(self) -> None:
         """Start long-lived sessions for all configured servers."""
-        for server_name in self.connections:
-            if server_name not in self.sessions:
-                await self._create_session_for_server(server_name)
+        if self._session_stack is not None:
+            return
 
-    async def _create_session_for_server(self, server_name: str) -> None:
-        cm = self.session(server_name, auto_initialize=True)
-        session = await cm.__aenter__()
-        self.sessions[server_name] = session
-        self._session_cms[server_name] = cm
+        stack = AsyncExitStack()
+        sessions: dict[str, ClientSession] = {}
+        try:
+            for server_name in self.connections:
+                session = await stack.enter_async_context(
+                    self.session(server_name, auto_initialize=True)
+                )
+                sessions[server_name] = session
+        except Exception:
+            await stack.aclose()
+            raise
+
+        self._session_stack = stack
+        self.sessions = sessions
 
     async def stop(
         self,
@@ -329,20 +345,27 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
         exc_tb: TracebackType | None = None,
     ) -> None:
         """Close all long-lived sessions."""
-        for cm in self._session_cms.values():
-            await cm.__aexit__(exc_type, exc_val, exc_tb)
+        if self._session_stack is not None:
+            await self._session_stack.aclose()
+            self._session_stack = None
         self.sessions.clear()
-        self._session_cms.clear()
+
+    @asynccontextmanager
+    async def _session_for_server(self, server_name: str) -> AsyncIterator[ClientSession]:
+        """Yield a persistent session when available, otherwise a short-lived one."""
+        self._validate_server_name(server_name)
+        persistent_session = self.sessions.get(server_name)
+        if persistent_session is not None:
+            yield persistent_session
+            return
+
+        async with self.session(server_name) as ephemeral_session:
+            yield ephemeral_session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
         """Get tools, preferring long-lived sessions when available."""
         if server_name is not None:
-            if server_name not in self.connections:
-                msg = (
-                    f"Couldn't find a server with name '{server_name}', "
-                    f"expected one of '{list(self.connections.keys())}'"
-                )
-                raise ValueError(msg)
+            self._validate_server_name(server_name)
 
             session = self.sessions.get(server_name)
             if session is not None:
@@ -391,21 +414,8 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
         arguments: dict[str, Any] | None = None,
     ) -> list[HumanMessage | AIMessage]:
         """Get a prompt, preferring long-lived sessions when available."""
-        if server_name not in self.connections:
-            msg = (
-                f"Couldn't find a server with name '{server_name}', "
-                f"expected one of '{list(self.connections.keys())}'"
-            )
-            raise ValueError(msg)
-
-        session = self.sessions.get(server_name)
-        if session is not None:
+        async with self._session_for_server(server_name) as session:
             return await load_mcp_prompt(session, prompt_name, arguments=arguments)
-
-        async with self.session(server_name) as ephemeral_session:
-            return await load_mcp_prompt(
-                ephemeral_session, prompt_name, arguments=arguments
-            )
 
     async def get_resources(
         self,
@@ -415,26 +425,12 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
     ) -> list[Blob]:
         """Get resources, preferring long-lived sessions when available."""
         if server_name is not None:
-            if server_name not in self.connections:
-                msg = (
-                    f"Couldn't find a server with name '{server_name}', "
-                    f"expected one of '{list(self.connections.keys())}'"
-                )
-                raise ValueError(msg)
-
-            session = self.sessions.get(server_name)
-            if session is not None:
+            async with self._session_for_server(server_name) as session:
                 return await load_mcp_resources(session, uris=uris)
-
-            async with self.session(server_name) as ephemeral_session:
-                return await load_mcp_resources(ephemeral_session, uris=uris)
 
         async def _load_resources_from_server(name: str) -> list[Blob]:
-            session = self.sessions.get(name)
-            if session is not None:
+            async with self._session_for_server(name) as session:
                 return await load_mcp_resources(session, uris=uris)
-            async with self.session(name) as ephemeral_session:
-                return await load_mcp_resources(ephemeral_session, uris=uris)
 
         all_resources: list[Blob] = []
         load_tasks = [

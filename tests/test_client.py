@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from unittest.mock import AsyncMock
 
+import pytest
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
@@ -273,6 +274,52 @@ async def test_long_lived_client_uses_persistent_session_for_get_resources(
         uris="math://formulas",
     )
     assert resources == expected_resources
+
+
+async def test_long_lived_client_start_cleans_up_on_partial_failure(monkeypatch):
+    client = LongLivedMultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            },
+        }
+    )
+
+    events: list[str] = []
+
+    class FakeCM:
+        def __init__(self, name: str, *, fail_enter: bool = False) -> None:
+            self.name = name
+            self.fail_enter = fail_enter
+
+        async def __aenter__(self):
+            events.append(f"enter:{self.name}")
+            if self.fail_enter:
+                raise RuntimeError("startup failure")
+            return AsyncMock()
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            events.append(f"exit:{self.name}")
+
+    def fake_session(server_name: str, *, auto_initialize: bool = True):
+        assert auto_initialize is True
+        return FakeCM(server_name, fail_enter=(server_name == "weather"))
+
+    monkeypatch.setattr(client, "session", fake_session)
+
+    with pytest.raises(RuntimeError, match="startup failure"):
+        await client.start()
+
+    assert events == ["enter:math", "enter:weather", "exit:math"]
+    assert client.sessions == {}
+    assert client._session_stack is None
 
 
 async def test_get_resources_from_all_servers():
