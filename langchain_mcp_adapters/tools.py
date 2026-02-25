@@ -195,6 +195,16 @@ def _convert_call_tool_result(
             structured_content=call_tool_result.structuredContent
         )
 
+    # If there is only a single text content block, return as a plain string
+    # for compatibility with LLM APIs that expect string tool message content
+    # (e.g. OpenAI). Multi-block or non-text results remain as list.
+    if (
+        len(tool_content) == 1
+        and isinstance(tool_content[0], dict)
+        and tool_content[0].get("type") == "text"
+    ):
+        return tool_content[0]["text"], artifact
+
     return tool_content, artifact
 
 

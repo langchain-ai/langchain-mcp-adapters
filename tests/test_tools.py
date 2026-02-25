@@ -56,7 +56,8 @@ def test_convert_single_text_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [{"type": "text", "text": "test result", "id": IsLangChainID}]
+    # Single text content should be returned as a plain string
+    assert content == "test result"
     assert artifact is None
 
 
@@ -141,7 +142,8 @@ def test_convert_with_structured_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    # Single text content should be returned as a plain string
+    assert content == "text result"
     assert artifact == MCPToolArtifact(
         structured_content={"key": "value", "nested": {"data": 123}}
     )
@@ -447,9 +449,8 @@ async def test_convert_mcp_tool_to_langchain_tool():
     # Verify result
     assert result.name == "test_tool"
     assert result.tool_call_id == "1"
-    assert result.content == [
-        {"type": "text", "text": "tool result", "id": IsLangChainID}
-    ]
+    # Single text content should be a plain string
+    assert result.content == "tool result"
 
 
 async def test_load_mcp_tools():
@@ -509,13 +510,7 @@ async def test_load_mcp_tools():
     )
     assert result1.name == "tool1"
     assert result1.tool_call_id == "1"
-    assert result1.content == [
-        {
-            "type": "text",
-            "text": "tool1 result with {'param1': 'test1', 'param2': 1}",
-            "id": IsLangChainID,
-        }
-    ]
+    assert result1.content == "tool1 result with {'param1': 'test1', 'param2': 1}"
 
     # Test calling the second tool
     result2 = await tools[1].ainvoke(
@@ -523,13 +518,7 @@ async def test_load_mcp_tools():
     )
     assert result2.name == "tool2"
     assert result2.tool_call_id == "2"
-    assert result2.content == [
-        {
-            "type": "text",
-            "text": "tool2 result with {'param1': 'test2', 'param2': 2}",
-            "id": IsLangChainID,
-        }
-    ]
+    assert result2.content == "tool2 result with {'param1': 'test2', 'param2': 2}"
 
 
 def _create_annotations_server():
@@ -732,9 +721,8 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
         # Test that the tool works correctly
         result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
-        assert result.content == [
-            {"type": "text", "text": "Server is running", "id": IsLangChainID}
-        ]
+        # Single text content should be a plain string
+        assert result.content == "Server is running"
 
 
 def _create_info_server():
@@ -1109,22 +1097,11 @@ async def test_parallel_tool_invocation_across_multiple_servers(socket_enabled) 
         results_by_id = {msg.tool_call_id: msg.content for msg in tool_messages}
 
         # Verify the weather search was routed to the weather server
-        assert results_by_id["call_weather"] == [
-            {
-                "type": "text",
-                "text": "Weather results for: sunny in Paris",
-                "id": IsLangChainID,
-            }
-        ]
+        # Single text content is returned as a plain string
+        assert results_by_id["call_weather"] == "Weather results for: sunny in Paris"
 
         # Verify the flights search was routed to the flights server
-        assert results_by_id["call_flights"] == [
-            {
-                "type": "text",
-                "text": "Flight results to: Tokyo",
-                "id": IsLangChainID,
-            }
-        ]
+        assert results_by_id["call_flights"] == "Flight results to: Tokyo"
 
 
 async def test_get_tools_with_name_conflict(socket_enabled) -> None:

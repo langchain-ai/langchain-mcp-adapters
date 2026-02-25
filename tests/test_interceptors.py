@@ -88,7 +88,7 @@ class TestInterceptorModifiesRequest:
             add_tool = next(tool for tool in tools if tool.name == "add")
             # Call add but interceptor redirects to multiply: 5 * 2 = 10
             result = await add_tool.ainvoke({"a": 5, "b": 2})
-            assert result == [{"type": "text", "text": "10", "id": IsLangChainID}]
+            assert result == "10"
 
 
 class TestInterceptorModifiesResponse:
@@ -131,9 +131,7 @@ class TestInterceptorModifiesResponse:
 
             add_tool = next(tool for tool in tools if tool.name == "add")
             result = await add_tool.ainvoke({"a": 2, "b": 3})
-            assert result == [
-                {"type": "text", "text": "Modified: 5", "id": IsLangChainID}
-            ]
+            assert result == "Modified: 5"
 
     async def test_interceptor_returns_custom_result(self, socket_enabled):
         """Test that interceptor can return a completely custom CallToolResult."""
@@ -160,9 +158,7 @@ class TestInterceptorModifiesResponse:
 
             add_tool = next(tool for tool in tools if tool.name == "add")
             result = await add_tool.ainvoke({"a": 2, "b": 3})
-            assert result == [
-                {"type": "text", "text": "Custom tool response", "id": IsLangChainID}
-            ]
+            assert result == "Custom tool response"
 
 
 class TestInterceptorAdvancedPatterns:
@@ -202,17 +198,17 @@ class TestInterceptorAdvancedPatterns:
 
             # First call - should execute
             result1 = await add_tool.ainvoke({"a": 2, "b": 3})
-            assert result1 == [{"type": "text", "text": "5", "id": IsLangChainID}]
+            assert result1 == "5"
             assert call_count == 1
 
             # Second call with same args - should use cache
             result2 = await add_tool.ainvoke({"a": 2, "b": 3})
-            assert result2 == [{"type": "text", "text": "5", "id": IsLangChainID}]
+            assert result2 == "5"
             assert call_count == 1  # Should not increment
 
             # Third call with different args - should execute
             result3 = await add_tool.ainvoke({"a": 5, "b": 7})
-            assert result3 == [{"type": "text", "text": "12", "id": IsLangChainID}]
+            assert result3 == "12"
             assert call_count == 2
 
 
@@ -254,7 +250,7 @@ class TestInterceptorComposition:
 
             add_tool = next(tool for tool in tools if tool.name == "add")
             result = await add_tool.ainvoke({"a": 2, "b": 3})
-            assert result == [{"type": "text", "text": "5", "id": IsLangChainID}]
+            assert result == "5"
 
             # Should execute in onion order: 1 before, 2 before, execute, 2 after,
             # 1 after
