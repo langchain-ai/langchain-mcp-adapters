@@ -195,7 +195,34 @@ def _convert_call_tool_result(
             structured_content=call_tool_result.structuredContent
         )
 
-    return tool_content, artifact
+    # FIX for issue #34669: Convert list content to string for OpenAI compatibility
+    # OpenAI tool messages expect string content, not list[dict]
+    import json as _json
+
+    # Case 1: Single text block -> return plain text string
+    if len(tool_content) == 1:
+        block = tool_content[0]
+        if isinstance(block, dict) and block.get("type") == "text":
+            return block.get("text", ""), artifact
+
+    # Case 2: Multiple blocks or non-text content -> JSON serialize
+    # This preserves all content while making it OpenAI-compatible
+    if len(tool_content) > 0:
+        # Check if all blocks are text - if so, join them
+        all_text = all(
+            isinstance(b, dict) and b.get("type") == "text"
+            for b in tool_content
+        )
+        if all_text:
+            # Join multiple text blocks with newlines
+            text_parts = [b.get("text", "") for b in tool_content]
+            return "\n".join(text_parts), artifact
+        else:
+            # Mixed content (images, files, etc.) - JSON serialize
+            return _json.dumps(tool_content), artifact
+
+    # Case 3: Empty content
+    return "", artifact
 
 
 def _build_interceptor_chain(
