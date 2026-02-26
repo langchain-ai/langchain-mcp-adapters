@@ -1,11 +1,16 @@
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock
 
+import pytest
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
-from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.client import (
+    LongLivedMultiServerMCPClient,
+    MultiServerMCPClient,
+)
 from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID
 
@@ -167,6 +172,154 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+async def test_long_lived_client_uses_persistent_session_for_load_mcp_tools(
+    monkeypatch,
+):
+    """Verify get_tools() uses the already-open session with load_mcp_tools()."""
+    client = LongLivedMultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            }
+        }
+    )
+    persistent_session = AsyncMock()
+    client.sessions["math"] = persistent_session
+
+    fake_tool = AsyncMock()
+
+    async def fake_load_mcp_tools(session, **kwargs):
+        assert session is persistent_session
+        assert kwargs["server_name"] == "math"
+        assert kwargs["callbacks"] is client.callbacks
+        assert kwargs["tool_name_prefix"] is False
+        return [fake_tool]
+
+    monkeypatch.setattr(
+        "langchain_mcp_adapters.client.load_mcp_tools",
+        fake_load_mcp_tools,
+    )
+
+    tools = await client.get_tools(server_name="math")
+    assert tools == [fake_tool]
+
+
+async def test_long_lived_client_uses_persistent_session_for_get_prompt(monkeypatch):
+    client = LongLivedMultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            }
+        }
+    )
+    persistent_session = AsyncMock()
+    client.sessions["math"] = persistent_session
+
+    expected_messages = [AIMessage(content="ok")]
+
+    async def fake_load_mcp_prompt(session, prompt_name, arguments=None):
+        assert session is persistent_session
+        assert prompt_name == "configure_assistant"
+        assert arguments == {"skills": "math"}
+        return expected_messages
+
+    monkeypatch.setattr(
+        "langchain_mcp_adapters.client.load_mcp_prompt",
+        fake_load_mcp_prompt,
+    )
+
+    messages = await client.get_prompt(
+        "math",
+        "configure_assistant",
+        arguments={"skills": "math"},
+    )
+    assert messages == expected_messages
+
+
+async def test_long_lived_client_uses_persistent_session_for_get_resources(
+    monkeypatch,
+):
+    client = LongLivedMultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            }
+        }
+    )
+    persistent_session = AsyncMock()
+    client.sessions["math"] = persistent_session
+
+    expected_resources = [Blob(data="E = mc^2", mimetype="text/plain", metadata={})]
+
+    async def fake_load_mcp_resources(session, uris=None):
+        assert session is persistent_session
+        assert uris == "math://formulas"
+        return expected_resources
+
+    monkeypatch.setattr(
+        "langchain_mcp_adapters.client.load_mcp_resources",
+        fake_load_mcp_resources,
+    )
+
+    resources = await client.get_resources(
+        server_name="math",
+        uris="math://formulas",
+    )
+    assert resources == expected_resources
+
+
+async def test_long_lived_client_start_cleans_up_on_partial_failure(monkeypatch):
+    client = LongLivedMultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": ["unused"],
+                "transport": "stdio",
+            },
+        }
+    )
+
+    events: list[str] = []
+
+    class FakeCM:
+        def __init__(self, name: str, *, fail_enter: bool = False) -> None:
+            self.name = name
+            self.fail_enter = fail_enter
+
+        async def __aenter__(self):
+            events.append(f"enter:{self.name}")
+            if self.fail_enter:
+                raise RuntimeError("startup failure")
+            return AsyncMock()
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            events.append(f"exit:{self.name}")
+
+    def fake_session(server_name: str, *, auto_initialize: bool = True):
+        assert auto_initialize is True
+        return FakeCM(server_name, fail_enter=(server_name == "weather"))
+
+    monkeypatch.setattr(client, "session", fake_session)
+
+    with pytest.raises(RuntimeError, match="startup failure"):
+        await client.start()
+
+    assert events == ["enter:math", "enter:weather", "exit:math"]
+    assert client.sessions == {}
+    assert client._session_stack is None
 
 
 async def test_get_resources_from_all_servers():
