@@ -321,3 +321,170 @@ class TestInterceptorErrorHandling:
             assert result.content == "Custom ToolMessage response"
             assert result.name == "add"
             assert result.tool_call_id == "test-call-id"
+
+
+class TestMetadataPassthrough:
+    """Tests for metadata passthrough to MCP servers via interceptors."""
+
+    async def test_interceptor_adds_metadata(self, socket_enabled):
+        """Test that interceptors can add metadata to tool calls."""
+        captured_meta = []
+
+        async def capture_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Capture the metaParams to verify it was set
+            captured_meta.append(request.metaParams)
+            return await handler(request)
+
+        async def add_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Add metaParams through the interceptor
+            modified_request = request.override(
+                metaParams={"session_id": "abc123", "user_id": "test-user"}
+            )
+            return await handler(modified_request)
+
+        with run_streamable_http(_create_math_server, 8210):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8210/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[add_meta_interceptor, capture_meta_interceptor],
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 2, "b": 3})
+
+            # Tool executes successfully
+            assert result == [{"type": "text", "text": "5", "id": IsLangChainID}]
+
+            # Verify that the metadata was passed through the interceptor
+            assert len(captured_meta) == 1
+            assert captured_meta[0] == {
+                "session_id": "abc123",
+                "user_id": "test-user",
+            }
+
+    async def test_interceptor_modifies_metadata(self, socket_enabled):
+        """Test that interceptors can modify metadata for different requests."""
+        captured_requests = []
+
+        async def capture_request_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Capture the request state to verify metadata
+            captured_requests.append(
+                {
+                    "name": request.name,
+                    "args": request.args.copy(),
+                    "metaParams": request.metaParams,
+                }
+            )
+            return await handler(request)
+
+        async def contextual_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Add context-specific metadata based on tool name
+            metadata = {
+                "tool": request.name,
+                "timestamp": "2025-02-26T00:00:00Z",
+            }
+
+            modified_request = request.override(metaParams=metadata)
+            return await handler(modified_request)
+
+        with run_streamable_http(_create_math_server, 8211):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8211/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[
+                    contextual_meta_interceptor,
+                    capture_request_interceptor,
+                ],
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 5, "b": 7})
+
+            # Tool executes successfully
+            assert result == [{"type": "text", "text": "12", "id": IsLangChainID}]
+
+            # Verify the captured request has the metadata
+            assert len(captured_requests) == 1
+            captured = captured_requests[0]
+            assert captured["name"] == "add"
+            assert captured["args"] == {"a": 5, "b": 7}
+            assert captured["metaParams"] == {
+                "tool": "add",
+                "timestamp": "2025-02-26T00:00:00Z",
+            }
+
+    async def test_multiple_interceptors_modify_metadata(self, socket_enabled):
+        """Test that multiple interceptors can compose to build metadata."""
+        captured_meta = []
+
+        async def add_correlation_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # First interceptor adds correlation ID
+            meta = request.metaParams or {}
+            meta["correlation_id"] = "corr-123"
+            modified = request.override(metaParams=meta)
+            return await handler(modified)
+
+        async def add_user_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Second interceptor adds user context
+            meta = request.metaParams or {}
+            meta["user_id"] = "user-456"
+            modified = request.override(metaParams=meta)
+            return await handler(modified)
+
+        async def capture_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            captured_meta.append(request.metaParams)
+            return await handler(request)
+
+        with run_streamable_http(_create_math_server, 8212):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8212/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[
+                    add_correlation_interceptor,
+                    add_user_interceptor,
+                    capture_meta_interceptor,
+                ],
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 10, "b": 20})
+
+            # Tool executes successfully
+            assert result == [{"type": "text", "text": "30", "id": IsLangChainID}]
+
+            # Verify both interceptors contributed to metadata
+            assert len(captured_meta) == 1
+            assert captured_meta[0] == {
+                "correlation_id": "corr-123",
+                "user_id": "user-456",
+            }

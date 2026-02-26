@@ -235,6 +235,61 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 
 > Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
+## Passing request metadata (`_meta`)
+
+MCP supports passing metadata with each tool invocation via the `_meta` parameter. Per the [MCP specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/index#general-fields), `_meta` is a protocol-level field for attaching additional metadata to interactions. This is useful for:
+
+- Passing request-specific context to servers
+- Custom routing or multi-tenant scenarios
+- Session tracking and correlation IDs
+
+### Example: adding `_meta` via interceptor
+
+Metadata is passed through interceptors, keeping it separate from tool arguments:
+
+```python
+from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain_mcp_adapters.interceptors import MCPToolCallRequest
+
+async def add_context_interceptor(request: MCPToolCallRequest, handler):
+    """Add request context via metadata."""
+    modified = request.override(
+        metaParams={"user_id": "current-user-id", "correlation_id": "trace-123"}
+    )
+    return await handler(modified)
+
+tools = await load_mcp_tools(
+    session,
+    tool_interceptors=[add_context_interceptor],
+)
+
+# Tool arguments remain clean - no metadata mixed in
+result = await tool.ainvoke({"query": "hello"})
+```
+
+### Example: composing multiple metadata interceptors
+
+```python
+async def add_correlation_interceptor(request: MCPToolCallRequest, handler):
+    """Add correlation ID for tracing."""
+    meta = request.metaParams or {}
+    meta["correlation_id"] = "trace-xyz"
+    return await handler(request.override(metaParams=meta))
+
+async def add_user_interceptor(request: MCPToolCallRequest, handler):
+    """Add user context."""
+    meta = request.metaParams or {}
+    meta["user_id"] = "user-123"
+    return await handler(request.override(metaParams=meta))
+
+tools = await load_mcp_tools(
+    session,
+    tool_interceptors=[add_correlation_interceptor, add_user_interceptor],
+)
+```
+
+> Per the [MCP specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/index#general-fields), `_meta` is a separate protocol-level parameter, not part of tool arguments. It enables servers to access metadata without exposing it to language models.
+
 ## Using with LangGraph StateGraph
 
 ```python

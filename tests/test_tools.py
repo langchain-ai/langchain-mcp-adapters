@@ -1,5 +1,5 @@
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -144,6 +144,22 @@ def test_convert_with_structured_content():
     assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
     assert artifact == MCPToolArtifact(
         structured_content={"key": "value", "nested": {"data": 123}}
+    )
+
+
+def test_convert_with_response_meta_only():
+    """Test that response _meta is returned as MCPToolArtifact."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="text result")],
+        isError=False,
+        _meta={"source": "unit-test", "trace_id": "abc123"},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    assert artifact == MCPToolArtifact(
+        _meta={"source": "unit-test", "trace_id": "abc123"}
     )
 
 
@@ -377,7 +393,7 @@ def test_convert_audio_content_raises():
 
 
 def test_convert_mixed_content_with_structured_content():
-    """Test mixed content with structuredContent returns both."""
+    """Test mixed content with structuredContent and _meta returns both."""
     result = CallToolResult(
         content=[
             TextContent(type="text", text="Here's the analysis"),
@@ -385,6 +401,7 @@ def test_convert_mixed_content_with_structured_content():
         ],
         isError=False,
         structuredContent={"analysis": {"score": 0.95, "confidence": "high"}},
+        _meta={"from_cache": True},
     )
 
     content, artifact = _convert_call_tool_result(result)
@@ -399,7 +416,8 @@ def test_convert_mixed_content_with_structured_content():
         },
     ]
     assert artifact == MCPToolArtifact(
-        structured_content={"analysis": {"score": 0.95, "confidence": "high"}}
+        structured_content={"analysis": {"score": 0.95, "confidence": "high"}},
+        _meta={"from_cache": True},
     )
 
 
@@ -441,7 +459,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None, meta=None
     )
 
     # Verify result
@@ -479,7 +497,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments, progress_callback=None):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None, meta=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
@@ -1177,3 +1195,150 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
         assert len(tools) == 2
         tool_names = {t.name for t in tools}
         assert tool_names == {"weather_search", "flights_search"}
+
+
+async def test_tool_call_with_meta():
+    """Test that metaParams parameter is passed to session.call_tool."""
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+        },
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+
+    # Mock session
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    # Create tool with interceptor that adds metaParams
+    async def add_meta_interceptor(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    ) -> MCPToolCallResult:
+        # Add meta to the request
+        new_request = request.override(
+            metaParams={"user_id": "123", "request_timestamp": "2025-01-23"}
+        )
+        return await handler(new_request)
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, tool_interceptors=[add_meta_interceptor]
+    )
+
+    # Invoke the tool
+    await lc_tool.ainvoke({"args": {"param1": "test"}, "id": "1", "type": "tool_call"})
+
+    # Verify call_tool was called with metaParams
+    session.call_tool.assert_called_once_with(
+        "test_tool",
+        {"param1": "test"},
+        progress_callback=None,
+        meta={"user_id": "123", "request_timestamp": "2025-01-23"},
+    )
+
+
+async def test_tool_call_with_meta_via_interceptor_override():
+    """Test that interceptors can override metaParams in the request."""
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+        },
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    # First interceptor adds meta
+    async def add_meta_interceptor(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    ) -> MCPToolCallResult:
+        new_request = request.override(metaParams={"source": "interceptor1"})
+        return await handler(new_request)
+
+    # Second interceptor modifies the meta
+    async def modify_meta_interceptor(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], Awaitable[MCPToolCallResult]],
+    ) -> MCPToolCallResult:
+        # Modify existing meta
+        existing_meta = request.metaParams or {}
+        modified_meta = {**existing_meta, "modified_by": "interceptor2"}
+        new_request = request.override(metaParams=modified_meta)
+        return await handler(new_request)
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session,
+        mcp_tool,
+        tool_interceptors=[add_meta_interceptor, modify_meta_interceptor],
+    )
+
+    await lc_tool.ainvoke({"args": {"param1": "test"}, "id": "1", "type": "tool_call"})
+
+    # Verify the final meta contains both modifications
+    session.call_tool.assert_called_once_with(
+        "test_tool",
+        {"param1": "test"},
+        progress_callback=None,
+        meta={"source": "interceptor1", "modified_by": "interceptor2"},
+    )
+
+
+async def test_tool_call_without_meta():
+    """Test that tool calls work without metaParams (passes None)."""
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+        },
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    # No interceptor - should work without meta
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    await lc_tool.ainvoke({"args": {"param1": "test"}, "id": "1", "type": "tool_call"})
+
+    # Verify call_tool was called with meta=None
+    session.call_tool.assert_called_once_with(
+        "test_tool",
+        {"param1": "test"},
+        progress_callback=None,
+        meta=None,
+    )
