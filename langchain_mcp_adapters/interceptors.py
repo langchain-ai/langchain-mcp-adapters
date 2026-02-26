@@ -46,6 +46,7 @@ class _MCPToolCallRequestOverrides(TypedDict, total=False):
     name: NotRequired[str]
     args: NotRequired[dict[str, Any]]
     headers: NotRequired[dict[str, Any] | None]
+    metaParams: NotRequired[dict[str, Any] | None]
 
 
 @dataclass
@@ -60,6 +61,7 @@ class MCPToolCallRequest:
         name: Tool name to invoke.
         args: Tool arguments as key-value pairs.
         headers: HTTP headers for applicable transports (SSE, HTTP).
+        metaParams: Optional metadata to pass to the MCP server.
 
     Context fields (read-only, use for routing/logging):
         server_name: Name of the MCP server handling the tool.
@@ -71,6 +73,7 @@ class MCPToolCallRequest:
     server_name: str  # Context: MCP server name
     headers: dict[str, Any] | None = None  # Modifiable: HTTP headers
     runtime: object | None = None  # Context: LangGraph runtime (if any)
+    metaParams: dict[str, Any] | None = None  # Modifiable: MCP metadata
 
     def override(
         self, **overrides: Unpack[_MCPToolCallRequestOverrides]
