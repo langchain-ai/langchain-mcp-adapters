@@ -362,7 +362,7 @@ def convert_mcp_tool_to_langchain_tool(
                     effective_connection = updated_connection
 
             captured_exception = None
-
+            call_tool_result = None
             if session is None:
                 # If a session is not provided, we will create one on the fly
                 if effective_connection is None:
