@@ -147,6 +147,22 @@ def test_convert_with_structured_content():
     )
 
 
+def test_convert_with_response_meta_only():
+    """Test that response _meta is returned as MCPToolArtifact."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="text result")],
+        isError=False,
+        _meta={"source": "unit-test", "trace_id": "abc123"},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    assert artifact == MCPToolArtifact(
+        _meta={"source": "unit-test", "trace_id": "abc123"}
+    )
+
+
 def test_convert_image_content():
     """Test ImageContent conversion to LangChain image block."""
     result = CallToolResult(
@@ -377,7 +393,7 @@ def test_convert_audio_content_raises():
 
 
 def test_convert_mixed_content_with_structured_content():
-    """Test mixed content with structuredContent returns both."""
+    """Test mixed content with structuredContent and _meta returns both."""
     result = CallToolResult(
         content=[
             TextContent(type="text", text="Here's the analysis"),
@@ -385,6 +401,7 @@ def test_convert_mixed_content_with_structured_content():
         ],
         isError=False,
         structuredContent={"analysis": {"score": 0.95, "confidence": "high"}},
+        _meta={"from_cache": True},
     )
 
     content, artifact = _convert_call_tool_result(result)
@@ -399,7 +416,8 @@ def test_convert_mixed_content_with_structured_content():
         },
     ]
     assert artifact == MCPToolArtifact(
-        structured_content={"analysis": {"score": 0.95, "confidence": "high"}}
+        structured_content={"analysis": {"score": 0.95, "confidence": "high"}},
+        _meta={"from_cache": True},
     )
 
 
