@@ -7,6 +7,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypedDict, get_args
 
+
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
     FileContentBlock,
@@ -158,18 +159,24 @@ def _handle_mcp_tool_error(
     raise error
 
 
-class MCPToolArtifact(TypedDict):
+class MCPToolArtifact(TypedDict, total=False):
     """Artifact returned from MCP tool calls.
 
-    This TypedDict wraps the structured content from MCP tool calls,
+    This TypedDict wraps additional fields returned by MCP tool calls,
     allowing for future extension if MCP adds more fields to tool results.
+
+    Both fields are optional and independently present — a response may carry
+    either, both, or neither (in which case the artifact is None).
 
     Attributes:
         structured_content: The structured content returned by the MCP tool,
             corresponding to the structuredContent field in CallToolResult.
+        _meta: The response metadata returned by the MCP tool,
+            corresponding to the _meta field in CallToolResult.
     """
 
     structured_content: dict[str, Any]
+    _meta: dict[str, Any]
 
 
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
@@ -246,12 +253,13 @@ def _convert_call_tool_result(
         A tuple containing:
         - The content: either a string (single text), list of content blocks,
             `ToolMessage`, or `Command`
-        - The artifact: `MCPToolArtifact` with `structured_content` if present,
-            otherwise None
+        - The artifact: `MCPToolArtifact` with `structured_content` and/or `_meta`
+            when present, otherwise None
 
     Raises:
         _MCPToolExecutionError: If the MCP tool reported an execution error
-            (`CallToolResult(isError=True)`).
+            (`CallToolResult(isError=True)`). Note: `_meta` on error results
+            is not surfaced — the exception carries only the content blocks.
         NotImplementedError: If AudioContent is encountered.
         ValueError: If an unknown or unsupported content type is encountered.
     """
@@ -273,12 +281,17 @@ def _convert_call_tool_result(
     if call_tool_result.isError:
         raise _MCPToolExecutionError(tool_content)
 
-    # Extract structured content and wrap in MCPToolArtifact
+    # Extract artifact fields from MCP result.
     artifact: MCPToolArtifact | None = None
-    if call_tool_result.structuredContent is not None:
-        artifact = MCPToolArtifact(
-            structured_content=call_tool_result.structuredContent
-        )
+    if (
+        call_tool_result.structuredContent is not None
+        or call_tool_result.meta is not None
+    ):
+        artifact = MCPToolArtifact()
+        if call_tool_result.structuredContent is not None:
+            artifact["structured_content"] = call_tool_result.structuredContent
+        if call_tool_result.meta is not None:
+            artifact["_meta"] = call_tool_result.meta
 
     return tool_content, artifact
 
@@ -409,7 +422,7 @@ def convert_mcp_tool_to_langchain_tool(
         Returns:
             A tuple of (content, artifact) where:
             - content: string, list of strings/content blocks, ToolMessage, or Command
-            - artifact: MCPToolArtifact with structured_content if present, else None
+            - artifact: MCPToolArtifact with structured_content and/or _meta when present, else None
         """
         mcp_callbacks = (
             callbacks.to_mcp_format(
