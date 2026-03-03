@@ -472,6 +472,7 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_name,
                             tool_args,
                             progress_callback=mcp_callbacks.progress_callback,
+                            meta=request.meta,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -490,6 +491,7 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
+                    meta=request.meta,
                 )
 
             return call_tool_result
