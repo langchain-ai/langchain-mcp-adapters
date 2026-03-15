@@ -6,6 +6,7 @@ MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -217,10 +218,13 @@ async def _create_stdio_session(
     Yields:
         An initialized ClientSession.
     """
+    resolved_env = (
+        {k: os.path.expandvars(v) for k, v in env.items()} if env is not None else None
+    )
     server_params = StdioServerParameters(
         command=command,
         args=args,
-        env=env,
+        env=resolved_env,
         cwd=cwd,
         encoding=encoding,
         encoding_error_handler=encoding_error_handler,

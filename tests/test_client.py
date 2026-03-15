@@ -1,13 +1,74 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.sessions import _create_stdio_session
 from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID
+
+
+async def test_stdio_session_expands_env_vars():
+    """Test that ${VAR} references in the env dict are expanded before spawning."""
+    os.environ["TEST_MCP_TOKEN"] = "secret123"
+
+    captured_params = {}
+
+    @asynccontextmanager
+    async def mock_stdio_client(params):
+        captured_params["server_params"] = params
+        mock_read = AsyncMock()
+        mock_write = AsyncMock()
+        yield mock_read, mock_write
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("langchain_mcp_adapters.sessions.stdio_client", mock_stdio_client),
+        patch("langchain_mcp_adapters.sessions.ClientSession", return_value=mock_session),
+    ):
+        async with _create_stdio_session(
+            command="npx",
+            args=["-y", "@some/mcp-server"],
+            env={"API_TOKEN": "${TEST_MCP_TOKEN}", "LITERAL": "plain"},
+        ):
+            pass
+
+    resolved_env = captured_params["server_params"].env
+    assert resolved_env["API_TOKEN"] == "secret123"
+    assert resolved_env["LITERAL"] == "plain"
+
+
+async def test_stdio_session_env_none_stays_none():
+    """Test that env=None is passed through as None (inherits parent environment)."""
+    captured_params = {}
+
+    @asynccontextmanager
+    async def mock_stdio_client(params):
+        captured_params["server_params"] = params
+        mock_read = AsyncMock()
+        mock_write = AsyncMock()
+        yield mock_read, mock_write
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("langchain_mcp_adapters.sessions.stdio_client", mock_stdio_client),
+        patch("langchain_mcp_adapters.sessions.ClientSession", return_value=mock_session),
+    ):
+        async with _create_stdio_session(command="npx", args=[]):
+            pass
+
+    assert captured_params["server_params"].env is None
 
 
 async def test_multi_server_mcp_client(
