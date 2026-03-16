@@ -80,6 +80,21 @@ async def test_stdio_session_env_empty_dict_stays_empty(mock_stdio_session):
     assert mock_stdio_session["server_params"].env == {}
 
 
+async def test_stdio_session_bare_dollar_not_expanded(monkeypatch, mock_stdio_session):
+    """Bare $VAR references must NOT be expanded — only ${VAR} is supported."""
+    monkeypatch.setenv("word123", "OOPS")
+
+    async with _create_stdio_session(
+        command="npx",
+        args=["-y", "@some/mcp-server"],
+        env={"DB_PASSWORD": "p@ss$word123"},
+    ):
+        pass
+
+    resolved_env = mock_stdio_session["server_params"].env
+    assert resolved_env["DB_PASSWORD"] == "p@ss$word123"  # noqa: S105
+
+
 async def test_stdio_session_warns_on_undefined_env_var(
     monkeypatch, mock_stdio_session, caplog
 ):

@@ -29,8 +29,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_UNEXPANDED_VAR_RE = re.compile(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*")
-"""Matches `${VAR}` and `$VAR` style environment variable references."""
+_BRACED_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+"""Matches `${VAR}` style environment variable references."""
+
+
+def _expand_env_vars(value: str) -> str:
+    """Expand `${VAR}` references in *value* using the current environment.
+
+    Only braced syntax is expanded; bare `$VAR` references are left untouched so
+    that literal dollar signs in passwords or other values are never silently
+    corrupted by an unrelated environment variable.
+
+    Undefined variables are preserved as-is (e.g. `${MISSING}` stays
+    `${MISSING}`).
+    """
+    return _BRACED_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -215,9 +229,11 @@ async def _create_stdio_session(
         command: Command to execute.
         args: Arguments for the command.
         env: Environment variables for the command. Values containing
-            `${VAR}` or `$VAR` references are expanded via `os.path.expandvars`.
-            Only values (not keys) are expanded; `command` and `args` are
-            passed through unchanged.
+            `${VAR}` references are expanded from the current environment. Only
+            braced syntax is supported; bare `${VAR}` is **not** expanded so
+            that literal dollar signs in passwords or other values are never
+            silently corrupted. Only values (not keys) are expanded;
+            `${command}` and `${args}` are passed through unchanged.
 
             If not specified, inherits a subset of the current environment.
 
@@ -231,11 +247,11 @@ async def _create_stdio_session(
         An initialized ClientSession.
     """
     resolved_env = (
-        {k: os.path.expandvars(v) for k, v in env.items()} if env is not None else None
+        {k: _expand_env_vars(v) for k, v in env.items()} if env is not None else None
     )
     if resolved_env is not None:
         for k, v in resolved_env.items():
-            if _UNEXPANDED_VAR_RE.search(v):
+            if _BRACED_VAR_RE.search(v):
                 logger.warning(
                     "env[%r] contains unexpanded variable reference: %r", k, v
                 )
