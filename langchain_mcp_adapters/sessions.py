@@ -6,7 +6,9 @@ MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -24,6 +26,11 @@ if TYPE_CHECKING:
     import httpx
 
     from langchain_mcp_adapters.callbacks import _MCPCallbacks
+
+logger = logging.getLogger(__name__)
+
+_UNEXPANDED_VAR_RE = re.compile(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*")
+"""Matches `${VAR}` and `$VAR` style environment variable references."""
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -207,8 +214,13 @@ async def _create_stdio_session(
     Args:
         command: Command to execute.
         args: Arguments for the command.
-        env: Environment variables for the command.
+        env: Environment variables for the command. Values containing
+            `${VAR}` or `$VAR` references are expanded via `os.path.expandvars`.
+            Only values (not keys) are expanded; `command` and `args` are
+            passed through unchanged.
+
             If not specified, inherits a subset of the current environment.
+
             The details are implemented in the MCP sdk.
         cwd: Working directory for the command.
         encoding: Character encoding.
@@ -221,6 +233,12 @@ async def _create_stdio_session(
     resolved_env = (
         {k: os.path.expandvars(v) for k, v in env.items()} if env is not None else None
     )
+    if resolved_env is not None:
+        for k, v in resolved_env.items():
+            if _UNEXPANDED_VAR_RE.search(v):
+                logger.warning(
+                    "env[%r] contains unexpanded variable reference: %r", k, v
+                )
     server_params = StdioServerParameters(
         command=command,
         args=args,

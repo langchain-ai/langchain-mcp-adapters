@@ -1,8 +1,11 @@
+import logging
 import os
+from collections.abc import Generator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
@@ -13,62 +16,88 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID
 
 
-async def test_stdio_session_expands_env_vars():
-    """Test that ${VAR} references in the env dict are expanded before spawning."""
-    os.environ["TEST_MCP_TOKEN"] = "secret123"
-
-    captured_params = {}
+@pytest.fixture
+def mock_stdio_session() -> Generator[dict, None, None]:
+    """Patch stdio_client and ClientSession, yielding a dict that captures
+    the StdioServerParameters passed to stdio_client."""
+    captured: dict = {}
 
     @asynccontextmanager
-    async def mock_stdio_client(params):
-        captured_params["server_params"] = params
-        mock_read = AsyncMock()
-        mock_write = AsyncMock()
-        yield mock_read, mock_write
+    async def fake_stdio_client(params):
+        captured["server_params"] = params
+        yield AsyncMock(), AsyncMock()
 
     mock_session = MagicMock()
     mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
     with (
-        patch("langchain_mcp_adapters.sessions.stdio_client", mock_stdio_client),
-        patch("langchain_mcp_adapters.sessions.ClientSession", return_value=mock_session),
+        patch("langchain_mcp_adapters.sessions.stdio_client", fake_stdio_client),
+        patch(
+            "langchain_mcp_adapters.sessions.ClientSession",
+            return_value=mock_session,
+        ),
     ):
+        yield captured
+
+
+async def test_stdio_session_expands_env_vars(monkeypatch, mock_stdio_session):
+    """Test that ${VAR} references in the env dict are expanded before spawning."""
+    monkeypatch.setenv("TEST_MCP_TOKEN", "secret123")
+
+    async with _create_stdio_session(
+        command="npx",
+        args=["-y", "@some/mcp-server"],
+        env={
+            "API_TOKEN": "${TEST_MCP_TOKEN}",
+            "LITERAL": "plain",
+            "EMBEDDED": "Bearer ${TEST_MCP_TOKEN}",
+        },
+    ):
+        pass
+
+    resolved_env = mock_stdio_session["server_params"].env
+    assert resolved_env["API_TOKEN"] == "secret123"
+    assert resolved_env["LITERAL"] == "plain"
+    assert resolved_env["EMBEDDED"] == "Bearer secret123"
+
+
+async def test_stdio_session_env_none_stays_none(mock_stdio_session):
+    """Test that env=None is passed through as None (inherits parent environment)."""
+    async with _create_stdio_session(command="npx", args=[]):
+        pass
+
+    assert mock_stdio_session["server_params"].env is None
+
+
+async def test_stdio_session_env_empty_dict_stays_empty(mock_stdio_session):
+    """Test that env={} is passed through as {} (not collapsed to None)."""
+    async with _create_stdio_session(command="npx", args=[], env={}):
+        pass
+
+    assert mock_stdio_session["server_params"].env == {}
+
+
+async def test_stdio_session_warns_on_undefined_env_var(
+    monkeypatch, mock_stdio_session, caplog
+):
+    """Test that undefined ${VAR} references emit a warning."""
+    monkeypatch.delenv("TOTALLY_UNDEFINED_VAR_XYZ", raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.sessions"):
         async with _create_stdio_session(
             command="npx",
-            args=["-y", "@some/mcp-server"],
-            env={"API_TOKEN": "${TEST_MCP_TOKEN}", "LITERAL": "plain"},
+            args=[],
+            env={"SECRET": "${TOTALLY_UNDEFINED_VAR_XYZ}"},
         ):
             pass
 
-    resolved_env = captured_params["server_params"].env
-    assert resolved_env["API_TOKEN"] == "secret123"
-    assert resolved_env["LITERAL"] == "plain"
-
-
-async def test_stdio_session_env_none_stays_none():
-    """Test that env=None is passed through as None (inherits parent environment)."""
-    captured_params = {}
-
-    @asynccontextmanager
-    async def mock_stdio_client(params):
-        captured_params["server_params"] = params
-        mock_read = AsyncMock()
-        mock_write = AsyncMock()
-        yield mock_read, mock_write
-
-    mock_session = MagicMock()
-    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
-    mock_session.__aexit__ = AsyncMock(return_value=None)
-
-    with (
-        patch("langchain_mcp_adapters.sessions.stdio_client", mock_stdio_client),
-        patch("langchain_mcp_adapters.sessions.ClientSession", return_value=mock_session),
-    ):
-        async with _create_stdio_session(command="npx", args=[]):
-            pass
-
-    assert captured_params["server_params"].env is None
+    assert "unexpanded variable reference" in caplog.text
+    # Value should pass through as literal when undefined
+    assert (
+        mock_stdio_session["server_params"].env["SECRET"]
+        == "${TOTALLY_UNDEFINED_VAR_XYZ}"
+    )
 
 
 async def test_multi_server_mcp_client(
