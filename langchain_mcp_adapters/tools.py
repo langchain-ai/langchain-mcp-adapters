@@ -303,7 +303,7 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
-        runtime: Annotated[Any, InjectedToolArg()] = None,
+        runtime: Annotated[object | None, InjectedToolArg()] = None,
         **arguments: dict[str, Any],
     ) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
         """Execute tool call with interceptor chain and return formatted result.
