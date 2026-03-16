@@ -6,6 +6,9 @@ MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
 
 from __future__ import annotations
 
+import logging
+import os
+import re
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
@@ -23,6 +26,25 @@ if TYPE_CHECKING:
     import httpx
 
     from langchain_mcp_adapters.callbacks import _MCPCallbacks
+
+logger = logging.getLogger(__name__)
+
+_BRACED_VAR_RE = re.compile(r"\$\{([^}]+)\}")
+"""Matches `${VAR}` style environment variable references."""
+
+
+def _expand_env_vars(value: str) -> str:
+    """Expand `${VAR}` references in *value* using the current environment.
+
+    Only braced syntax is expanded; bare `$VAR` references are left untouched so
+    that literal dollar signs in passwords or other values are never silently
+    corrupted by an unrelated environment variable.
+
+    Undefined variables are preserved as-is (e.g. `${MISSING}` stays
+    `${MISSING}`).
+    """
+    return _BRACED_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+
 
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
@@ -206,8 +228,15 @@ async def _create_stdio_session(
     Args:
         command: Command to execute.
         args: Arguments for the command.
-        env: Environment variables for the command.
+        env: Environment variables for the command. Values containing
+            `${VAR}` references are expanded from the current environment. Only
+            braced syntax is supported; bare `${VAR}` is **not** expanded so
+            that literal dollar signs in passwords or other values are never
+            silently corrupted. Only values (not keys) are expanded;
+            `${command}` and `${args}` are passed through unchanged.
+
             If not specified, inherits a subset of the current environment.
+
             The details are implemented in the MCP sdk.
         cwd: Working directory for the command.
         encoding: Character encoding.
@@ -217,10 +246,19 @@ async def _create_stdio_session(
     Yields:
         An initialized ClientSession.
     """
+    resolved_env = (
+        {k: _expand_env_vars(v) for k, v in env.items()} if env is not None else None
+    )
+    if resolved_env is not None:
+        for k, v in resolved_env.items():
+            if _BRACED_VAR_RE.search(v):
+                logger.warning(
+                    "env[%r] contains unexpanded variable reference: %r", k, v
+                )
     server_params = StdioServerParameters(
         command=command,
         args=args,
-        env=env,
+        env=resolved_env,
         cwd=cwd,
         encoding=encoding,
         encoding_error_handler=encoding_error_handler,
