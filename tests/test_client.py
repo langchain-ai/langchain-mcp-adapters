@@ -140,6 +140,81 @@ async def test_multi_server_connect_methods(
     assert tool_names == {"add", "multiply", "get_time"}
 
 
+async def test_get_tools_respects_disabled_tools():
+    """Test that disabled_tools filters tool loading for a specific server."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+                "disabled_tools": ["multiply"],
+            },
+            "weather": {
+                "command": "python3",
+                "args": [weather_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+
+    all_tools = await client.get_tools()
+    assert {tool.name for tool in all_tools} == {"add", "get_weather"}
+
+    math_tools = await client.get_tools(server_name="math")
+    assert [tool.name for tool in math_tools] == ["add"]
+
+    add_tool = math_tools[0]
+    result = await add_tool.ainvoke({"a": 7, "b": 8})
+    assert result == [{"type": "text", "text": "15", "id": IsLangChainID}]
+
+
+async def test_session_allows_disabled_tools_in_connection_config():
+    """Test that disabled_tools does not break raw session creation."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+                "disabled_tools": ["multiply"],
+            }
+        },
+    )
+
+    async with client.session("math") as session:
+        tools = await load_mcp_tools(session)
+
+    assert {tool.name for tool in tools} == {"add", "multiply"}
+
+
+async def test_get_tools_returns_empty_list_when_all_tools_disabled():
+    """Test that disabling every tool for a server returns an empty list."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+                "disabled_tools": ["add", "multiply"],
+            }
+        },
+    )
+
+    tools = await client.get_tools(server_name="math")
+    assert tools == []
+
+
 async def test_get_prompt():
     """Test retrieving prompts from MCP servers."""
     # Get the absolute path to the server scripts

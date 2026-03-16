@@ -4,7 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated, Any, TypedDict, get_args
 
 from langchain_core.messages import ToolMessage
@@ -303,7 +303,7 @@ def convert_mcp_tool_to_langchain_tool(
         raise ValueError(msg)
 
     async def call_tool(
-        runtime: Annotated[Any, InjectedToolArg()] = None,
+        runtime: Annotated[object | None, InjectedToolArg()] = None,
         **arguments: dict[str, Any],
     ) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
         """Execute tool call with interceptor chain and return formatted result.
@@ -441,6 +441,7 @@ async def load_mcp_tools(
     tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
     tool_name_prefix: bool = False,
+    disabled_tools: Sequence[str] | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
@@ -452,6 +453,8 @@ async def load_mcp_tools(
         server_name: Name of the server these tools belong to.
         tool_name_prefix: If `True` and `server_name` is provided, tool names will be
             prefixed w/ server name (e.g., `"weather_search"` instead of `"search"`).
+        disabled_tools: Optional iterable of MCP tool names to exclude before
+            converting them to LangChain tools.
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
@@ -463,6 +466,9 @@ async def load_mcp_tools(
     if session is None and connection is None:
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
+
+    if disabled_tools is None and connection is not None:
+        disabled_tools = connection.get("disabled_tools")
 
     mcp_callbacks = (
         callbacks.to_mcp_format(context=CallbackContext(server_name=server_name))
@@ -482,6 +488,10 @@ async def load_mcp_tools(
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
+
+    if disabled_tools:
+        disabled_tool_names = set(disabled_tools)
+        tools = [tool for tool in tools if tool.name not in disabled_tool_names]
 
     return [
         convert_mcp_tool_to_langchain_tool(

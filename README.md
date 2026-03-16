@@ -148,6 +148,35 @@ weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?
 >     tools = await load_mcp_tools(session)
 > ```
 
+### Disabling specific tools per server
+
+If an MCP server exposes tools you do not want to bind into LangChain, add
+`disabled_tools` to that server's connection config. Tool names are matched
+against the original MCP tool name before `tool_name_prefix` is applied.
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+client = MultiServerMCPClient(
+    {
+        "tikhub-tiktok": {
+            "transport": "http",
+            "url": "https://mcp.tikhub.io/tiktok/mcp",
+            "headers": {
+                "Authorization": "Bearer YOUR_API_KEY",
+            },
+            "disabled_tools": [
+                "xiaohongshu_web_v2_fetch_search_notes",
+                "xiaohongshu_web_get_home_recommend",
+                "xiaohongshu_web_get_note_info_v2",
+            ],
+        },
+    }
+)
+
+tools = await client.get_tools()
+```
+
 ## Streamable HTTP
 
 MCP now supports [streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http) transport.
