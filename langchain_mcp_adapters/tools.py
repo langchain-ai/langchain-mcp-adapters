@@ -413,10 +413,16 @@ def convert_mcp_tool_to_langchain_tool(
 
         return _convert_call_tool_result(call_tool_result)
 
+    metadata: dict[str, Any] = {}
+    if tool.annotations is not None:
+        metadata["annotations"] = tool.annotations.model_dump()
+    fn_metadata = getattr(tool, "fn_metadata", None)
+    if fn_metadata is not None:
+        metadata["fn_metadata"] = fn_metadata
     meta = getattr(tool, "meta", None)
-    base = tool.annotations.model_dump() if tool.annotations is not None else {}
-    meta = {"_meta": meta} if meta is not None else {}
-    metadata = {**base, **meta} or None
+    if meta is not None:
+        metadata["_meta"] = meta
+    metadata = metadata or None
 
     # Apply server name prefix if requested
     lc_tool_name = tool.name
