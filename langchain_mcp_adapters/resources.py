@@ -22,7 +22,6 @@ def convert_mcp_resource_to_langchain_blob(
 
     Returns:
         A LangChain Blob
-
     """
     if isinstance(contents, TextResourceContents):
         data = contents.text
@@ -33,22 +32,16 @@ def convert_mcp_resource_to_langchain_blob(
         raise TypeError(msg)
 
     return Blob.from_data(
-        data=data, mime_type=contents.mimeType, metadata={"uri": resource_uri}
+        data=data,
+        mime_type=contents.mimeType,
+        metadata={"uri": resource_uri},
     )
 
 
 async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
-    """Fetch a single MCP resource and convert it to LangChain [Blob objects][langchain_core.documents.base.Blob].
-
-    Args:
-        session: MCP client session.
-        uri: URI of the resource to fetch.
-
-    Returns:
-        A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
-    """  # noqa: E501
+    """Fetch a single MCP resource and convert it to LangChain Blobs."""
     contents_result = await session.read_resource(uri)
-    if not contents_result.contents or len(contents_result.contents) == 0:
+    if not contents_result.contents:
         return []
 
     return [
@@ -62,29 +55,22 @@ async def load_mcp_resources(
     *,
     uris: str | list[str] | None = None,
 ) -> list[Blob]:
-    """Load MCP resources and convert them to LangChain [Blob objects][langchain_core.documents.base.Blob].
+    """Load MCP resources and convert them to LangChain Blobs."""
+    blobs: list[Blob] = []
 
-    Args:
-        session: MCP client session.
-        uris: List of URIs to load. If `None`, all resources will be loaded.
-
-            !!! note
-
-                Dynamic resources will NOT be loaded when `None` is specified,
-                as they require parameters and are ignored by the MCP SDK's
-                `session.list_resources()` method.
-
-    Returns:
-        A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
-
-    Raises:
-        RuntimeError: If an error occurs while fetching a resource.
-    """  # noqa: E501
-    blobs = []
+    # 🔹 NEW: keep resource metadata map (uri → name/description)
+    resource_meta = {}
 
     if uris is None:
         resources_list = await session.list_resources()
-        uri_list = [r.uri for r in resources_list.resources]
+        resource_meta = {
+            r.uri: {
+                "name": r.name,
+                "description": r.description,
+            }
+            for r in resources_list.resources
+        }
+        uri_list = list(resource_meta.keys())
     elif isinstance(uris, str):
         uri_list = [uris]
     else:
@@ -95,7 +81,16 @@ async def load_mcp_resources(
         for uri in uri_list:
             current_uri = uri
             resource_blobs = await get_mcp_resource(session, uri)
+
+            # 🔹 NEW: enrich blob metadata (non-breaking)
+            meta = resource_meta.get(uri)
+            if meta:
+                for blob in resource_blobs:
+                    blob.metadata.setdefault("name", meta.get("name"))
+                    blob.metadata.setdefault("description", meta.get("description"))
+
             blobs.extend(resource_blobs)
+
     except Exception as e:
         msg = f"Error fetching resource {current_uri}"
         raise RuntimeError(msg) from e
