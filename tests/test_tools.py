@@ -44,7 +44,7 @@ def test_convert_empty_text_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == []
+    assert content == ""
     assert artifact is None
 
 
@@ -56,7 +56,8 @@ def test_convert_single_text_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [{"type": "text", "text": "test result", "id": IsLangChainID}]
+    # FIX #34669: Single text content now returns plain string for OpenAI compatibility
+    assert content == "test result"
     assert artifact is None
 
 
@@ -72,10 +73,8 @@ def test_convert_multiple_text_contents():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {"type": "text", "text": "result 1", "id": IsLangChainID},
-        {"type": "text", "text": "result 2", "id": IsLangChainID},
-    ]
+    # FIX #34669: Multiple text blocks are joined with newlines
+    assert content == "result 1\nresult 2"
     assert artifact is None
 
 
@@ -100,21 +99,16 @@ def test_convert_with_non_text_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    # With mixed content, we get a list of LangChain content blocks
-    assert content == [
-        {"type": "text", "text": "text result", "id": IsLangChainID},
-        {
-            "type": "image",
-            "base64": "base64data",
-            "mime_type": "image/png",
-            "id": IsLangChainID,
-        },
-        {
-            "type": "text",
-            "text": "hi",
-            "id": IsLangChainID,
-        },  # EmbeddedResource with text -> text block
-    ]
+    # FIX #34669: Mixed content (text + image) is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 3
+    assert parsed[0]["type"] == "text"
+    assert parsed[0]["text"] == "text result"
+    assert parsed[1]["type"] == "image"
+    assert parsed[1]["base64"] == "base64data"
+    assert parsed[2]["type"] == "text"
+    assert parsed[2]["text"] == "hi"
     # No structuredContent in this result
     assert artifact is None
 
@@ -141,7 +135,8 @@ def test_convert_with_structured_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    # FIX #34669: Single text content returns plain string
+    assert content == "text result"
     assert artifact == MCPToolArtifact(
         structured_content={"key": "value", "nested": {"data": 123}}
     )
@@ -158,15 +153,13 @@ def test_convert_image_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    # Single non-text content returns as a list of content blocks
-    assert content == [
-        {
-            "type": "image",
-            "base64": "jpeg_base64_data",
-            "mime_type": "image/jpeg",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Single non-text content is JSON serialized for OpenAI compatibility
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "image"
+    assert parsed[0]["base64"] == "jpeg_base64_data"
+    assert parsed[0]["mime_type"] == "image/jpeg"
     assert artifact is None
 
 
@@ -186,14 +179,13 @@ def test_convert_resource_link():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {
-            "type": "file",
-            "url": "file:///path/to/document.pdf",
-            "mime_type": "application/pdf",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "file"
+    assert parsed[0]["url"] == "file:///path/to/document.pdf"
+    assert parsed[0]["mime_type"] == "application/pdf"
     assert artifact is None
 
 
@@ -213,14 +205,13 @@ def test_convert_resource_link_image():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {
-            "type": "image",
-            "url": "https://example.com/photo.png",
-            "mime_type": "image/png",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "image"
+    assert parsed[0]["url"] == "https://example.com/photo.png"
+    assert parsed[0]["mime_type"] == "image/png"
     assert artifact is None
 
 
@@ -240,14 +231,13 @@ def test_convert_resource_link_image_jpeg():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {
-            "type": "image",
-            "url": "file:///photos/vacation.jpg",
-            "mime_type": "image/jpeg",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "image"
+    assert parsed[0]["url"] == "file:///photos/vacation.jpg"
+    assert parsed[0]["mime_type"] == "image/jpeg"
     assert artifact is None
 
 
@@ -267,15 +257,13 @@ def test_convert_resource_link_text():
 
     content, artifact = _convert_call_tool_result(result)
 
-    # Text ResourceLinks become file blocks since we only have URL, not content
-    assert content == [
-        {
-            "type": "file",
-            "url": "file:///docs/readme.txt",
-            "mime_type": "text/plain",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "file"
+    assert parsed[0]["url"] == "file:///docs/readme.txt"
+    assert parsed[0]["mime_type"] == "text/plain"
     assert artifact is None
 
 
@@ -294,13 +282,12 @@ def test_convert_resource_link_no_mime_type():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {
-            "type": "file",
-            "url": "file:///data/unknown",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "file"
+    assert parsed[0]["url"] == "file:///data/unknown"
     assert artifact is None
 
 
@@ -322,14 +309,13 @@ def test_convert_embedded_resource_blob_image():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {
-            "type": "image",
-            "base64": "png_base64_data",
-            "mime_type": "image/png",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "image"
+    assert parsed[0]["base64"] == "png_base64_data"
+    assert parsed[0]["mime_type"] == "image/png"
     assert artifact is None
 
 
@@ -351,14 +337,13 @@ def test_convert_embedded_resource_blob_file():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {
-            "type": "file",
-            "base64": "pdf_base64_data",
-            "mime_type": "application/pdf",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: Non-text content is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 1
+    assert parsed[0]["type"] == "file"
+    assert parsed[0]["base64"] == "pdf_base64_data"
+    assert parsed[0]["mime_type"] == "application/pdf"
     assert artifact is None
 
 
@@ -389,15 +374,14 @@ def test_convert_mixed_content_with_structured_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [
-        {"type": "text", "text": "Here's the analysis", "id": IsLangChainID},
-        {
-            "type": "image",
-            "base64": "chart_data",
-            "mime_type": "image/png",
-            "id": IsLangChainID,
-        },
-    ]
+    # FIX #34669: Mixed content (text + image) is JSON serialized
+    import json
+    parsed = json.loads(content)
+    assert len(parsed) == 2
+    assert parsed[0]["type"] == "text"
+    assert parsed[0]["text"] == "Here's the analysis"
+    assert parsed[1]["type"] == "image"
+    assert parsed[1]["base64"] == "chart_data"
     assert artifact == MCPToolArtifact(
         structured_content={"analysis": {"score": 0.95, "confidence": "high"}}
     )
@@ -444,12 +428,10 @@ async def test_convert_mcp_tool_to_langchain_tool():
         "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
     )
 
-    # Verify result
+    # Verify result - FIX #34669: content is now a string
     assert result.name == "test_tool"
     assert result.tool_call_id == "1"
-    assert result.content == [
-        {"type": "text", "text": "tool result", "id": IsLangChainID}
-    ]
+    assert result.content == "tool result"
 
 
 async def test_load_mcp_tools():
@@ -509,13 +491,8 @@ async def test_load_mcp_tools():
     )
     assert result1.name == "tool1"
     assert result1.tool_call_id == "1"
-    assert result1.content == [
-        {
-            "type": "text",
-            "text": "tool1 result with {'param1': 'test1', 'param2': 1}",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: content is now a string
+    assert result1.content == "tool1 result with {'param1': 'test1', 'param2': 1}"
 
     # Test calling the second tool
     result2 = await tools[1].ainvoke(
@@ -523,13 +500,8 @@ async def test_load_mcp_tools():
     )
     assert result2.name == "tool2"
     assert result2.tool_call_id == "2"
-    assert result2.content == [
-        {
-            "type": "text",
-            "text": "tool2 result with {'param1': 'test2', 'param2': 2}",
-            "id": IsLangChainID,
-        }
-    ]
+    # FIX #34669: content is now a string
+    assert result2.content == "tool2 result with {'param1': 'test2', 'param2': 2}"
 
 
 def _create_annotations_server():
@@ -732,9 +704,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
         # Test that the tool works correctly
         result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
-        assert result.content == [
-            {"type": "text", "text": "Server is running", "id": IsLangChainID}
-        ]
+        # FIX #34669: content is now a string\n        assert result.content == \"Server is running\"
 
 
 def _create_info_server():
