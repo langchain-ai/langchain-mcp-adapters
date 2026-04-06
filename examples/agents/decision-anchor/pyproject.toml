@@ -1,0 +1,34 @@
+[project]
+name = "decision-anchor-agent"
+version = "0.1.0"
+description = "LangGraph ReAct agent with Decision Anchor MCP integration for external accountability proof"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["mcp", "langchain", "langgraph", "accountability", "decision-anchor"]
+license = { text = "MIT" }
+dependencies = [
+    "langchain-mcp-adapters",
+    "langgraph",
+    "langchain-openai",
+]
+
+[project.scripts]
+decision-anchor-agent = "decision_anchor_agent.agent:main_sync"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["decision_anchor_agent"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.uv]
+dev-dependencies = ["ruff>=0.6.9"]
