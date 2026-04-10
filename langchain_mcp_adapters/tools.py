@@ -341,6 +341,7 @@ def convert_mcp_tool_to_langchain_tool(
             """
             tool_name = request.name
             tool_args = request.args
+            tool_meta = request.meta
             effective_connection = connection
 
             # If headers were modified, create a new connection with updated headers
@@ -378,6 +379,7 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_name,
                             tool_args,
                             progress_callback=mcp_callbacks.progress_callback,
+                            meta=tool_meta,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -396,17 +398,25 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
+                    meta=tool_meta,
                 )
 
             return call_tool_result
 
         # Build and execute the interceptor chain
         handler = _build_interceptor_chain(execute_tool, tool_interceptors)
+
+        # Extract _meta from arguments - it's protocol metadata, not a tool argument.
+        # We must remove it before passing arguments to the MCP server, otherwise
+        # the server will reject it as an unexpected tool parameter.
+        tool_meta = arguments.pop("_meta", None)
+
         request = MCPToolCallRequest(
             name=tool.name,
             args=arguments,
             server_name=server_name or "unknown",
             headers=None,
+            meta=tool_meta,
             runtime=runtime,
         )
         call_tool_result = await handler(request)
