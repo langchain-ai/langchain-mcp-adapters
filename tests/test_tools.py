@@ -584,13 +584,14 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         assert len(tools) == 1
         tool = tools[0]
         assert tool.name == "get_time"
-        assert tool.metadata == {
-            "title": "Get Time",
-            "readOnlyHint": True,
-            "idempotentHint": False,
-            "destructiveHint": None,
-            "openWorldHint": None,
-        }
+        # Check base metadata fields
+        assert tool.metadata["title"] == "Get Time"
+        assert tool.metadata["readOnlyHint"] is True
+        assert tool.metadata["idempotentHint"] is False
+        assert tool.metadata["destructiveHint"] is None
+        assert tool.metadata["openWorldHint"] is None
+        # Check output_schema is preserved in metadata (if not supported by StructuredTool)
+        assert "mcp_output_schema" in tool.metadata
 
 
 # Tests for to_fastmcp functionality
