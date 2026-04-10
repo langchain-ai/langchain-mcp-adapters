@@ -327,3 +327,30 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
   }
 }
 ```
+
+## Production MCP Servers
+
+Connect to hosted, production MCP servers without running local servers.
+
+### SolHunt - Solana Wallet Recovery
+
+[SolHunt](https://github.com/shieldspprt/solhunt-recovery) provides Solana wallet health analysis and SOL recovery via a remote MCP server.
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langgraph.prebuilt import create_react_agent
+
+async with MultiServerMCPClient({
+    "solhunt": {
+        "transport": "http",
+        "url": "https://solhunt.dev/.netlify/functions/mcp",
+    }
+}) as client:
+    tools = client.get_tools()
+    agent = create_react_agent("openai:gpt-4.1", tools)
+    result = await agent.ainvoke({
+        "messages": [{"role": "user", "content": "Check wallet health for ExampleAddress11111111111111111111"}]
+    })
+```
+
+See full example: [`examples/clients/solhunt_wallet_recovery.py`](examples/clients/solhunt_wallet_recovery.py)
