@@ -327,3 +327,35 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
   }
 }
 ```
+
+## Community MCP Servers
+
+Below are community-maintained MCP servers compatible with `langchain-mcp-adapters`.
+
+### HiveAgent
+
+[HiveAgent](https://hiveagentiq.com) provides 1,221 MCP tools for the agentic economy, covering payments (Visa ICC, Mastercard Agent Pay, Stripe MPP, x402, BVNK, Circle CPN), agent identity (DID, KYA), security (injection scanning, circuit breaker), yield (4–12% APY), and 45 industry verticals.
+
+**Install via Smithery:**
+
+```bash
+npx @smithery/cli install @hiveagentiq/hiveagent
+```
+
+**Endpoint:** `https://hiveagentiq.com/mcp`
+
+**Usage with `MultiServerMCPClient`:**
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async with MultiServerMCPClient(
+    {
+        "hiveagent": {
+            "url": "https://hiveagentiq.com/mcp",
+            "transport": "streamable_http",
+        }
+    }
+) as client:
+    tools = await client.get_tools()
+```
