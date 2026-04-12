@@ -1177,3 +1177,88 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
         assert len(tools) == 2
         tool_names = {t.name for t in tools}
         assert tool_names == {"weather_search", "flights_search"}
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_aenter_failure_raises_not_unbound() -> None:
+    """Regression test: UnboundLocalError when create_session.__aenter__ fails.
+
+    When session=None and create_session().__aenter__ raises (e.g. connection
+    refused, network error), the old code left call_tool_result unbound while
+    captured_exception remained None, causing UnboundLocalError on the
+    ``return call_tool_result`` line.  The fix wraps the entire ``async with``
+    in an outer try/except so the originating exception is always re-raised.
+    """
+    from unittest.mock import patch
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="A tool",
+        inputSchema={"type": "object", "properties": {}, "title": "Empty"},
+    )
+    connection = {
+        "transport": "streamable_http",
+        "url": "http://localhost:9999/mcp",
+    }
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        None, mcp_tool, connection=connection
+    )
+
+    aenter_error = ConnectionRefusedError("connection refused")
+
+    class _FailingCM:
+        async def __aenter__(self):
+            raise aenter_error
+
+        async def __aexit__(self, *_):
+            pass
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session", return_value=_FailingCM()
+    ):
+        with pytest.raises(ConnectionRefusedError, match="connection refused"):
+            await lc_tool.ainvoke(
+                {"args": {}, "id": "1", "type": "tool_call"}
+            )
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_initialize_failure_raises_not_unbound() -> None:
+    """Regression test: UnboundLocalError when tool_session.initialize() fails.
+
+    In the old code initialize() was called outside the inner try/except, so a
+    failure there also left call_tool_result unbound.
+    """
+    from unittest.mock import patch
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="A tool",
+        inputSchema={"type": "object", "properties": {}, "title": "Empty"},
+    )
+    connection = {
+        "transport": "streamable_http",
+        "url": "http://localhost:9999/mcp",
+    }
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        None, mcp_tool, connection=connection
+    )
+
+    init_error = RuntimeError("initialize failed")
+    mock_session = AsyncMock()
+    mock_session.initialize.side_effect = init_error
+
+    class _SessionCM:
+        async def __aenter__(self):
+            return mock_session
+
+        async def __aexit__(self, *_):
+            pass
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session", return_value=_SessionCM()
+    ):
+        with pytest.raises(RuntimeError, match="initialize failed"):
+            await lc_tool.ainvoke(
+                {"args": {}, "id": "1", "type": "tool_call"}
+            )
