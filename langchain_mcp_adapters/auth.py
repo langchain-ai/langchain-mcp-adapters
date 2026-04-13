@@ -134,26 +134,6 @@ def _bind_callback_socket() -> socket.socket:
     return sock
 
 
-def _make_redirect_handler() -> Callable[[str], Awaitable[None]]:
-    """Return an async handler that opens the authorization URL in a browser."""
-
-    async def _redirect(url: str) -> None:
-        logger.info("Opening browser for OAuth authorization...")
-        try:
-            webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            # Headless / SSH / Docker — print the URL so the user can open it
-            # manually on another machine.
-            pass
-        # Always print — the browser may have opened in the background.
-        print(  # noqa: T201
-            f"\n  OAuth authorization required.\n"
-            f"  If a browser did not open, visit this URL:\n\n"
-            f"    {url}\n"
-        )
-
-    return _redirect
-
 
 _CALLBACK_HTML = (
     "HTTP/1.1 200 OK\r\n"
@@ -164,71 +144,91 @@ _CALLBACK_HTML = (
 )
 
 
-def _make_callback_handler(
-    sock: socket.socket,
-    timeout: float,
-) -> Callable[[], Awaitable[tuple[str, str | None]]]:
-    """Return an async handler that starts a local server and waits for the redirect."""
+class _CallbackServer:
+    """Local HTTP server that receives the OAuth redirect.
 
-    async def _callback() -> tuple[str, str | None]:
-        result_future: asyncio.Future[tuple[str, str | None]] = (
-            asyncio.get_running_loop().create_future()
+    The server is started eagerly (before the browser opens) to avoid a race
+    where a fast OAuth provider redirects before the server is listening.
+    """
+
+    def __init__(self, sock: socket.socket, timeout: float) -> None:
+        self._sock = sock
+        self._timeout = timeout
+        self._server: asyncio.AbstractServer | None = None
+        self._result_future: asyncio.Future[tuple[str, str | None]] | None = None
+
+    async def start(self) -> None:
+        """Start listening for the redirect callback."""
+        self._result_future = asyncio.get_running_loop().create_future()
+        self._sock.setblocking(False)
+        self._server = await asyncio.start_server(
+            self._handle_client, sock=self._sock
         )
 
-        async def _handle_client(
-            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-        ) -> None:
-            try:
-                request_line = await asyncio.wait_for(
-                    reader.readline(), timeout=10
-                )
-                decoded = request_line.decode("utf-8", errors="replace")
-
-                # Parse: GET /callback?code=...&state=... HTTP/1.1
-                parts = decoded.split()
-                if len(parts) >= 2:
-                    parsed = urlparse(parts[1])
-                    qs = parse_qs(parsed.query)
-
-                    error = qs.get("error", [None])[0]
-                    if error and not result_future.done():
-                        error_desc = qs.get("error_description", [error])[0]
-                        result_future.set_exception(
-                            RuntimeError(f"OAuth authorization denied: {error_desc}")
-                        )
-                        writer.write(
-                            "HTTP/1.1 200 OK\r\n"
-                            "Content-Type: text/html; charset=utf-8\r\n"
-                            "Connection: close\r\n\r\n"
-                            "<html><body><h2>Authorization failed</h2>"
-                            f"<p>{error_desc}</p></body></html>".encode()
-                        )
-                        await writer.drain()
-                        return
-
-                    code = qs.get("code", [None])[0]
-                    state = qs.get("state", [None])[0]
-
-                    if code and not result_future.done():
-                        result_future.set_result((code, state))
-
-                writer.write(_CALLBACK_HTML.encode())
-                await writer.drain()
-            finally:
-                writer.close()
-                await writer.wait_closed()
-
-        sock.setblocking(False)
-        server = await asyncio.start_server(_handle_client, sock=sock)
-
+    async def wait_for_code(self) -> tuple[str, str | None]:
+        """Block until the callback arrives or timeout."""
+        if self._result_future is None:
+            msg = "Server not started. Call start() first."
+            raise RuntimeError(msg)
         try:
-            return await asyncio.wait_for(result_future, timeout=timeout)
+            return await asyncio.wait_for(
+                self._result_future, timeout=self._timeout
+            )
         finally:
-            server.close()
-            await server.wait_closed()
-            sock.close()
+            await self.stop()
 
-    return _callback
+    async def stop(self) -> None:
+        """Shut down the server."""
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+    async def _handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=10)
+            decoded = request_line.decode("utf-8", errors="replace")
+
+            parts = decoded.split()
+            if len(parts) >= 2 and self._result_future is not None:
+                parsed = urlparse(parts[1])
+                qs = parse_qs(parsed.query)
+
+                error = qs.get("error", [None])[0]
+                if error and not self._result_future.done():
+                    error_desc = qs.get("error_description", [error])[0]
+                    self._result_future.set_exception(
+                        RuntimeError(
+                            f"OAuth authorization denied: {error_desc}"
+                        )
+                    )
+                    writer.write(
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: text/html; charset=utf-8\r\n"
+                        "Connection: close\r\n\r\n"
+                        "<html><body><h2>Authorization failed</h2>"
+                        f"<p>{error_desc}</p></body></html>".encode()
+                    )
+                    await writer.drain()
+                    return
+
+                code = qs.get("code", [None])[0]
+                state = qs.get("state", [None])[0]
+
+                if code and not self._result_future.done():
+                    self._result_future.set_result((code, state))
+
+            writer.write(_CALLBACK_HTML.encode())
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 def oauth_auth(
@@ -286,6 +286,12 @@ def _build_oauth_provider(
 
     storage = FileTokenStorage(server_url, token_dir=token_dir)
 
+    # Clear cached client_info if the redirect URI changed (port is random
+    # each process, and OAuth servers validate redirect URIs exactly).
+    _invalidate_stale_client_info(storage, redirect_uri)
+
+    callback_server = _CallbackServer(sock, timeout)
+
     client_metadata = OAuthClientMetadata(
         redirect_uris=[redirect_uri],
         token_endpoint_auth_method="none",
@@ -294,14 +300,59 @@ def _build_oauth_provider(
         client_name=client_name,
     )
 
+    async def _redirect_handler(url: str) -> None:
+        # Start the callback server BEFORE opening the browser so fast
+        # redirects (auto-approved SSO) don't get connection-refused.
+        await callback_server.start()
+        logger.info("Opening browser for OAuth authorization...")
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001
+            pass
+        print(  # noqa: T201
+            f"\n  OAuth authorization required.\n"
+            f"  If a browser did not open, visit this URL:\n\n"
+            f"    {url}\n"
+        )
+
+    async def _callback_handler() -> tuple[str, str | None]:
+        return await callback_server.wait_for_code()
+
     return OAuthClientProvider(
         server_url=server_url,
         client_metadata=client_metadata,
         storage=storage,
-        redirect_handler=_make_redirect_handler(),
-        callback_handler=_make_callback_handler(sock, timeout),
+        redirect_handler=_redirect_handler,
+        callback_handler=_callback_handler,
         timeout=timeout,
     )
+
+
+def _invalidate_stale_client_info(
+    storage: FileTokenStorage, redirect_uri: str
+) -> None:
+    """Clear cached client_info if the stored redirect URI doesn't match.
+
+    Each process binds a random port, so the redirect_uri changes across
+    restarts.  OAuth servers that validate redirect URIs exactly will reject
+    re-auth attempts with a stale client registration.
+    """
+    data = storage._read()
+    client_info = data.get("client_info")
+    if client_info is None:
+        return
+
+    stored_uris = client_info.get("redirect_uris", [])
+    # Pydantic serializes AnyUrl objects; compare as strings
+    stored_str = [str(u) for u in stored_uris]
+    if redirect_uri not in stored_str:
+        logger.debug(
+            "Redirect URI changed (%s not in %s), clearing cached client_info",
+            redirect_uri,
+            stored_str,
+        )
+        data.pop("client_info", None)
+        storage._write(data)
 
 
 class _LazyOAuthAuth(httpx.Auth):

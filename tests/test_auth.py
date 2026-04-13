@@ -11,9 +11,9 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from langchain_mcp_adapters.auth import (
     FileTokenStorage,
+    _CallbackServer,
     _LazyOAuthAuth,
     _bind_callback_socket,
-    _make_callback_handler,
     oauth_auth,
 )
 
@@ -130,7 +130,8 @@ def test_bind_callback_socket():
 async def test_callback_server_receives_code():
     sock = _bind_callback_socket()
     port = sock.getsockname()[1]
-    handler = _make_callback_handler(sock, timeout=5.0)
+    server = _CallbackServer(sock, timeout=5.0)
+    await server.start()
 
     async def _send_callback():
         await asyncio.sleep(0.1)
@@ -140,20 +141,20 @@ async def test_callback_server_receives_code():
             f"Host: 127.0.0.1:{port}\r\n\r\n".encode()
         )
         await writer.drain()
-        # Read the response
         await reader.read(4096)
         writer.close()
         await writer.wait_closed()
 
-    results = await asyncio.gather(handler(), _send_callback())
+    results = await asyncio.gather(server.wait_for_code(), _send_callback())
     assert results[0] == ("test-code", "test-state")
 
 
 async def test_callback_server_timeout():
     sock = _bind_callback_socket()
-    handler = _make_callback_handler(sock, timeout=0.1)
+    server = _CallbackServer(sock, timeout=0.1)
+    await server.start()
     with pytest.raises(asyncio.TimeoutError):
-        await handler()
+        await server.wait_for_code()
 
 
 # --- oauth_auth factory ---
