@@ -11,7 +11,7 @@ import os
 import re
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Union
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
@@ -158,8 +158,13 @@ class SSEConnection(TypedDict):
     httpx_client_factory: NotRequired[McpHttpClientFactory | None]
     """Custom factory for httpx.AsyncClient (optional)."""
 
-    auth: NotRequired[httpx.Auth]
-    """Optional authentication for the HTTP client."""
+    auth: NotRequired[Union[httpx.Auth, Literal["oauth"]]]
+    """Optional authentication for the HTTP client.
+
+    Pass an ``httpx.Auth`` instance for custom auth, or the string
+    ``"oauth"`` to enable automatic OAuth 2.1 with browser-based
+    authorization and file-based token caching.
+    """
 
 
 class StreamableHttpConnection(TypedDict):
@@ -189,8 +194,13 @@ class StreamableHttpConnection(TypedDict):
     httpx_client_factory: NotRequired[McpHttpClientFactory | None]
     """Custom factory for httpx.AsyncClient (optional)."""
 
-    auth: NotRequired[httpx.Auth]
-    """Optional authentication for the HTTP client."""
+    auth: NotRequired[Union[httpx.Auth, Literal["oauth"]]]
+    """Optional authentication for the HTTP client.
+
+    Pass an ``httpx.Auth`` instance for custom auth, or the string
+    ``"oauth"`` to enable automatic OAuth 2.1 with browser-based
+    authorization and file-based token caching.
+    """
 
 
 class WebsocketConnection(TypedDict):
@@ -423,6 +433,19 @@ async def create_session(
 
     transport = connection["transport"]
     params = {k: v for k, v in connection.items() if k != "transport"}
+
+    # Resolve ``auth: "oauth"`` shorthand into a real OAuthClientProvider.
+    if params.get("auth") == "oauth":
+        from langchain_mcp_adapters.auth import (  # noqa: PLC0415
+            _LazyOAuthAuth,
+            oauth_auth,
+        )
+
+        url = params.get("url", "")
+        params["auth"] = oauth_auth(url or None)
+        # If oauth_auth returned a lazy wrapper (no URL), resolve it now.
+        if isinstance(params["auth"], _LazyOAuthAuth) and url:
+            params["auth"].resolve(url)
 
     if mcp_callbacks is not None:
         params["session_kwargs"] = params.get("session_kwargs", {})
