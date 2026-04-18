@@ -590,6 +590,7 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
             "idempotentHint": False,
             "destructiveHint": None,
             "openWorldHint": None,
+            "mcp_server_name": "time"
         }
 
 
