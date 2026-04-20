@@ -5,7 +5,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, TypedDict, get_args
+from typing import Annotated, Any, NotRequired, TypedDict, get_args
 
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
@@ -70,15 +70,19 @@ MAX_ITERATIONS = 1000
 class MCPToolArtifact(TypedDict):
     """Artifact returned from MCP tool calls.
 
-    This TypedDict wraps the structured content from MCP tool calls,
+    This TypedDict wraps additional fields returned by MCP tool calls,
     allowing for future extension if MCP adds more fields to tool results.
 
     Attributes:
         structured_content: The structured content returned by the MCP tool,
             corresponding to the structuredContent field in CallToolResult.
+            None if the tool did not return structured content.
+        _meta: The response metadata returned by the MCP tool,
+            corresponding to the _meta field in CallToolResult.
     """
 
-    structured_content: dict[str, Any]
+    structured_content: dict[str, Any] | None
+    _meta: NotRequired[dict[str, Any]]
 
 
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
@@ -155,8 +159,8 @@ def _convert_call_tool_result(
         A tuple containing:
         - The content: either a string (single text), list of content blocks,
           ToolMessage, or Command
-        - The artifact: MCPToolArtifact with structured_content if present,
-          otherwise None
+        - The artifact: MCPToolArtifact with structured_content and/or _meta
+          when present, otherwise None
 
     Raises:
         ToolException: If the tool call resulted in an error.
@@ -188,12 +192,17 @@ def _convert_call_tool_result(
         error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
         raise ToolException(error_msg)
 
-    # Extract structured content and wrap in MCPToolArtifact
+    # Extract artifact fields from MCP result.
     artifact: MCPToolArtifact | None = None
-    if call_tool_result.structuredContent is not None:
+    if (
+        call_tool_result.structuredContent is not None
+        or call_tool_result.meta is not None
+    ):
         artifact = MCPToolArtifact(
             structured_content=call_tool_result.structuredContent
         )
+        if call_tool_result.meta is not None:
+            artifact["_meta"] = call_tool_result.meta
 
     return tool_content, artifact
 
@@ -378,6 +387,7 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_name,
                             tool_args,
                             progress_callback=mcp_callbacks.progress_callback,
+                            meta=request.metaParams,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -396,6 +406,7 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
+                    meta=request.metaParams,
                 )
 
             return call_tool_result
