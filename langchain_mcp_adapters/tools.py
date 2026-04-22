@@ -418,6 +418,10 @@ def convert_mcp_tool_to_langchain_tool(
     meta = {"_meta": meta} if meta is not None else {}
     metadata = {**base, **meta} or None
 
+    # Add the server name to the metadata
+    if server_name is not None:
+        metadata = {**(metadata or {}), "mcp_server_name": server_name}
+
     # Apply server name prefix if requested
     lc_tool_name = tool.name
     if tool_name_prefix and server_name:
