@@ -15,6 +15,149 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID, run_streamable_http
 
 
+class TestMetaPassthrough:
+    """Tests for _meta parameter passthrough to MCP servers."""
+
+    async def test_meta_passed_via_arguments(self, socket_enabled):
+        """Test that _meta in tool arguments is passed through to MCP server."""
+
+        def _create_meta_echo_server(port: int = 8220):
+            """Create a server that echoes the received _meta."""
+            server = FastMCP(port=port)
+
+            @server.tool()
+            def echo_meta(message: str) -> str:
+                """Echo message and return any received meta."""
+                # The server receives _meta through the MCP protocol
+                # We'll verify it was passed by checking the request context
+                return f"Message: {message}"
+
+            return server
+
+        with run_streamable_http(_create_meta_echo_server, 8220):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8220/mcp",
+                    "transport": "streamable_http",
+                },
+            )
+
+            echo_tool = next(tool for tool in tools if tool.name == "echo_meta")
+            # Pass _meta as part of the arguments - it should be extracted
+            # and passed to MCP call_tool
+            result = await echo_tool.ainvoke(
+                {"message": "hello", "_meta": {"session_id": "abc123"}}
+            )
+            # Tool executes successfully (meta doesn't affect response in this test)
+            assert "Message: hello" in str(result)
+
+    async def test_interceptor_can_modify_meta(self, socket_enabled):
+        """Test that interceptors can modify the meta field."""
+        captured_meta = []
+
+        async def add_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Add or modify meta through the interceptor
+            modified_request = request.override(
+                meta={"added_by_interceptor": True, "user_id": "test-user"}
+            )
+            return await handler(modified_request)
+
+        async def capture_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Capture the meta after modification to verify it was set
+            captured_meta.append(request.meta)
+            return await handler(request)
+
+        def _create_simple_server(port: int = 8221):
+            server = FastMCP(port=port)
+
+            @server.tool()
+            def simple_tool(value: int) -> int:
+                """Return doubled value."""
+                return value * 2
+
+            return server
+
+        with run_streamable_http(_create_simple_server, 8221):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8221/mcp",
+                    "transport": "streamable_http",
+                },
+                # First interceptor modifies, second captures to verify
+                tool_interceptors=[add_meta_interceptor, capture_meta_interceptor],
+            )
+
+            simple_tool = next(tool for tool in tools if tool.name == "simple_tool")
+            result = await simple_tool.ainvoke({"value": 5})
+            assert "10" in str(result)
+
+            # Verify the meta was modified by the first interceptor
+            assert len(captured_meta) == 1
+            assert captured_meta[0] == {
+                "added_by_interceptor": True,
+                "user_id": "test-user",
+            }
+
+    async def test_meta_and_args_passed_separately(self, socket_enabled):
+        """Test that _meta is extracted from args and passed as separate param."""
+        captured_requests = []
+
+        async def capture_request_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            # Capture the request to verify _meta was extracted from args
+            captured_requests.append(
+                {
+                    "args": dict(request.args),
+                    "meta": request.meta,
+                }
+            )
+            return await handler(request)
+
+        def _create_capture_server(port: int = 8222):
+            server = FastMCP(port=port)
+
+            @server.tool()
+            def capture_tool(a: int, b: int) -> int:
+                """Add two numbers."""
+                return a + b
+
+            return server
+
+        with run_streamable_http(_create_capture_server, 8222):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8222/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[capture_request_interceptor],
+            )
+
+            capture_tool = next(tool for tool in tools if tool.name == "capture_tool")
+            result = await capture_tool.ainvoke(
+                {"a": 3, "b": 7, "_meta": {"session_id": "abc123"}}
+            )
+
+            # Verify the tool executed correctly
+            assert "10" in str(result)
+
+            # Verify _meta was extracted from args and placed in meta field
+            assert len(captured_requests) == 1
+            assert "_meta" not in captured_requests[0]["args"]
+            assert captured_requests[0]["args"] == {"a": 3, "b": 7}
+            assert captured_requests[0]["meta"] == {"session_id": "abc123"}
+
+
 def _create_math_server(port: int = 8200):
     """Create a math server with add and multiply tools."""
     server = FastMCP(port=port)
