@@ -13,12 +13,11 @@ from typing import Any
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from mcp import ClientSession
-
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
+from langchain_mcp_adapters.server_info import load_mcp_server_info
 from langchain_mcp_adapters.sessions import (
     Connection,
     McpHttpClientFactory,
@@ -29,6 +28,8 @@ from langchain_mcp_adapters.sessions import (
     create_session,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp import ClientSession
+from mcp.types import InitializeResult
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
     "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a "
@@ -198,6 +199,29 @@ class MultiServerMCPClient:
         for tools in tools_list:
             all_tools.extend(tools)
         return all_tools
+
+    async def get_info(self) -> dict[str, InitializeResult]:
+        """Get server info from all connected MCP servers.
+
+        Returns the ``InitializeResult`` for each server, which includes
+        server instructions, capabilities, and implementation details.
+
+        Returns:
+            A dict mapping server names to their ``InitializeResult``.
+
+        """
+        tasks = [
+            asyncio.create_task(
+                load_mcp_server_info(
+                    connection=self.connections[name],
+                    callbacks=self.callbacks,
+                    server_name=name,
+                )
+            )
+            for name in self.connections
+        ]
+        results = await asyncio.gather(*tasks)
+        return dict(zip(self.connections.keys(), results))
 
     async def get_prompt(
         self,
