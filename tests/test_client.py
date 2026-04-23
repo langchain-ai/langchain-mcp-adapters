@@ -11,7 +11,11 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.sessions import _create_stdio_session
+from langchain_mcp_adapters.sessions import (
+    _create_sse_session,
+    _create_stdio_session,
+    _create_streamable_http_session,
+)
 from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID
 
@@ -115,6 +119,167 @@ async def test_stdio_session_warns_on_undefined_env_var(
         mock_stdio_session["server_params"].env["SECRET"]
         == "${TOTALLY_UNDEFINED_VAR_XYZ}"  # noqa: S105
     )
+
+
+@pytest.fixture
+def mock_sse_session() -> Generator[dict, None, None]:
+    """Patch sse_client and ClientSession.
+
+    Yields a dict with the positional args passed to sse_client so tests can
+    assert on the resolved headers (arg index 1).
+    """
+    captured: dict = {}
+
+    @asynccontextmanager
+    async def fake_sse_client(*args: object, **kwargs: object):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        yield AsyncMock(), AsyncMock()
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("langchain_mcp_adapters.sessions.sse_client", fake_sse_client),
+        patch(
+            "langchain_mcp_adapters.sessions.ClientSession",
+            return_value=mock_session,
+        ),
+    ):
+        yield captured
+
+
+@pytest.fixture
+def mock_http_session() -> Generator[dict, None, None]:
+    """Patch streamablehttp_client and ClientSession.
+
+    Yields a dict with the positional args passed to streamablehttp_client so
+    tests can assert on the resolved headers (arg index 1).
+    """
+    captured: dict = {}
+
+    @asynccontextmanager
+    async def fake_streamablehttp_client(*args: object, **kwargs: object):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        yield AsyncMock(), AsyncMock(), AsyncMock()
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch(
+            "langchain_mcp_adapters.sessions.streamablehttp_client",
+            fake_streamablehttp_client,
+        ),
+        patch(
+            "langchain_mcp_adapters.sessions.ClientSession",
+            return_value=mock_session,
+        ),
+    ):
+        yield captured
+
+
+async def test_sse_session_expands_header_vars(monkeypatch, mock_sse_session):
+    """Test that ${VAR} references in SSE headers are expanded before connect."""
+    monkeypatch.setenv("TEST_MCP_TOKEN", "secret123")
+
+    async with _create_sse_session(
+        url="https://mcp.example.com/sse",
+        headers={
+            "Authorization": "Bearer ${TEST_MCP_TOKEN}",
+            "X-Literal": "plain",
+            "X-Embedded": "t=${TEST_MCP_TOKEN};v=1",
+        },
+    ):
+        pass
+
+    # sse_client is called as sse_client(url, headers, timeout, sse_read_timeout, ...)
+    resolved_headers = mock_sse_session["args"][1]
+    assert resolved_headers["Authorization"] == "Bearer secret123"
+    assert resolved_headers["X-Literal"] == "plain"
+    assert resolved_headers["X-Embedded"] == "t=secret123;v=1"
+
+
+async def test_sse_session_headers_none_stays_none(mock_sse_session):
+    """Test that headers=None is passed through as None."""
+    async with _create_sse_session(url="https://mcp.example.com/sse"):
+        pass
+
+    assert mock_sse_session["args"][1] is None
+
+
+async def test_sse_session_bare_dollar_not_expanded(monkeypatch, mock_sse_session):
+    """Bare $VAR header values must NOT be expanded — only ${VAR} is supported."""
+    monkeypatch.setenv("word123", "OOPS")
+
+    async with _create_sse_session(
+        url="https://mcp.example.com/sse",
+        headers={"X-Trace": "req=$word123"},
+    ):
+        pass
+
+    assert mock_sse_session["args"][1]["X-Trace"] == "req=$word123"
+
+
+async def test_sse_session_warns_on_undefined_header_var(
+    monkeypatch, mock_sse_session, caplog
+):
+    """Test that undefined ${VAR} references in headers emit a warning."""
+    monkeypatch.delenv("TOTALLY_UNDEFINED_VAR_XYZ", raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.sessions"):
+        async with _create_sse_session(
+            url="https://mcp.example.com/sse",
+            headers={"Authorization": "Bearer ${TOTALLY_UNDEFINED_VAR_XYZ}"},
+        ):
+            pass
+
+    assert "unexpanded variable reference" in caplog.text
+    # Preserved literal when undefined, same as stdio behavior
+    assert (
+        mock_sse_session["args"][1]["Authorization"]
+        == "Bearer ${TOTALLY_UNDEFINED_VAR_XYZ}"
+    )
+
+
+async def test_streamable_http_session_expands_header_vars(
+    monkeypatch, mock_http_session
+):
+    """Test that ${VAR} in streamable_http headers are expanded before connect."""
+    monkeypatch.setenv("TEST_MCP_TOKEN", "secret123")
+
+    async with _create_streamable_http_session(
+        url="https://mcp.example.com/http",
+        headers={
+            "Authorization": "Bearer ${TEST_MCP_TOKEN}",
+            "X-Literal": "plain",
+        },
+    ):
+        pass
+
+    # streamablehttp_client is called as streamablehttp_client(url, headers, ...)
+    resolved_headers = mock_http_session["args"][1]
+    assert resolved_headers["Authorization"] == "Bearer secret123"
+    assert resolved_headers["X-Literal"] == "plain"
+
+
+async def test_streamable_http_session_warns_on_undefined_header_var(
+    monkeypatch, mock_http_session, caplog
+):
+    """Test that undefined ${VAR} in streamable_http headers emits a warning."""
+    monkeypatch.delenv("TOTALLY_UNDEFINED_VAR_XYZ", raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.sessions"):
+        async with _create_streamable_http_session(
+            url="https://mcp.example.com/http",
+            headers={"Authorization": "Bearer ${TOTALLY_UNDEFINED_VAR_XYZ}"},
+        ):
+            pass
+
+    assert "unexpanded variable reference" in caplog.text
 
 
 async def test_multi_server_mcp_client(
