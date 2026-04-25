@@ -351,3 +351,39 @@ async def test_get_resources_from_specific_server():
     assert len(weather_resources) == 1
     assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
     assert weather_resources[0].data == "Sunny with a chance of clouds"
+
+
+async def test_get_tools_isolates_failing_server(caplog):
+    """A single failing server must not drop tools from healthy servers (#492)."""
+    healthy_tool = MagicMock(spec=BaseTool)
+    healthy_tool.name = "healthy_tool"
+
+    async def fake_load_mcp_tools(_session, *, server_name, **_kwargs):
+        if server_name == "broken":
+            raise FileNotFoundError("npx: command not found")
+        return [healthy_tool]
+
+    client = MultiServerMCPClient(
+        {
+            "broken": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                "transport": "stdio",
+            },
+            "healthy": {
+                "url": "http://localhost:8092/mcp/mcp",
+                "transport": "streamable_http",
+            },
+        }
+    )
+
+    with (
+        patch("langchain_mcp_adapters.client.load_mcp_tools", new=fake_load_mcp_tools),
+        caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.client"),
+    ):
+        tools = await client.get_tools()
+
+    # Healthy server's tools survive; broken server's failure is logged.
+    assert tools == [healthy_tool]
+    assert "broken" in caplog.text
+    assert "npx" in caplog.text
