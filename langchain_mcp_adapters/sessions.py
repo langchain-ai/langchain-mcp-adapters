@@ -201,6 +201,16 @@ class WebsocketConnection(TypedDict):
     url: str
     """The URL of the Websocket endpoint to connect to."""
 
+    headers: NotRequired[dict[str, Any] | None]
+    """HTTP headers to send during the WebSocket handshake.
+
+    Useful for passing authentication tokens (e.g. ``Authorization: Bearer ...``)
+    or other custom headers required by the upstream MCP server.
+
+    When omitted, the upstream MCP SDK ``websocket_client`` is used unchanged
+    to preserve full backward-compatibility.
+    """
+
     session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession"""
 
@@ -361,15 +371,89 @@ async def _create_streamable_http_session(
 
 
 @asynccontextmanager
+async def _websocket_client_with_headers(
+    url: str,
+    headers: dict[str, Any] | None,
+) -> AsyncIterator[tuple[Any, Any]]:
+    """WebSocket client that mirrors ``mcp.client.websocket.websocket_client``.
+
+    The upstream MCP SDK's ``websocket_client`` only accepts a ``url`` argument
+    and does not forward HTTP handshake headers (see
+    https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/websocket.py).
+
+    We replicate its read/write loop here so callers can supply custom headers
+    (e.g. ``Authorization: Bearer ...``) on the WebSocket handshake. This path
+    is only taken when ``headers`` is provided; otherwise the upstream client
+    is used unchanged.
+    """
+    # Local imports keep websockets/anyio out of the import path when WebSockets
+    # are not in use (matches upstream MCP SDK behavior).
+    import json  # noqa: PLC0415
+
+    import anyio  # noqa: PLC0415
+    from mcp import types  # noqa: PLC0415
+    from mcp.shared.message import SessionMessage  # noqa: PLC0415
+    from pydantic import ValidationError  # noqa: PLC0415
+    from websockets.asyncio.client import connect as ws_connect  # noqa: PLC0415
+    from websockets.typing import Subprotocol  # noqa: PLC0415
+
+    read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
+    write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
+
+    async with ws_connect(
+        url,
+        subprotocols=[Subprotocol("mcp")],
+        additional_headers=headers,
+    ) as ws:
+
+        async def ws_reader() -> None:
+            async with read_stream_writer:
+                async for raw_text in ws:
+                    try:
+                        # `jsonrpc_message_adapter` exists on newer MCP SDKs;
+                        # fall back to `JSONRPCMessage.model_validate_json`
+                        # for older releases.
+                        adapter = getattr(types, "jsonrpc_message_adapter", None)
+                        if adapter is not None:
+                            message = adapter.validate_json(raw_text, by_name=False)
+                        else:
+                            message = types.JSONRPCMessage.model_validate_json(
+                                raw_text
+                            )
+                        await read_stream_writer.send(SessionMessage(message))
+                    except ValidationError as exc:
+                        await read_stream_writer.send(exc)
+
+        async def ws_writer() -> None:
+            async with write_stream_reader:
+                async for session_message in write_stream_reader:
+                    msg_dict = session_message.message.model_dump(
+                        by_alias=True, mode="json", exclude_none=True
+                    )
+                    await ws.send(json.dumps(msg_dict))
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(ws_reader)
+            tg.start_soon(ws_writer)
+            yield (read_stream, write_stream)
+            tg.cancel_scope.cancel()
+
+
+@asynccontextmanager
 async def _create_websocket_session(
     *,
     url: str,
+    headers: dict[str, Any] | None = None,
     session_kwargs: dict[str, Any] | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using Websockets.
 
     Args:
         url: URL of the Websocket endpoint.
+        headers: HTTP headers to send during the WebSocket handshake (e.g.
+            ``{"Authorization": "Bearer ..."}``). When omitted, the upstream
+            MCP SDK ``websocket_client`` is used unchanged for full
+            backward-compatibility.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
 
     Yields:
@@ -388,8 +472,15 @@ async def _create_websocket_session(
         )
         raise ImportError(msg) from None
 
+    if headers:
+        # Use the local header-aware client; upstream `websocket_client` does
+        # not yet accept headers (see _websocket_client_with_headers).
+        client_cm = _websocket_client_with_headers(url, headers)
+    else:
+        client_cm = websocket_client(url)
+
     async with (
-        websocket_client(url) as (read, write),
+        client_cm as (read, write),
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
         yield session
