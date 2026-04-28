@@ -11,6 +11,7 @@ This library provides a lightweight wrapper that makes [Anthropic Model Context 
 
 - 🛠️ Convert MCP tools into [LangChain tools](https://python.langchain.com/docs/concepts/tools/) that can be used with [LangGraph](https://github.com/langchain-ai/langgraph) agents
 - 📦 A client implementation that allows you to connect to multiple MCP servers and load tools from them
+- 📝 MCP **prompts/list** and **prompts/get**: `MultiServerMCPClient.list_prompts()` discovers prompt templates (metadata); `get_prompt()` loads rendered messages for a chosen template (same split as the [MCP Inspector](https://www.npmjs.com/package/@modelcontextprotocol/inspector) flow)
 
 ## Installation
 
