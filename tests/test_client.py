@@ -351,3 +351,103 @@ async def test_get_resources_from_specific_server():
     assert len(weather_resources) == 1
     assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
     assert weather_resources[0].data == "Sunny with a chance of clouds"
+
+
+async def test_get_tools_isolates_per_server_failures(caplog):
+    """A failing server must not prevent healthy servers from returning tools.
+
+    Regression test for https://github.com/langchain-ai/langchain-mcp-adapters/issues/492:
+    `MultiServerMCPClient.get_tools()` previously used `asyncio.gather` without
+    `return_exceptions=True`, so a single failing server (e.g. a stdio command
+    that is not on PATH) caused the whole call to raise and all tools — even
+    from healthy servers — were lost.
+    """
+    healthy_tool = MagicMock(spec=BaseTool)
+    healthy_tool.name = "healthy_tool"
+
+    async def fake_load_mcp_tools(
+        session,
+        *,
+        connection,
+        callbacks,
+        server_name,
+        tool_interceptors,
+        tool_name_prefix,
+    ):
+        if server_name == "broken":
+            raise FileNotFoundError("npx: command not found")
+        return [healthy_tool]
+
+    client = MultiServerMCPClient(
+        {
+            "broken": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                "transport": "stdio",
+            },
+            "healthy": {
+                "url": "http://localhost:8092/mcp/mcp",
+                "transport": "streamable_http",
+            },
+        }
+    )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.client"),
+        patch(
+            "langchain_mcp_adapters.client.load_mcp_tools",
+            side_effect=fake_load_mcp_tools,
+        ),
+    ):
+        tools = await client.get_tools()
+
+    # Healthy server's tools must still be returned.
+    assert tools == [healthy_tool]
+
+    # Broken server's failure must be logged with the server name surfaced.
+    assert "broken" in caplog.text
+    assert "npx: command not found" in caplog.text
+
+
+async def test_get_tools_all_servers_failing_returns_empty(caplog):
+    """If every server fails, get_tools() returns [] and warns for each."""
+
+    async def always_fail(
+        session,
+        *,
+        connection,
+        callbacks,
+        server_name,
+        tool_interceptors,
+        tool_name_prefix,
+    ):
+        raise RuntimeError(f"boom from {server_name}")
+
+    client = MultiServerMCPClient(
+        {
+            "a": {
+                "command": "python3",
+                "args": ["/nope/a.py"],
+                "transport": "stdio",
+            },
+            "b": {
+                "command": "python3",
+                "args": ["/nope/b.py"],
+                "transport": "stdio",
+            },
+        }
+    )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.client"),
+        patch(
+            "langchain_mcp_adapters.client.load_mcp_tools",
+            side_effect=always_fail,
+        ),
+    ):
+        tools = await client.get_tools()
+
+    assert tools == []
+    assert "boom from a" in caplog.text
+    assert "boom from b" in caplog.text
+</content>
