@@ -13,6 +13,7 @@ This library provides a lightweight wrapper that makes [Anthropic Model Context 
 - 📦 A client implementation that allows you to connect to multiple MCP servers and load tools from them
 - 📝 MCP **prompts/list** and **prompts/get**: `MultiServerMCPClient.list_prompts()` discovers prompt templates (metadata); `get_prompt()` loads rendered messages for a chosen template (same split as the [MCP Inspector](https://www.npmjs.com/package/@modelcontextprotocol/inspector) flow)
 - 🔗 **`bind_mcp_prompt`**: compose MCP prompt messages with a chat model in one runnable (same idea as `model.bind_tools(tools)` — prepend template content, then invoke the model); see [`langchain_mcp_adapters.prompt_binder`](langchain_mcp_adapters/prompt_binder.py)
+- **`create_mcp_prompt_injection_node`**: LangGraph-only node that writes MCP prompt messages into state (`prepend` / `append`); see [`langchain_mcp_adapters.langgraph_prompt`](langchain_mcp_adapters/langgraph_prompt.py)
 
 ## Installation
 
@@ -306,6 +307,35 @@ reply = await bound.ainvoke("What is 7 * 8?")
 ```
 
 For LangGraph state with extra fields, pass **`arguments_resolver=lambda state: {...}`** so template arguments can depend on `state`.
+
+## MCP prompt injection node (LangGraph)
+
+To update only the graph state (like **`ToolNode`** updates messages with tool results), use **`create_mcp_prompt_injection_node`**: it calls **`prompts/get`** and returns a **`messages`** update for **`add_messages`** / **`MessagesState`**.
+
+- **`placement="prepend"`** (default): MCP messages appear **before** the current history (LangGraph **`RemoveMessage(REMOVE_ALL_MESSAGES)`** + full list pattern).
+- **`placement="append"`**: MCP messages are **appended** after existing messages.
+
+```python
+from langgraph.graph import END, MessagesState, START, StateGraph
+
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.langgraph_prompt import create_mcp_prompt_injection_node
+
+client = MultiServerMCPClient({...})
+inject = create_mcp_prompt_injection_node(
+    client,
+    "math",
+    "configure_assistant",
+    arguments={"skills": "algebra"},
+)
+
+builder = StateGraph(MessagesState)
+builder.add_node("mcp_prompt", inject)
+builder.add_edge(START, "mcp_prompt")
+# builder.add_edge("mcp_prompt", "agent")  # then your model node
+```
+
+Requires **`langgraph`** (declared in the library’s **test** dependency group for contributors; install in your app with `pip install langgraph`).
 
 ## Using with LangGraph API Server
 
