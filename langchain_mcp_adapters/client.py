@@ -5,9 +5,9 @@ to multiple MCP servers and loading tools, prompts, and resources from them.
 """
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from types import TracebackType
 from typing import Any
 
@@ -300,7 +300,22 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
+        health_check_interval: float | None = None,
+        health_check_timeout: float = 5.0,
     ) -> None:
+        """Initialize a long-lived MCP client with optional health-check config.
+
+        Args:
+            connections: Server connection configurations.
+            callbacks: Optional callbacks for notifications and events.
+            tool_interceptors: Optional tool call interceptors.
+            tool_name_prefix: Prefix tool names with the server name.
+            health_check_interval: Debounce window in seconds for
+                ``sessions_healthy()``. ``None`` (default) means ping on every
+                call.
+            health_check_timeout: Maximum seconds to wait for ping responses
+                in ``health_check()``. Defaults to ``5.0``.
+        """
         super().__init__(
             connections=connections,
             callbacks=callbacks,
@@ -309,6 +324,9 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
         )
         self.sessions: dict[str, ClientSession] = {}
         self._session_stack: AsyncExitStack | None = None
+        self._health_check_interval = health_check_interval
+        self._health_check_timeout = health_check_timeout
+        self._last_healthy_ping: float = 0.0
 
     def _validate_server_name(self, server_name: str) -> None:
         if server_name not in self.connections:
@@ -337,6 +355,7 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
 
         self._session_stack = stack
         self.sessions = sessions
+        self._last_healthy_ping = time.monotonic()
 
     async def stop(
         self,
@@ -441,6 +460,84 @@ class LongLivedMultiServerMCPClient(MultiServerMCPClient):
         for resources in resources_list:
             all_resources.extend(resources)
         return all_resources
+
+    async def health_check(
+        self, timeout: float | None = None
+    ) -> dict[str, bool]:
+        """Ping all active sessions and return per-server health status.
+
+        Uses the MCP protocol's ``send_ping()`` to verify each session is
+        still alive.  Returns a dict mapping server names to health status
+        (``True`` = healthy, ``False`` = dead / timed-out).
+
+        Args:
+            timeout: Maximum seconds to wait for all pings to complete.
+                Defaults to the instance's ``health_check_timeout``.
+                Set to ``None`` to wait indefinitely.
+
+        Returns:
+            Dict mapping server name to health status.  Servers with no
+            active session are reported as ``False``.
+        """
+        _timeout = timeout if timeout is not None else self._health_check_timeout
+        results: dict[str, bool] = {}
+        if not self.sessions:
+            return results
+
+        async def _ping_one(
+            name: str, session: ClientSession
+        ) -> tuple[str, bool]:
+            try:
+                await session.send_ping()
+            except Exception:  # noqa: BLE001
+                return (name, False)
+            else:
+                return (name, True)
+
+        try:
+            async with asyncio.timeout(_timeout):
+                pairs = await asyncio.gather(
+                    *(
+                        _ping_one(name, session)
+                        for name, session in self.sessions.items()
+                    )
+                )
+                results = dict(pairs)
+        except TimeoutError:
+            for name in self.sessions:
+                if name not in results:
+                    results[name] = False
+        return results
+
+    async def sessions_healthy(self) -> bool:
+        """Check whether all active MCP sessions are still alive.
+
+        Uses the debounce interval configured via ``health_check_interval``
+        to avoid redundant pings under concurrent load.  If the interval
+        has not elapsed since the last successful check, returns ``True``
+        immediately without sending any network traffic.
+
+        When ``health_check_interval`` is ``None`` (the default), pings
+        on every call.
+
+        Returns:
+            ``True`` if all sessions responded to ping (or were checked
+            recently within the debounce window).  ``False`` if any
+            session failed or timed out.
+        """
+        if not self.sessions:
+            return True
+
+        if self._health_check_interval is not None and (
+            time.monotonic() - self._last_healthy_ping
+        ) < self._health_check_interval:
+            return True
+
+        status = await self.health_check()
+        all_healthy = all(status.values())
+        if all_healthy:
+            self._last_healthy_ping = time.monotonic()
+        return all_healthy
 
     async def __aenter__(self) -> "LongLivedMultiServerMCPClient":
         await self.start()
