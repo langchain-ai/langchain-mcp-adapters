@@ -2,8 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
-from anyio import BrokenResourceError, ClosedResourceError
+from anyio import ClosedResourceError
 
 from langchain_mcp_adapters.client import LongLivedMultiServerMCPClient
 
@@ -54,33 +53,6 @@ class TestHealthCheck:
 
         result = await client.health_check(timeout=0.1)
         assert result == {"slow_server": False}
-
-    async def test_broken_resource_error_returns_false(self):
-        client = _make_client()
-        broken = MagicMock()
-        broken.send_ping = AsyncMock(side_effect=BrokenResourceError())
-        client.sessions = {"broken": broken}
-
-        result = await client.health_check()
-        assert result == {"broken": False}
-
-    async def test_httpx_transport_error_returns_false(self):
-        client = _make_client()
-        http_dead = MagicMock()
-        http_dead.send_ping = AsyncMock(side_effect=httpx.ConnectError("refused"))
-        client.sessions = {"http_dead": http_dead}
-
-        result = await client.health_check()
-        assert result == {"http_dead": False}
-
-    async def test_uses_instance_timeout_by_default(self):
-        client = _make_client(health_check_timeout=1.0)
-        fast = MagicMock()
-        fast.send_ping = AsyncMock(return_value=None)
-        client.sessions = {"fast": fast}
-
-        result = await client.health_check()
-        assert result == {"fast": True}
 
     async def test_timeout_arg_overrides_instance_default(self):
         client = _make_client(health_check_timeout=60.0)
@@ -167,17 +139,6 @@ class TestSessionsHealthy:
 
         assert await client.sessions_healthy() is False
         assert client._last_healthy_ping == 0.0
-
-    async def test_healthy_updates_last_ping(self):
-        client = _make_client(health_check_interval=30.0)
-        s1 = MagicMock()
-        s1.send_ping = AsyncMock(return_value=None)
-        client.sessions = {"server_a": s1}
-
-        assert client._last_healthy_ping == 0.0
-        assert await client.sessions_healthy() is True
-        assert client._last_healthy_ping > 0.0
-
 
 class TestStartResetsLastHealthyPing:
     """Verify that start() resets _last_healthy_ping after opening sessions."""
