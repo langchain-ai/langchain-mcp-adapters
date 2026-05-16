@@ -2,7 +2,7 @@
 
 Connects to the live emem MCP server over Streamable HTTP, auto-discovers
 all tools, and runs a LangGraph ReAct agent that answers a geospatial
-verification question about coordinates 23.351921, 85.309145.
+verification question about coordinates 60.3172, 24.9633.
 
 Install:
     pip install langchain-mcp-adapters langgraph langchain-openai
@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
 EMEM_MCP_URL = "https://emem.dev/mcp"
 
 QUESTION = (
-    "I have coordinates 23.351921, 85.309145. "
+    "I have coordinates 60.3172, 24.9633. "
     "Locate this place, recall its geospatial facts (elevation, "
     "land cover, vegetation, surface water), and summarise what "
     "you find. Cite the signed receipt fact_cids in your answer."
