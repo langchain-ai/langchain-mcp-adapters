@@ -166,9 +166,21 @@ class MultiServerMCPClient:
             server_name: Optional name of the server to get tools from.
                 If `None`, all tools from all servers will be returned.
 
-        !!! note
+        !!! warning "Stateless: a new session is created per tool call"
+            Each tool returned by this method opens a **fresh MCP session** every time it is
+            invoked and closes it immediately after. This is fine for stateless servers (math,
+            file reads, REST APIs) but will break stateful servers such as Playwright, where
+            browser context must survive across multiple tool calls within a single agent run.
 
-            A new session will be created for each tool call
+            For stateful servers use `client.session()` together with `load_mcp_tools(session)`
+            so all tools share one persistent connection:
+
+            ```python
+            async with client.session("playwright") as session:
+                tools = await load_mcp_tools(session)
+                agent = create_agent(model, tools)
+                result = await agent.ainvoke(...)
+            ```
 
         Returns:
             A list of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools)
