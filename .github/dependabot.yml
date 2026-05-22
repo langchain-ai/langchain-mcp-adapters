@@ -9,6 +9,14 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: "langchain-core"
+      - dependency-name: "langchain"
+      - dependency-name: "langchain-classic"
+      - dependency-name: "langchain-text-splitters"
+      - dependency-name: "langchain-tests"
+      - dependency-name: "langchain-model-profiles"
     groups:
       minor-and-patch:
         patterns:
