@@ -29,6 +29,10 @@ from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadat
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
+    CallToolRequest,
+    CallToolRequestParams,
+    CallToolResult,
+    ClientRequest,
     ContentBlock,
     EmbeddedResource,
     ImageContent,
@@ -330,7 +334,8 @@ def convert_mcp_tool_to_langchain_tool(
             """Execute the actual MCP tool call with optional session creation.
 
             Args:
-                request: Tool call request with name, args, headers, and context.
+                request: Tool call request with name, args, headers, extra_params,
+                    and context.
 
             Returns:
                 MCPToolCallResult from MCP SDK.
@@ -361,6 +366,18 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
+            # Build tool call params with optional extra params from the request
+            def _build_tool_call_params(
+                base_name: str,
+                base_args: dict[str, Any] | None,
+                extra: dict[str, Any] | None,
+            ) -> CallToolRequestParams:
+                """Build CallToolRequestParams, merging extra params if provided."""
+                kwargs: dict[str, Any] = dict(name=base_name, arguments=base_args)
+                if extra:
+                    kwargs.update(extra)
+                return CallToolRequestParams(**kwargs)
+
             captured_exception = None
 
             if session is None:
@@ -374,9 +391,12 @@ def convert_mcp_tool_to_langchain_tool(
                 ) as tool_session:
                     await tool_session.initialize()
                     try:
-                        call_tool_result = await tool_session.call_tool(
-                            tool_name,
-                            tool_args,
+                        tool_params = _build_tool_call_params(
+                            tool_name, tool_args, request.extra_params
+                        )
+                        call_tool_result = await tool_session.send_request(
+                            ClientRequest(CallToolRequest(params=tool_params)),
+                            CallToolResult,
                             progress_callback=mcp_callbacks.progress_callback,
                         )
                     except Exception as e:  # noqa: BLE001
@@ -392,9 +412,12 @@ def convert_mcp_tool_to_langchain_tool(
                 if captured_exception is not None:
                     raise captured_exception
             else:
-                call_tool_result = await session.call_tool(
-                    tool_name,
-                    tool_args,
+                tool_params = _build_tool_call_params(
+                    tool_name, tool_args, request.extra_params
+                )
+                call_tool_result = await session.send_request(
+                    ClientRequest(CallToolRequest(params=tool_params)),
+                    CallToolResult,
                     progress_callback=mcp_callbacks.progress_callback,
                 )
 
