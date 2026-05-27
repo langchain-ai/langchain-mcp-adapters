@@ -46,6 +46,44 @@ def _expand_env_vars(value: str) -> str:
     return _BRACED_VAR_RE.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
 
 
+def _expand_header_values(
+    headers: dict[str, Any] | None,
+    *,
+    transport: str,
+) -> dict[str, Any] | None:
+    """Expand `${VAR}` references in string-typed values of an HTTP header dict.
+
+    Mirrors the stdio `env` handling (see `_create_stdio_session`). Only
+    string values are touched; non-string values (rare but possible in some
+    client configs) pass through unchanged. `${VAR}` that refers to an unset
+    name is preserved as the literal string and a warning is logged, matching
+    stdio behavior.
+
+    Args:
+        headers: HTTP headers to process, or None to short-circuit.
+        transport: Transport name ("sse" / "streamable_http") used in the
+            warning message so operators know which connection is affected.
+
+    Returns:
+        A new dict with expanded values, or None if *headers* is None.
+    """
+    if headers is None:
+        return None
+    resolved: dict[str, Any] = {
+        k: (_expand_env_vars(v) if isinstance(v, str) else v)
+        for k, v in headers.items()
+    }
+    for k, v in resolved.items():
+        if isinstance(v, str) and _BRACED_VAR_RE.search(v):
+            logger.warning(
+                "%s header[%r] contains unexpanded variable reference: %r",
+                transport,
+                k,
+                v,
+            )
+    return resolved
+
+
 EncodingErrorHandler = Literal["strict", "ignore", "replace"]
 
 DEFAULT_ENCODING = "utf-8"
@@ -297,16 +335,17 @@ async def _create_sse_session(
     Yields:
         An initialized ClientSession.
     """
+    resolved_headers = _expand_header_values(headers, transport="sse")
+
     # Create and store the connection
     kwargs = {}
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
 
     async with (
-        sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (
-            read,
-            write,
-        ),
+        sse_client(
+            url, resolved_headers, timeout, sse_read_timeout, auth=auth, **kwargs
+        ) as (read, write),
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
         yield session
@@ -340,6 +379,8 @@ async def _create_streamable_http_session(
     Yields:
         An initialized ClientSession.
     """
+    resolved_headers = _expand_header_values(headers, transport="streamable_http")
+
     # Create and store the connection
     kwargs = {}
     if httpx_client_factory is not None:
@@ -348,7 +389,7 @@ async def _create_streamable_http_session(
     async with (
         streamablehttp_client(
             url,
-            headers,
+            resolved_headers,
             timeout,
             sse_read_timeout,
             terminate_on_close,
