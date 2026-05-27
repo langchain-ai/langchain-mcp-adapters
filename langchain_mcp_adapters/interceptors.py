@@ -46,6 +46,7 @@ class _MCPToolCallRequestOverrides(TypedDict, total=False):
     name: NotRequired[str]
     args: NotRequired[dict[str, Any]]
     headers: NotRequired[dict[str, Any] | None]
+    extra_params: NotRequired[dict[str, Any] | None]
 
 
 @dataclass
@@ -71,6 +72,7 @@ class MCPToolCallRequest:
     server_name: str  # Context: MCP server name
     headers: dict[str, Any] | None = None  # Modifiable: HTTP headers
     runtime: object | None = None  # Context: LangGraph runtime (if any)
+    extra_params: dict[str, Any] | None = None  # Modifiable: extra params to merge into tools/call params
 
     def override(
         self, **overrides: Unpack[_MCPToolCallRequestOverrides]
@@ -87,6 +89,7 @@ class MCPToolCallRequest:
                 - name: Tool name
                 - args: Tool arguments
                 - headers: HTTP headers
+                - extra_params: Extra params to merge into tools/call params
 
         Returns:
             New MCPToolCallRequest instance with specified overrides

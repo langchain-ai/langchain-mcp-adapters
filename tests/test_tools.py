@@ -415,7 +415,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
     }
     # Mock session and MCP tool
     session = AsyncMock()
-    session.call_tool.return_value = CallToolResult(
+    session.send_request.return_value = CallToolResult(
         content=[TextContent(type="text", text="tool result")],
         isError=False,
     )
@@ -439,10 +439,15 @@ async def test_convert_mcp_tool_to_langchain_tool():
         {"args": {"param1": "test", "param2": 42}, "id": "1", "type": "tool_call"},
     )
 
-    # Verify session.call_tool was called with correct arguments
-    session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
-    )
+    # Verify session.send_request was called with correct arguments
+    assert session.send_request.call_count == 1
+    call_args = session.send_request.call_args
+    assert call_args is not None
+    # Verify the result type (positional arg)
+    assert len(call_args.args) >= 2
+    assert call_args.args[1] == CallToolResult
+    # Verify progress_callback (keyword arg)
+    assert call_args.kwargs.get("progress_callback") is None
 
     # Verify result
     assert result.name == "test_tool"
@@ -479,20 +484,28 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments, progress_callback=None):
-        if tool_name == "tool1":
-            return CallToolResult(
-                content=[
-                    TextContent(type="text", text=f"tool1 result with {arguments}")
-                ],
-                isError=False,
-            )
-        return CallToolResult(
-            content=[TextContent(type="text", text=f"tool2 result with {arguments}")],
-            isError=False,
-        )
+    async def mock_send_request(request, result_type, progress_callback=None, **kwargs):
+        # Extract tool name from the CallToolRequest params
+        from mcp.types import ClientRequest, CallToolRequest
+        if isinstance(request, ClientRequest):
+            inner = request.root
+            if isinstance(inner, CallToolRequest):
+                tool_name = inner.params.name
+                arguments = inner.params.arguments
+                if tool_name == "tool1":
+                    return CallToolResult(
+                        content=[
+                            TextContent(type="text", text=f"tool1 result with {arguments}")
+                        ],
+                        isError=False,
+                    )
+                return CallToolResult(
+                    content=[TextContent(type="text", text=f"tool2 result with {arguments}")],
+                    isError=False,
+                )
+        return CallToolResult(content=[], isError=False)
 
-    session.call_tool.side_effect = mock_call_tool
+    session.send_request.side_effect = mock_send_request
 
     # Load MCP tools
     tools = await load_mcp_tools(session)
@@ -529,6 +542,68 @@ async def test_load_mcp_tools():
             "text": "tool2 result with {'param1': 'test2', 'param2': 2}",
             "id": IsLangChainID,
         }
+    ]
+
+
+async def test_convert_mcp_tool_to_langchain_tool_with_extra_params():
+    """Test that extra_params are passed through to the MCP tools/call params."""
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+        },
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+
+    async def mock_send_request(request, result_type, progress_callback=None, **kwargs):
+        from mcp.types import ClientRequest, CallToolRequest
+
+        if isinstance(request, ClientRequest):
+            inner = request.root
+            if isinstance(inner, CallToolRequest):
+                # Verify the extra params were passed through
+                params = inner.params
+                assert (
+                    getattr(params, "context", None) == {"my_key": "my_value"}
+                ), f"Expected context in params, got {params}"
+                return CallToolResult(
+                    content=[TextContent(type="text", text="tool result")],
+                    isError=False,
+                )
+        return CallToolResult(content=[], isError=False)
+
+    session.send_request.side_effect = mock_send_request
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    from langchain_mcp_adapters.interceptors import MCPToolCallRequest
+
+    # Create a custom interceptor that injects extra_params
+    class ContextInjector:
+        async def __call__(self, request, handler):
+            modified = request.override(
+                extra_params={"context": {"my_key": "my_value"}}
+            )
+            return await handler(modified)
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session,
+        mcp_tool,
+        tool_interceptors=[ContextInjector()],
+    )
+
+    result = await lc_tool.ainvoke(
+        {"args": {"param1": "test"}, "id": "1", "type": "tool_call"},
+    )
+
+    assert result.content == [
+        {"type": "text", "text": "tool result", "id": IsLangChainID}
     ]
 
 
