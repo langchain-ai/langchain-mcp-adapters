@@ -7,6 +7,23 @@ tools, handle tool execution, and manage tool conversion between the two formats
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypedDict, get_args
 
+
+def _supports_structured_tool_output_schema() -> bool:
+    """Check if StructuredTool supports output_schema parameter.
+    
+    Returns:
+        True if StructuredTool.model_fields contains 'output_schema', False otherwise.
+    """
+    try:
+        from langchain_core.tools import StructuredTool
+        
+        model_fields = getattr(StructuredTool, 'model_fields', None)
+        if model_fields:
+            return 'output_schema' in model_fields
+        return False
+    except Exception:
+        return False
+
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
     FileContentBlock,
@@ -418,19 +435,37 @@ def convert_mcp_tool_to_langchain_tool(
     meta = {"_meta": meta} if meta is not None else {}
     metadata = {**base, **meta} or None
 
+    # Handle output_schema support
+    output_schema = getattr(tool, 'outputSchema', None)
+    if output_schema is not None:
+        if _supports_structured_tool_output_schema():
+            # StructuredTool supports output_schema parameter
+            pass  # Will be passed to StructuredTool constructor
+        else:
+            # Fallback: save to metadata
+            if metadata is None:
+                metadata = {}
+            metadata['mcp_output_schema'] = output_schema
+
     # Apply server name prefix if requested
     lc_tool_name = tool.name
     if tool_name_prefix and server_name:
         lc_tool_name = f"{server_name}_{tool.name}"
 
-    return StructuredTool(
-        name=lc_tool_name,
-        description=tool.description or "",
-        args_schema=tool.inputSchema,
-        coroutine=call_tool,
-        response_format="content_and_artifact",
-        metadata=metadata,
-    )
+    # Build StructuredTool with optional output_schema
+    tool_kwargs = {
+        "name": lc_tool_name,
+        "description": tool.description or "",
+        "args_schema": tool.inputSchema,
+        "coroutine": call_tool,
+        "response_format": "content_and_artifact",
+        "metadata": metadata,
+    }
+    
+    if output_schema is not None and _supports_structured_tool_output_schema():
+        tool_kwargs["output_schema"] = output_schema
+
+    return StructuredTool(**tool_kwargs)
 
 
 async def load_mcp_tools(
