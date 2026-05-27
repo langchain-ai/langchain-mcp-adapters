@@ -203,6 +203,36 @@ agent = create_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
+
+
+### Real-world example: AgentScrape (x402 paid server)
+
+For a working remote MCP server you can hit without running anything locally,
+[AgentScrape](https://agent-scrape.healingsunhaven.workers.dev) is a live
+Streamable HTTP MCP service using the [x402](https://www.x402.org) protocol
+for pay-per-call billing in USDC on Base mainnet. It exposes six web-scraping
+tools and has a 10-call free tier per wallet, so the example works zero-config.
+
+```python
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+async def main():
+    client = MultiServerMCPClient({
+        "agentscrape": {
+            "url": "https://agent-scrape.healingsunhaven.workers.dev/mcp",
+            "transport": "streamable_http",
+        }
+    })
+    tools = await client.get_tools()
+    print(f"Loaded {len(tools)} AgentScrape tools")
+
+asyncio.run(main())
+```
+
+A complete LangGraph-integrated example with payment headers and an agent
+runtime is at [`examples/agentscrape_x402_example.py`](examples/agentscrape_x402_example.py).
+
 ## Passing runtime headers
 
 When connecting to MCP servers, you can include custom headers (e.g., for authentication or tracing) using the `headers` field in the connection configuration. This is supported for the following transports:
