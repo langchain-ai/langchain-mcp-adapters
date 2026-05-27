@@ -41,6 +41,70 @@ ASYNC_CONTEXT_MANAGER_ERROR = (
     "       tools = await load_mcp_tools(session)"
 )
 
+# ============================================================
+# Connection config validation
+# ============================================================
+
+_VALID_TRANSPORTS = frozenset({"stdio", "sse", "streamable_http", "websocket"})
+
+_TRANSPORT_REQUIRED_KEYS: dict[str, frozenset[str]] = {
+    "stdio":           frozenset({"command", "args"}),
+    "sse":             frozenset({"url"}),
+    "streamable_http": frozenset({"url"}),
+    "websocket":       frozenset({"url"}),
+}
+
+def _validate_connections(connections: dict) -> None:
+    """Validate connections dict and raise a clear error if malformed.
+
+    Catches three common mistakes when copying config from
+    MCP-standard JSON descriptors (Claude Desktop, ModelScope, etc.):
+    1. ``"mcpServers"`` wrapper left in place
+    2. ``"type"`` used instead of ``"transport"``
+    3. Missing ``"transport"`` or transport-required keys (e.g. ``"url"``)
+    """
+    for name, config in connections.items():
+        if not isinstance(config, dict):
+            raise TypeError(
+                f"Connection '{name}' must be a dict, "
+                f"got {type(config).__name__}."
+            )
+
+        if "transport" not in config:
+            if "type" in config:
+                raise ValueError(
+                    f"Connection '{name}' uses 'type' instead of "
+                    f"'transport'. If you copied this config from an "
+                    f"MCP-standard JSON descriptor (e.g. Claude Desktop "
+                    f"or ModelScope), note that the top-level 'mcpServers' "
+                    f"key must be removed and 'type' renamed to 'transport'."
+                )
+            if any(isinstance(v, dict) for v in config.values()):
+                raise ValueError(
+                    f"Connection '{name}' appears to have an extra "
+                    f"layer of nesting. Unwrap the top-level "
+                    f"'mcpServers' key and pass the inner dict directly."
+                )
+            raise ValueError(
+                f"Connection '{name}' is missing the required "
+                f"'transport' key. "
+                f"Expected one of: {sorted(_VALID_TRANSPORTS)}"
+            )
+
+        transport = config["transport"]
+        if transport not in _VALID_TRANSPORTS:
+            raise ValueError(
+                f"Connection '{name}': invalid transport "
+                f"'{transport}'. "
+                f"Expected one of: {sorted(_VALID_TRANSPORTS)}"
+            )
+
+        missing = _TRANSPORT_REQUIRED_KEYS[transport] - config.keys()
+        if missing:
+            raise ValueError(
+                f"Connection '{name}' (transport='{transport}') "
+                f"is missing required key(s): {sorted(missing)}"
+            )
 
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers.
@@ -104,6 +168,9 @@ class MultiServerMCPClient:
                 tools = await load_mcp_tools(session)
             ```
         """
+        if connections is not None:
+            _validate_connections(connections)
+
         self.connections: dict[str, Connection] = (
             connections if connections is not None else {}
         )
