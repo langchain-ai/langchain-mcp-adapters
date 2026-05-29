@@ -235,6 +235,43 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 
 > Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
+## Passing request metadata (`_meta`)
+
+MCP supports passing metadata with each tool invocation via the `_meta` parameter. This is useful for:
+- Passing request-specific context to servers
+- Custom routing or multi-tenant scenarios
+
+### Example: passing `_meta` with tool invocation
+
+```python
+# Pass _meta as part of tool arguments
+result = await tool.ainvoke({
+    "message": "hello",
+    "_meta": {"session_id": "abc123"}
+})
+```
+
+### Example: adding `_meta` via interceptor
+
+```python
+from langchain_mcp_adapters.tools import load_mcp_tools
+
+async def add_context_interceptor(request, handler):
+    """Add request context via _meta."""
+    modified = request.override(
+        meta={"user_id": "current-user-id"}
+    )
+    return await handler(modified)
+
+tools = await load_mcp_tools(
+    None,
+    connection={"url": "http://localhost:8000/mcp", "transport": "http"},
+    tool_interceptors=[add_context_interceptor],
+)
+```
+
+> Per the [MCP specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/index#meta), `_meta` is reserved for protocol-level metadata.
+
 ## Using with LangGraph StateGraph
 
 ```python

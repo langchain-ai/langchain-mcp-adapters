@@ -441,7 +441,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None, meta=None
     )
 
     # Verify result
@@ -479,7 +479,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments, progress_callback=None):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None, meta=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
