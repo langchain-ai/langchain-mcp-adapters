@@ -378,6 +378,7 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_name,
                             tool_args,
                             progress_callback=mcp_callbacks.progress_callback,
+                            meta=request.meta,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -396,17 +397,20 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
+                    meta=request.meta,
                 )
 
             return call_tool_result
 
         # Build and execute the interceptor chain
         handler = _build_interceptor_chain(execute_tool, tool_interceptors)
+        meta = arguments.pop("_meta", None)
         request = MCPToolCallRequest(
             name=tool.name,
             args=arguments,
             server_name=server_name or "unknown",
             headers=None,
+            meta=meta,
             runtime=runtime,
         )
         call_tool_result = await handler(request)

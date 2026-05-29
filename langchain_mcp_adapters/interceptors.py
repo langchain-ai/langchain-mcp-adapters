@@ -46,6 +46,7 @@ class _MCPToolCallRequestOverrides(TypedDict, total=False):
     name: NotRequired[str]
     args: NotRequired[dict[str, Any]]
     headers: NotRequired[dict[str, Any] | None]
+    meta: NotRequired[dict[str, Any] | None]
 
 
 @dataclass
@@ -70,6 +71,7 @@ class MCPToolCallRequest:
     args: dict[str, Any]
     server_name: str  # Context: MCP server name
     headers: dict[str, Any] | None = None  # Modifiable: HTTP headers
+    meta: dict[str, Any] | None = None  # Modifiable: MCP _meta parameter
     runtime: object | None = None  # Context: LangGraph runtime (if any)
 
     def override(
