@@ -5,8 +5,9 @@ to multiple MCP servers and loading tools, prompts, and resources from them.
 """
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from types import TracebackType
 from typing import Any
 
@@ -279,8 +280,281 @@ class MultiServerMCPClient:
         raise NotImplementedError(ASYNC_CONTEXT_MANAGER_ERROR)
 
 
+class LongLivedMultiServerMCPClient(MultiServerMCPClient):
+    """A `MultiServerMCPClient` variant that keeps sessions alive across tool calls.
+
+    Use this class as an async context manager:
+
+    ```python
+    async with LongLivedMultiServerMCPClient(connections) as client:
+        tools = await client.get_tools()
+    ```
+
+    In this mode, tools loaded by `get_tools()` will reuse long-lived server sessions.
+    """
+
+    def __init__(
+        self,
+        connections: dict[str, Connection] | None = None,
+        *,
+        callbacks: Callbacks | None = None,
+        tool_interceptors: list[ToolCallInterceptor] | None = None,
+        tool_name_prefix: bool = False,
+        health_check_interval: float | None = None,
+        health_check_timeout: float = 5.0,
+    ) -> None:
+        """Initialize a long-lived MCP client with optional health-check config.
+
+        Args:
+            connections: Server connection configurations.
+            callbacks: Optional callbacks for notifications and events.
+            tool_interceptors: Optional tool call interceptors.
+            tool_name_prefix: Prefix tool names with the server name.
+            health_check_interval: Debounce window in seconds for
+                ``sessions_healthy()``. ``None`` (default) means ping on every
+                call.
+            health_check_timeout: Maximum seconds to wait for ping responses
+                in ``health_check()``. Defaults to ``5.0``.
+        """
+        super().__init__(
+            connections=connections,
+            callbacks=callbacks,
+            tool_interceptors=tool_interceptors,
+            tool_name_prefix=tool_name_prefix,
+        )
+        self.sessions: dict[str, ClientSession] = {}
+        self._session_stack: AsyncExitStack | None = None
+        self._health_check_interval = health_check_interval
+        self._health_check_timeout = health_check_timeout
+        self._last_healthy_ping: float = 0.0
+
+    def _validate_server_name(self, server_name: str) -> None:
+        if server_name not in self.connections:
+            msg = (
+                f"Couldn't find a server with name '{server_name}', "
+                f"expected one of '{list(self.connections.keys())}'"
+            )
+            raise ValueError(msg)
+
+    async def start(self) -> None:
+        """Start long-lived sessions for all configured servers."""
+        if self._session_stack is not None:
+            return
+
+        stack = AsyncExitStack()
+        sessions: dict[str, ClientSession] = {}
+        try:
+            for server_name in self.connections:
+                session = await stack.enter_async_context(
+                    self.session(server_name, auto_initialize=True)
+                )
+                sessions[server_name] = session
+        except Exception:
+            await stack.aclose()
+            raise
+
+        self._session_stack = stack
+        self.sessions = sessions
+        self._last_healthy_ping = time.monotonic()
+
+    async def stop(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_val: BaseException | None = None,
+        exc_tb: TracebackType | None = None,
+    ) -> None:
+        """Close all long-lived sessions."""
+        if self._session_stack is not None:
+            await self._session_stack.aclose()
+            self._session_stack = None
+        self.sessions.clear()
+
+    @asynccontextmanager
+    async def _session_for_server(self, server_name: str) -> AsyncIterator[ClientSession]:
+        """Yield a persistent session when available, otherwise a short-lived one."""
+        self._validate_server_name(server_name)
+        persistent_session = self.sessions.get(server_name)
+        if persistent_session is not None:
+            yield persistent_session
+            return
+
+        async with self.session(server_name) as ephemeral_session:
+            yield ephemeral_session
+
+    async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
+        """Get tools, preferring long-lived sessions when available."""
+        if server_name is not None:
+            self._validate_server_name(server_name)
+
+            session = self.sessions.get(server_name)
+            if session is not None:
+                return await load_mcp_tools(
+                    session,
+                    callbacks=self.callbacks,
+                    server_name=server_name,
+                    tool_interceptors=self.tool_interceptors,
+                    tool_name_prefix=self.tool_name_prefix,
+                )
+
+            return await load_mcp_tools(
+                None,
+                connection=self.connections[server_name],
+                callbacks=self.callbacks,
+                server_name=server_name,
+                tool_interceptors=self.tool_interceptors,
+                tool_name_prefix=self.tool_name_prefix,
+            )
+
+        all_tools: list[BaseTool] = []
+        load_mcp_tool_tasks = []
+        for name, connection in self.connections.items():
+            session = self.sessions.get(name)
+            load_mcp_tool_task = asyncio.create_task(
+                load_mcp_tools(
+                    session,
+                    connection=None if session is not None else connection,
+                    callbacks=self.callbacks,
+                    server_name=name,
+                    tool_interceptors=self.tool_interceptors,
+                    tool_name_prefix=self.tool_name_prefix,
+                )
+            )
+            load_mcp_tool_tasks.append(load_mcp_tool_task)
+        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        for tools in tools_list:
+            all_tools.extend(tools)
+        return all_tools
+
+    async def get_prompt(
+        self,
+        server_name: str,
+        prompt_name: str,
+        *,
+        arguments: dict[str, Any] | None = None,
+    ) -> list[HumanMessage | AIMessage]:
+        """Get a prompt, preferring long-lived sessions when available."""
+        async with self._session_for_server(server_name) as session:
+            return await load_mcp_prompt(session, prompt_name, arguments=arguments)
+
+    async def get_resources(
+        self,
+        server_name: str | None = None,
+        *,
+        uris: str | list[str] | None = None,
+    ) -> list[Blob]:
+        """Get resources, preferring long-lived sessions when available."""
+        if server_name is not None:
+            async with self._session_for_server(server_name) as session:
+                return await load_mcp_resources(session, uris=uris)
+
+        async def _load_resources_from_server(name: str) -> list[Blob]:
+            async with self._session_for_server(name) as session:
+                return await load_mcp_resources(session, uris=uris)
+
+        all_resources: list[Blob] = []
+        load_tasks = [
+            asyncio.create_task(_load_resources_from_server(name))
+            for name in self.connections
+        ]
+        resources_list = await asyncio.gather(*load_tasks)
+        for resources in resources_list:
+            all_resources.extend(resources)
+        return all_resources
+
+    async def health_check(
+        self, timeout: float | None = None
+    ) -> dict[str, bool]:
+        """Ping all active sessions and return per-server health status.
+
+        Uses the MCP protocol's ``send_ping()`` to verify each session is
+        still alive.  Returns a dict mapping server names to health status
+        (``True`` = healthy, ``False`` = dead / timed-out).
+
+        Args:
+            timeout: Maximum seconds to wait for all pings to complete.
+                Defaults to the instance's ``health_check_timeout``.
+                Set to ``None`` to wait indefinitely.
+
+        Returns:
+            Dict mapping server name to health status.  Servers with no
+            active session are reported as ``False``.
+        """
+        _timeout = timeout if timeout is not None else self._health_check_timeout
+        results: dict[str, bool] = {}
+        if not self.sessions:
+            return results
+
+        async def _ping_one(
+            name: str, session: ClientSession
+        ) -> tuple[str, bool]:
+            try:
+                await session.send_ping()
+            except Exception:  # noqa: BLE001
+                return (name, False)
+            else:
+                return (name, True)
+
+        try:
+            async with asyncio.timeout(_timeout):
+                pairs = await asyncio.gather(
+                    *(
+                        _ping_one(name, session)
+                        for name, session in self.sessions.items()
+                    )
+                )
+                results = dict(pairs)
+        except TimeoutError:
+            for name in self.sessions:
+                if name not in results:
+                    results[name] = False
+        return results
+
+    async def sessions_healthy(self) -> bool:
+        """Check whether all active MCP sessions are still alive.
+
+        Uses the debounce interval configured via ``health_check_interval``
+        to avoid redundant pings under concurrent load.  If the interval
+        has not elapsed since the last successful check, returns ``True``
+        immediately without sending any network traffic.
+
+        When ``health_check_interval`` is ``None`` (the default), pings
+        on every call.
+
+        Returns:
+            ``True`` if all sessions responded to ping (or were checked
+            recently within the debounce window).  ``False`` if any
+            session failed or timed out.
+        """
+        if not self.sessions:
+            return True
+
+        if self._health_check_interval is not None and (
+            time.monotonic() - self._last_healthy_ping
+        ) < self._health_check_interval:
+            return True
+
+        status = await self.health_check()
+        all_healthy = all(status.values())
+        if all_healthy:
+            self._last_healthy_ping = time.monotonic()
+        return all_healthy
+
+    async def __aenter__(self) -> "LongLivedMultiServerMCPClient":
+        await self.start()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        await self.stop(exc_type, exc_val, exc_tb)
+
+
 __all__ = [
     "Callbacks",
+    "LongLivedMultiServerMCPClient",
     "McpHttpClientFactory",
     "MultiServerMCPClient",
     "SSEConnection",
