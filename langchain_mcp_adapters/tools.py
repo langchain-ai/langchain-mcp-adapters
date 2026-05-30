@@ -361,6 +361,7 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
+            call_tool_result = None  # Initialize to prevent UnboundLocalError on exception
             captured_exception = None
 
             if session is None:
@@ -381,6 +382,11 @@ def convert_mcp_tool_to_langchain_tool(
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
+                        # This is necessary because the context manager may suppress exceptions
+                        # This change was introduced to work-around an issue in MCP SDK
+                        # that may suppress exceptions when the client disconnects.
+                        # If this is causing an issue, with your use case, please file an issue
+                        # on the langchain-mcp-adapters GitHub repo.
                         captured_exception = e
 
                 # Re-raise the exception outside the context manager
@@ -392,11 +398,17 @@ def convert_mcp_tool_to_langchain_tool(
                 if captured_exception is not None:
                     raise captured_exception
             else:
-                call_tool_result = await session.call_tool(
-                    tool_name,
-                    tool_args,
-                    progress_callback=mcp_callbacks.progress_callback,
-                )
+                try:
+                    call_tool_result = await session.call_tool(
+                        tool_name,
+                        tool_args,
+                        progress_callback=mcp_callbacks.progress_callback,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    # Re-raise exceptions from the existing session (e.g., client disconnect).
+                    # Without this, call_tool_result would be unbound and cause an
+                    # UnboundLocalError at the return statement below.
+                    raise
 
             return call_tool_result
 
