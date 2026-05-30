@@ -194,7 +194,13 @@ class MultiServerMCPClient:
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
-        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        try:
+            tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        except BaseException:
+            for task in load_mcp_tool_tasks:
+                task.cancel()
+            await asyncio.gather(*load_mcp_tool_tasks, return_exceptions=True)
+            raise
         for tools in tools_list:
             all_tools.extend(tools)
         return all_tools
@@ -247,7 +253,13 @@ class MultiServerMCPClient:
             asyncio.create_task(_load_resources_from_server(name))
             for name in self.connections
         ]
-        resources_list = await asyncio.gather(*load_tasks)
+        try:
+            resources_list = await asyncio.gather(*load_tasks)
+        except BaseException:
+            for task in load_tasks:
+                task.cancel()
+            await asyncio.gather(*load_tasks, return_exceptions=True)
+            raise
         for resources in resources_list:
             all_resources.extend(resources)
         return all_resources

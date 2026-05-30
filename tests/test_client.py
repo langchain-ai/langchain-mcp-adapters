@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from collections.abc import Generator
@@ -351,3 +352,50 @@ async def test_get_resources_from_specific_server():
     assert len(weather_resources) == 1
     assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
     assert weather_resources[0].data == "Sunny with a chance of clouds"
+
+
+async def test_get_tools_cancels_sibling_tasks_on_failure():
+    """Test that sibling tasks are cancelled when one server fails in get_tools()."""
+    was_cancelled = False
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    async def mock_load_mcp_tools(
+        session, *, connection=None, callbacks=None, tool_interceptors=None,
+        server_name=None, tool_name_prefix=False,
+    ):
+        nonlocal was_cancelled
+        if server_name == "failing":
+            raise ConnectionError("Server unavailable")
+        # Slow server — should receive CancelledError if properly cleaned up
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            was_cancelled = True
+            raise
+        return []
+
+    client = MultiServerMCPClient(
+        {
+            "failing": {
+                "command": "python3",
+                "args": ["nonexistent.py"],
+                "transport": "stdio",
+            },
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+
+    with patch("langchain_mcp_adapters.client.load_mcp_tools", mock_load_mcp_tools):
+        with pytest.raises(ConnectionError, match="Server unavailable"):
+            await client.get_tools()
+
+    # Give the event loop a tick to process cancellation
+    await asyncio.sleep(0.05)
+    assert was_cancelled, (
+        "Sibling task should have been cancelled but was left running"
+    )
