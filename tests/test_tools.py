@@ -590,6 +590,7 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
             "idempotentHint": False,
             "destructiveHint": None,
             "openWorldHint": None,
+            "mcp_server_name": "time"
         }
 
 
@@ -1177,3 +1178,37 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
         assert len(tools) == 2
         tool_names = {t.name for t in tools}
         assert tool_names == {"weather_search", "flights_search"}
+
+
+async def test_get_tools_metadata_has_server_name(socket_enabled) -> None:
+    """Verify tool.metadata['mcp_server_name'] reflects the server key.
+
+    The metadata tag should match the key in self.connections regardless of
+    tool_name_prefix setting, providing authoritative client-side attribution.
+    """
+    with (
+        run_streamable_http(_create_weather_search_server, 8187),
+        run_streamable_http(_create_flights_search_server, 8188),
+    ):
+        for prefix in (True, False):
+            client = MultiServerMCPClient(
+                {
+                    "weather": {
+                        "url": "http://localhost:8187/mcp",
+                        "transport": "streamable_http",
+                    },
+                    "flights": {
+                        "url": "http://localhost:8188/mcp",
+                        "transport": "streamable_http",
+                    },
+                },
+                tool_name_prefix=prefix,
+            )
+            tools = await client.get_tools()
+            assert len(tools) == 2
+            for tool in tools:
+                assert tool.metadata is not None
+                assert "mcp_server_name" in tool.metadata
+                assert tool.metadata["mcp_server_name"] in {"weather", "flights"}
+            servers_seen = {t.metadata["mcp_server_name"] for t in tools}
+            assert servers_seen == {"weather", "flights"}
