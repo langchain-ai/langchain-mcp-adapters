@@ -9,6 +9,7 @@ import pytest
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
+from mcp.types import Prompt
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import _create_stdio_session
@@ -274,6 +275,99 @@ async def test_get_prompt():
     assert isinstance(messages[0], AIMessage)
     assert "You are a helpful assistant" in messages[0].content
     assert "math, addition, multiplication" in messages[0].content
+
+
+async def test_list_prompts_from_specific_server():
+    """Test MCP prompts/list metadata for one server."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+    prompts = await client.list_prompts(server_name="math")
+
+    assert len(prompts) == 3
+    assert all(isinstance(p, Prompt) for p in prompts)
+    by_name = {p.name: p for p in prompts}
+
+    cfg = by_name["configure_assistant"]
+    assert cfg.description is not None
+    assert "Configure the assistant" in cfg.description
+    assert len(cfg.arguments or []) == 1
+    assert cfg.arguments[0].name == "skills"
+    assert cfg.arguments[0].required is True
+
+    solver = by_name["math_problem_solver"]
+    assert solver.description is not None
+    assert "Expert prompt" in solver.description
+    assert len(solver.arguments or []) == 1
+    assert solver.arguments[0].name == "problem_type"
+
+    guide = by_name["calculation_guide"]
+    assert guide.description is not None
+    assert "calculation" in guide.description.lower()
+    assert (guide.arguments or []) == []
+
+
+async def test_list_prompts_from_all_servers():
+    """Test prompts/list across servers returns a namespaced dict."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+            "weather": {
+                "command": "python3",
+                "args": [weather_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+    prompts_by_server = await client.list_prompts()
+
+    assert set(prompts_by_server) == {"math", "weather"}
+    assert len(prompts_by_server["math"]) == 3
+    assert len(prompts_by_server["weather"]) == 1
+    weather_names = {p.name for p in prompts_by_server["weather"]}
+    assert weather_names == {"weather_briefing_style"}
+
+
+async def test_list_prompts_invalid_server():
+    """Test list_prompts raises for unknown server."""
+    current_dir = Path(__file__).parent
+    math_server_path = os.path.join(current_dir, "servers/math_server.py")
+
+    client = MultiServerMCPClient(
+        {
+            "math": {
+                "command": "python3",
+                "args": [math_server_path],
+                "transport": "stdio",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="nonexistent_server"):
+        await client.list_prompts("nonexistent_server")
+
+
+async def test_list_prompts_empty_connections_returns_empty_dict():
+    """When no servers are configured, list all prompts yields an empty mapping."""
+    client = MultiServerMCPClient({})
+    assert await client.list_prompts() == {}
 
 
 async def test_get_resources_from_all_servers():
