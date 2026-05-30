@@ -369,28 +369,46 @@ def convert_mcp_tool_to_langchain_tool(
                     msg = "Either session or connection must be provided"
                     raise ValueError(msg)
 
-                async with create_session(
-                    effective_connection, mcp_callbacks=mcp_callbacks
-                ) as tool_session:
-                    await tool_session.initialize()
-                    try:
-                        call_tool_result = await tool_session.call_tool(
-                            tool_name,
-                            tool_args,
-                            progress_callback=mcp_callbacks.progress_callback,
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        # Capture exception to re-raise outside context manager
-                        captured_exception = e
+                try:
+                    async with create_session(
+                        effective_connection, mcp_callbacks=mcp_callbacks
+                    ) as tool_session:
+                        try:
+                            await tool_session.initialize()
+                            call_tool_result = await tool_session.call_tool(
+                                tool_name,
+                                tool_args,
+                                progress_callback=mcp_callbacks.progress_callback,
+                            )
+                        except BaseException as e:  # noqa: BLE001
+                            # Capture exception to re-raise outside context manager.
+                            # Using BaseException (not Exception) to also capture
+                            # asyncio.CancelledError and other BaseException subclasses.
+                            # The inner try/except captures failures inside the session body
+                            # before the context manager's __aexit__ can suppress them.
+                            captured_exception = e
+                except BaseException as outer_e:  # noqa: BLE001
+                    # Capture any exception from create_session.__aenter__,
+                    # create_session.__aexit__, or initialize() if not caught above.
+                    # Without this outer layer, __aenter__ failures leave
+                    # call_tool_result unbound and captured_exception as None,
+                    # causing an UnboundLocalError on the return below.
+                    if captured_exception is None:
+                        captured_exception = outer_e
 
-                # Re-raise the exception outside the context manager
-                # This is necessary because the context manager may suppress exceptions
-                # This change was introduced to work-around an issue in MCP SDK
+                # Re-raise the exception outside the context manager.
+                # This is necessary because the context manager may suppress exceptions.
+                # This change was introduced to work around an issue in the MCP SDK
                 # that may suppress exceptions when the client disconnects.
-                # If this is causing an issue, with your use case, please file an issue
+                # If this is causing an issue with your use case, please file an issue
                 # on the langchain-mcp-adapters GitHub repo.
                 if captured_exception is not None:
                     raise captured_exception
+
+                # call_tool_result is guaranteed bound here:
+                # - If any exception occurred (aenter, initialize, call_tool, or aexit),
+                #   captured_exception is set and we raised above.
+                # - If no exception occurred, the inner try block assigned call_tool_result.
             else:
                 call_tool_result = await session.call_tool(
                     tool_name,
