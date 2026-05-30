@@ -585,11 +585,13 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
         tool = tools[0]
         assert tool.name == "get_time"
         assert tool.metadata == {
-            "title": "Get Time",
-            "readOnlyHint": True,
-            "idempotentHint": False,
-            "destructiveHint": None,
-            "openWorldHint": None,
+            "annotations": {
+                "title": "Get Time",
+                "readOnlyHint": True,
+                "idempotentHint": False,
+                "destructiveHint": None,
+                "openWorldHint": None,
+            }
         }
 
 
@@ -825,11 +827,13 @@ async def test_convert_mcp_tool_metadata_variants():
     )
     lc_tool_ann = convert_mcp_tool_to_langchain_tool(session, mcp_tool_ann)
     assert lc_tool_ann.metadata == {
-        "title": "Title",
-        "readOnlyHint": True,
-        "idempotentHint": False,
-        "destructiveHint": None,
-        "openWorldHint": None,
+        "annotations": {
+            "title": "Title",
+            "readOnlyHint": True,
+            "idempotentHint": False,
+            "destructiveHint": None,
+            "openWorldHint": None,
+        }
     }
 
     mcp_tool_meta = MCPTool(
@@ -851,11 +855,13 @@ async def test_convert_mcp_tool_metadata_variants():
 
     lc_tool_both = convert_mcp_tool_to_langchain_tool(session, mcp_tool_both)
     assert lc_tool_both.metadata == {
-        "title": "Both",
-        "readOnlyHint": None,
-        "idempotentHint": None,
-        "destructiveHint": None,
-        "openWorldHint": None,
+        "annotations": {
+            "title": "Both",
+            "readOnlyHint": None,
+            "idempotentHint": None,
+            "destructiveHint": None,
+            "openWorldHint": None,
+        },
         "_meta": {"flag": True},
     }
 
