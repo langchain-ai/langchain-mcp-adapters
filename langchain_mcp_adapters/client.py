@@ -149,11 +149,14 @@ class MultiServerMCPClient:
                 await session.initialize()
             yield session
 
-    async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
+    async def get_tools(
+        self, *, server_name: str | list[str] | None = None
+    ) -> list[BaseTool]:
         """Get a list of all tools from all connected servers.
 
         Args:
-            server_name: Optional name of the server to get tools from.
+            server_name: Optional name of the server (or a list of server names)
+                to get tools from.
                 If `None`, all tools from all servers will be returned.
 
         !!! note
@@ -164,25 +167,24 @@ class MultiServerMCPClient:
             A list of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools)
 
         """
-        if server_name is not None:
-            if server_name not in self.connections:
-                msg = (
-                    f"Couldn't find a server with name '{server_name}', "
-                    f"expected one of '{list(self.connections.keys())}'"
-                )
-                raise ValueError(msg)
-            return await load_mcp_tools(
-                None,
-                connection=self.connections[server_name],
-                callbacks=self.callbacks,
-                server_name=server_name,
-                tool_interceptors=self.tool_interceptors,
-                tool_name_prefix=self.tool_name_prefix,
-            )
+        server_names = []
+        if isinstance(server_name, str):
+            server_names = [server_name]
+        elif isinstance(server_name, list):
+            server_names = server_name
+        else:
+            server_names = list(self.connections.keys())
 
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
-        for name, connection in self.connections.items():
+        for name in server_names:
+            if name not in self.connections:
+                msg = (
+                    f"Couldn't find a server with name '{name}', "
+                    f"expected one of '{list(self.connections.keys())}'"
+                )
+                raise ValueError(msg)
+            connection = self.connections[name]
             load_mcp_tool_task = asyncio.create_task(
                 load_mcp_tools(
                     None,
