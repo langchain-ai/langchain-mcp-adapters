@@ -1177,3 +1177,49 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
         assert len(tools) == 2
         tool_names = {t.name for t in tools}
         assert tool_names == {"weather_search", "flights_search"}
+
+
+async def test_load_mcp_tools_respects_disabled_tools_from_connection(
+    socket_enabled,
+) -> None:
+    """Test that load_mcp_tools filters tools using connection.disabled_tools."""
+    with run_streamable_http(_create_weather_search_server, 8185):
+        tools = await load_mcp_tools(
+            None,
+            connection={
+                "url": "http://localhost:8185/mcp",
+                "transport": "streamable_http",
+                "disabled_tools": ["search"],
+            },
+        )
+
+    assert tools == []
+
+
+async def test_get_tools_filters_before_applying_tool_name_prefix(
+    socket_enabled,
+) -> None:
+    """Test that disabled_tools matches the original MCP tool name."""
+    with (
+        run_streamable_http(_create_weather_search_server, 8185),
+        run_streamable_http(_create_flights_search_server, 8186),
+    ):
+        client = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8185/mcp",
+                    "transport": "streamable_http",
+                    "disabled_tools": ["search"],
+                },
+                "flights": {
+                    "url": "http://localhost:8186/mcp",
+                    "transport": "streamable_http",
+                },
+            },
+            tool_name_prefix=True,
+        )
+
+        tools = await client.get_tools()
+
+    assert len(tools) == 1
+    assert tools[0].name == "flights_search"

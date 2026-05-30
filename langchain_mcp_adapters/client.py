@@ -60,7 +60,9 @@ class MultiServerMCPClient:
 
         Args:
             connections: A `dict` mapping server names to connection configurations. If
-                `None`, no initial connections are established.
+                `None`, no initial connections are established. Each server
+                configuration may also include `disabled_tools` to exclude
+                specific MCP tool names when loading LangChain tools.
             callbacks: Optional callbacks for handling notifications and events.
             tool_interceptors: Optional list of tool call interceptors for modifying
                 requests and responses.
@@ -171,6 +173,7 @@ class MultiServerMCPClient:
                     f"expected one of '{list(self.connections.keys())}'"
                 )
                 raise ValueError(msg)
+            disabled_tools = self.connections[server_name].get("disabled_tools")
             return await load_mcp_tools(
                 None,
                 connection=self.connections[server_name],
@@ -178,11 +181,13 @@ class MultiServerMCPClient:
                 server_name=server_name,
                 tool_interceptors=self.tool_interceptors,
                 tool_name_prefix=self.tool_name_prefix,
+                disabled_tools=disabled_tools,
             )
 
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
         for name, connection in self.connections.items():
+            disabled_tools = connection.get("disabled_tools")
             load_mcp_tool_task = asyncio.create_task(
                 load_mcp_tools(
                     None,
@@ -191,6 +196,7 @@ class MultiServerMCPClient:
                     server_name=name,
                     tool_interceptors=self.tool_interceptors,
                     tool_name_prefix=self.tool_name_prefix,
+                    disabled_tools=disabled_tools,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)

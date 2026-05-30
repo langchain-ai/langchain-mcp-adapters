@@ -80,7 +80,14 @@ class McpHttpClientFactory(Protocol):
         ...
 
 
-class StdioConnection(TypedDict):
+class BaseConnection(TypedDict, total=False):
+    """Shared configuration options for MCP server connections."""
+
+    disabled_tools: list[str]
+    """Tool names to exclude when loading LangChain tools for this server."""
+
+
+class StdioConnection(BaseConnection):
     """Configuration for stdio transport connections to MCP servers."""
 
     transport: Literal["stdio"]
@@ -127,7 +134,7 @@ class StdioConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession."""
 
 
-class SSEConnection(TypedDict):
+class SSEConnection(BaseConnection):
     """Configuration for Server-Sent Events (SSE) transport connections to MCP."""
 
     transport: Literal["sse"]
@@ -162,7 +169,7 @@ class SSEConnection(TypedDict):
     """Optional authentication for the HTTP client."""
 
 
-class StreamableHttpConnection(TypedDict):
+class StreamableHttpConnection(BaseConnection):
     """Connection configuration for Streamable HTTP transport."""
 
     transport: Literal["streamable_http"]
@@ -193,7 +200,7 @@ class StreamableHttpConnection(TypedDict):
     """Optional authentication for the HTTP client."""
 
 
-class WebsocketConnection(TypedDict):
+class WebsocketConnection(BaseConnection):
     """Configuration for WebSocket transport connections to MCP servers."""
 
     transport: Literal["websocket"]
@@ -422,7 +429,11 @@ async def create_session(
         raise ValueError(msg)
 
     transport = connection["transport"]
-    params = {k: v for k, v in connection.items() if k != "transport"}
+    params = {
+        k: v
+        for k, v in connection.items()
+        if k not in {"transport", "disabled_tools"}
+    }
 
     if mcp_callbacks is not None:
         params["session_kwargs"] = params.get("session_kwargs", {})
