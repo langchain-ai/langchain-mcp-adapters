@@ -67,6 +67,34 @@ else:
 MAX_ITERATIONS = 1000
 
 
+class _MCPToolError(ToolException):
+    """MCP tool execution error (``CallToolResult(isError=True)``).
+
+    Carries the already-converted LangChain content blocks so the error can be
+    surfaced to the model as a failed tool output instead of crashing the run.
+    """
+
+    def __init__(
+        self, message: str, tool_content: list[ToolMessageContentBlock]
+    ) -> None:
+        super().__init__(message)
+        self.tool_content = tool_content
+
+
+def _handle_mcp_tool_error(
+    error: ToolException,
+) -> list[ToolMessageContentBlock]:
+    """Surface MCP tool execution errors as failed tool output.
+
+    Returns the error content for MCP tool execution errors so the caller
+    produces a ``ToolMessage(status="error")``. Re-raises any other
+    ``ToolException`` (e.g. adapter/runtime bugs) so it still propagates.
+    """
+    if isinstance(error, _MCPToolError):
+        return error.tool_content
+    raise error
+
+
 class MCPToolArtifact(TypedDict):
     """Artifact returned from MCP tool calls.
 
@@ -159,7 +187,8 @@ def _convert_call_tool_result(
           otherwise None
 
     Raises:
-        ToolException: If the tool call resulted in an error.
+        _MCPToolError: If the MCP tool reported an execution error
+            (``CallToolResult(isError=True)``).
         NotImplementedError: If AudioContent is encountered.
     """
     # If the interceptor returned a ToolMessage directly, return it as the content
@@ -186,7 +215,7 @@ def _convert_call_tool_result(
             elif isinstance(item, dict) and item.get("type") == "text":
                 error_parts.append(item.get("text", ""))
         error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
-        raise ToolException(error_msg)
+        raise _MCPToolError(error_msg, tool_content)
 
     # Extract structured content and wrap in MCPToolArtifact
     artifact: MCPToolArtifact | None = None
@@ -278,6 +307,7 @@ def convert_mcp_tool_to_langchain_tool(
     tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
     tool_name_prefix: bool = False,
+    handle_tool_errors: bool = True,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -293,6 +323,12 @@ def convert_mcp_tool_to_langchain_tool(
         server_name: Name of the server this tool belongs to
         tool_name_prefix: If `True` and `server_name` is provided, the tool name will be
             prefixed w/ server name (e.g., `"weather_search"` instead of `"search"`)
+        handle_tool_errors: If `True` (default), an MCP tool execution error
+            (`CallToolResult(isError=True)`) is returned to the model as a
+            `ToolMessage` with `status="error"` so the agent can self-correct
+            instead of crashing the run. If `False`, the legacy behavior is kept
+            and a `ToolException` is raised. Protocol/transport/session failures
+            and adapter bugs always raise regardless of this setting.
 
     Returns:
         a LangChain tool
@@ -430,6 +466,7 @@ def convert_mcp_tool_to_langchain_tool(
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
+        handle_tool_error=_handle_mcp_tool_error if handle_tool_errors else False,
     )
 
 
@@ -441,6 +478,7 @@ async def load_mcp_tools(
     tool_interceptors: list[ToolCallInterceptor] | None = None,
     server_name: str | None = None,
     tool_name_prefix: bool = False,
+    handle_tool_errors: bool = True,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
@@ -452,6 +490,10 @@ async def load_mcp_tools(
         server_name: Name of the server these tools belong to.
         tool_name_prefix: If `True` and `server_name` is provided, tool names will be
             prefixed w/ server name (e.g., `"weather_search"` instead of `"search"`).
+        handle_tool_errors: If `True` (default), MCP tool execution errors
+            (`CallToolResult(isError=True)`) are returned to the model as a
+            `ToolMessage` with `status="error"`. If `False`, a `ToolException` is
+            raised instead (legacy behavior).
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
@@ -492,6 +534,7 @@ async def load_mcp_tools(
             tool_interceptors=tool_interceptors,
             server_name=server_name,
             tool_name_prefix=tool_name_prefix,
+            handle_tool_errors=handle_tool_errors,
         )
         for tool in tools
     ]

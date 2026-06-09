@@ -532,6 +532,139 @@ async def test_load_mcp_tools():
     ]
 
 
+async def test_mcp_tool_error_returns_failed_tool_message():
+    """isError=True is surfaced as ToolMessage(status='error'), not raised."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="project not found")],
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(
+        {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.tool_call_id == "1"
+    assert result.content == [
+        {"type": "text", "text": "project not found", "id": IsLangChainID}
+    ]
+
+
+async def test_mcp_tool_success_returns_successful_tool_message():
+    """isError=False still returns a successful ToolMessage."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(
+        {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "success"
+    assert result.content == [{"type": "text", "text": "ok", "id": IsLangChainID}]
+
+
+async def test_mcp_tool_error_raises_with_opt_out_flag():
+    """handle_tool_errors=False keeps legacy behavior (raises ToolException)."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="project not found")],
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, handle_tool_errors=False
+    )
+
+    with pytest.raises(ToolException, match="project not found"):
+        await lc_tool.ainvoke(
+            {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+        )
+
+
+async def test_transport_failure_still_raises():
+    """Transport/session failures propagate, even with error handling enabled."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.side_effect = httpx.ConnectError("connection refused")
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    with pytest.raises(httpx.ConnectError):
+        await lc_tool.ainvoke(
+            {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+        )
+
+
+async def test_adapter_bug_still_raises():
+    """Malformed/unsupported MCP content raises rather than silently degrading."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[AudioContent(type="audio", mimeType="audio/wav", data="abc")],
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    with pytest.raises(NotImplementedError):
+        await lc_tool.ainvoke(
+            {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+        )
+
+
 def _create_annotations_server():
     server = FastMCP(port=8181)
 
