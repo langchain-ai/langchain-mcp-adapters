@@ -67,17 +67,48 @@ else:
 MAX_ITERATIONS = 1000
 
 
-class _MCPToolError(ToolException):
+def _summarize_tool_error(tool_content: list[ToolMessageContentBlock]) -> str:
+    """Build a human-readable error message from converted error content blocks.
+
+    Joins the text from all text blocks. Non-text blocks (image/file) carry no
+    human-readable error text, so fall back to a summary rather than dumping
+    their raw repr (which may include large base64 payloads).
+
+    Args:
+        tool_content: The converted LangChain content blocks from an MCP
+            `isError=True` result.
+
+    Returns:
+        The joined text from all text blocks, or a summary if there are none.
+    """
+    error_parts: list[str] = [
+        block["text"] for block in tool_content if block["type"] == "text"
+    ]
+    if error_parts:
+        return "\n".join(error_parts)
+    return (
+        "MCP tool returned an error with no text content "
+        f"({len(tool_content)} non-text content block(s))."
+    )
+
+
+class _MCPToolExecutionError(ToolException):
     """MCP tool execution error (`CallToolResult(isError=True)`).
 
     Carries the already-converted LangChain content blocks so the error can be
     surfaced to the model as a failed tool output instead of crashing the run.
+    The exception message is derived from `tool_content` (see
+    `_summarize_tool_error`) so the two cannot drift; the message is what the
+    model sees when error handling is disabled and the exception is raised.
+
+    Deliberately narrow: only `isError=True` results use this type.
+    Transport/session failures and content-conversion errors are *not*
+    `ToolException` subclasses, so they bypass `handle_tool_error` and
+    propagate (see `_handle_mcp_tool_error`).
     """
 
-    def __init__(
-        self, message: str, tool_content: list[ToolMessageContentBlock]
-    ) -> None:
-        super().__init__(message)
+    def __init__(self, tool_content: list[ToolMessageContentBlock]) -> None:
+        super().__init__(_summarize_tool_error(tool_content))
         self.tool_content = tool_content
 
 
@@ -97,17 +128,24 @@ def _handle_mcp_tool_error(
         error: The `ToolException` raised during tool execution.
 
     Returns:
-        The already-converted content blocks carried by an `_MCPToolError`
-        (an MCP `isError=True` result), so the caller produces a
-        `ToolMessage` with `status="error"`.
+        The already-converted content blocks carried by an
+            `_MCPToolExecutionError` (an MCP `isError=True` result), so the caller
+            produces a `ToolMessage` with `status="error"`. When the error carried
+            no text block (e.g. empty or image-only content), the synthesized error
+            message is prepended as a text block so the model always receives a
+            human-readable explanation it can act on.
 
     Raises:
-        ToolException: Re-raised for any non-`_MCPToolError` `ToolException`
-            so it still propagates. Defensive: the adapter only ever raises
-            `_MCPToolError` into this path.
+        ToolException: Re-raised for any non-`_MCPToolExecutionError`
+            `ToolException` so it still propagates. Defensive: the adapter only
+            ever raises `_MCPToolExecutionError` into this path, but an
+            interceptor raising a bare `ToolException` must keep propagating
+            rather than be swallowed.
     """
-    if isinstance(error, _MCPToolError):
-        return error.tool_content
+    if isinstance(error, _MCPToolExecutionError):
+        if any(block["type"] == "text" for block in error.tool_content):
+            return error.tool_content
+        return [create_text_block(text=str(error)), *error.tool_content]
     raise error
 
 
@@ -192,20 +230,21 @@ def _convert_call_tool_result(
 
     Args:
         call_tool_result: The result from calling an MCP tool. Can be either
-            a CallToolResult (MCP format), a ToolMessage (LangChain format),
-            or a Command (LangGraph format, if langgraph is installed).
+            a `CallToolResult` (MCP format), a `ToolMessage` (LangChain format),
+            or a `Command` (LangGraph format, if `langgraph` is installed).
 
     Returns:
         A tuple containing:
         - The content: either a string (single text), list of content blocks,
-          ToolMessage, or Command
-        - The artifact: MCPToolArtifact with structured_content if present,
-          otherwise None
+            `ToolMessage`, or `Command`
+        - The artifact: `MCPToolArtifact` with `structured_content` if present,
+            otherwise None
 
     Raises:
-        _MCPToolError: If the MCP tool reported an execution error
+        _MCPToolExecutionError: If the MCP tool reported an execution error
             (`CallToolResult(isError=True)`).
         NotImplementedError: If AudioContent is encountered.
+        ValueError: If an unknown or unsupported content type is encountered.
     """
     # If the interceptor returned a ToolMessage directly, return it as the content
     # with None as the artifact to match the content_and_artifact format
@@ -223,23 +262,7 @@ def _convert_call_tool_result(
     ]
 
     if call_tool_result.isError:
-        # Join text from all text blocks. Non-text blocks (image/file) carry no
-        # human-readable error text, so fall back to a summary rather than
-        # dumping their raw repr (which may include large base64 payloads).
-        error_parts: list[str] = [
-            block.get("text", "")
-            for block in tool_content
-            if block.get("type") == "text"
-        ]
-        error_msg = (
-            "\n".join(error_parts)
-            if error_parts
-            else (
-                "MCP tool returned an error with no text content "
-                f"({len(tool_content)} non-text content block(s))."
-            )
-        )
-        raise _MCPToolError(error_msg, tool_content)
+        raise _MCPToolExecutionError(tool_content)
 
     # Extract structured content and wrap in MCPToolArtifact
     artifact: MCPToolArtifact | None = None
@@ -486,10 +509,12 @@ def convert_mcp_tool_to_langchain_tool(
         lc_tool_name = f"{server_name}_{tool.name}"
 
     # `handle_tool_error` is typed to return `str`, but our callback returns a
-    # list of LangChain content blocks. `_format_output` preserves list content
-    # (it is recognized message content), so the blocks reach the `ToolMessage`
-    # unchanged. The type mismatch is intentional and load-bearing; see
-    # `_handle_mcp_tool_error`.
+    # list of LangChain content blocks. langchain_core's output formatting
+    # preserves list content (it is recognized message content), so the blocks
+    # reach the `ToolMessage` unchanged. The type mismatch is intentional and
+    # load-bearing; see `_handle_mcp_tool_error`. This relies on langchain_core's
+    # current content-block recognition and is locked by
+    # `test_mcp_tool_error_preserves_non_text_content`.
     error_handler = _handle_mcp_tool_error if handle_tool_errors else False
     return StructuredTool(
         name=lc_tool_name,
