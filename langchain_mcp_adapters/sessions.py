@@ -13,17 +13,16 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
-
-    import httpx
 
     from langchain_mcp_adapters.callbacks import _MCPCallbacks
 
@@ -173,10 +172,10 @@ class StreamableHttpConnection(TypedDict):
     headers: NotRequired[dict[str, Any] | None]
     """HTTP headers to send to the endpoint."""
 
-    timeout: NotRequired[timedelta]
+    timeout: NotRequired[float | timedelta]
     """HTTP timeout."""
 
-    sse_read_timeout: NotRequired[timedelta]
+    sse_read_timeout: NotRequired[float | timedelta]
     """How long (in seconds) the client will wait for a new event before disconnecting.
     All other HTTP operations are controlled by `timeout`."""
 
@@ -317,8 +316,8 @@ async def _create_streamable_http_session(
     *,
     url: str,
     headers: dict[str, Any] | None = None,
-    timeout: timedelta = DEFAULT_STREAMABLE_HTTP_TIMEOUT,
-    sse_read_timeout: timedelta = DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT,
+    timeout: float | timedelta = DEFAULT_STREAMABLE_HTTP_TIMEOUT,
+    sse_read_timeout: float | timedelta = DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT,
     terminate_on_close: bool = True,
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
@@ -341,19 +340,27 @@ async def _create_streamable_http_session(
         An initialized ClientSession.
     """
     # Create and store the connection
-    kwargs = {}
-    if httpx_client_factory is not None:
-        kwargs["httpx_client_factory"] = httpx_client_factory
+    client_factory = httpx_client_factory or create_mcp_http_client
+    timeout_seconds = (
+        timeout.total_seconds() if isinstance(timeout, timedelta) else timeout
+    )
+    sse_read_timeout_seconds = (
+        sse_read_timeout.total_seconds()
+        if isinstance(sse_read_timeout, timedelta)
+        else sse_read_timeout
+    )
+    client = client_factory(
+        headers=headers,
+        timeout=httpx.Timeout(timeout_seconds, read=sse_read_timeout_seconds),
+        auth=auth,
+    )
 
     async with (
-        streamablehttp_client(
+        client,
+        streamable_http_client(
             url,
-            headers,
-            timeout,
-            sse_read_timeout,
-            terminate_on_close,
-            auth=auth,
-            **kwargs,
+            http_client=client,
+            terminate_on_close=terminate_on_close,
         ) as (read, write, _),
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
