@@ -235,6 +235,25 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 
 > Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
+## Tool error handling
+
+MCP distinguishes a tool *execution* error (`CallToolResult(isError=True)`, e.g. "project not found") from a protocol/transport failure. By default, an execution error is returned to the model as a `ToolMessage` with `status="error"`, so the agent can see what went wrong and self-correct instead of the run crashing:
+
+```python
+client = MultiServerMCPClient({...})
+tools = await client.get_tools()  # handle_tool_errors=True by default
+```
+
+To restore the legacy behavior — raising a `ToolException` on execution errors — set `handle_tool_errors=False`:
+
+```python
+client = MultiServerMCPClient({...}, handle_tool_errors=False)
+# or, at the tool-loading level:
+tools = await load_mcp_tools(session, handle_tool_errors=False)
+```
+
+> Transport/session failures and content-conversion errors (e.g. unsupported audio content) always raise regardless of this setting; only MCP execution errors (`isError=True`) are governed by it.
+
 ## Using with LangGraph StateGraph
 
 ```python

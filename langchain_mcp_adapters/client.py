@@ -69,11 +69,14 @@ class MultiServerMCPClient:
                 using an underscore separator (e.g., `"weather_search"` instead of
                 `"search"`). This helps avoid conflicts when multiple servers have tools
                 with the same name. Defaults to `False`.
-            handle_tool_errors: If `True` (default), MCP tool execution errors
-                (`CallToolResult(isError=True)`) are returned to the model as a
-                `ToolMessage` with `status="error"` so the agent can self-correct.
-                If `False`, a `ToolException` is raised instead (legacy behavior).
-                Protocol/transport/session failures always raise.
+            handle_tool_errors: If `True` (default), an MCP tool execution error
+                (`CallToolResult(isError=True)`) is returned to the model as a
+                `ToolMessage` with `status="error"` so the agent can self-correct
+                instead of crashing the run. If `False`, a `ToolException` is
+                raised instead (legacy behavior). Transport/session failures and
+                content-conversion errors (e.g. unsupported audio content) always
+                raise regardless of this setting; only MCP execution errors
+                (`isError=True`) are governed by it.
 
         !!! example "Basic usage (starting a new session on each tool call)"
 

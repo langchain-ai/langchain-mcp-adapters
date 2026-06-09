@@ -68,7 +68,7 @@ MAX_ITERATIONS = 1000
 
 
 class _MCPToolError(ToolException):
-    """MCP tool execution error (``CallToolResult(isError=True)``).
+    """MCP tool execution error (`CallToolResult(isError=True)`).
 
     Carries the already-converted LangChain content blocks so the error can be
     surfaced to the model as a failed tool output instead of crashing the run.
@@ -86,9 +86,25 @@ def _handle_mcp_tool_error(
 ) -> list[ToolMessageContentBlock]:
     """Surface MCP tool execution errors as failed tool output.
 
-    Returns the error content for MCP tool execution errors so the caller
-    produces a ``ToolMessage(status="error")``. Re-raises any other
-    ``ToolException`` (e.g. adapter/runtime bugs) so it still propagates.
+    Used as the `handle_tool_error` callback on the generated
+    `StructuredTool`. LangChain only routes `ToolException` (and subclasses)
+    to this callback, so it never sees other error types: content-conversion
+    failures (`NotImplementedError`, `ValueError`) and transport/session
+    failures are not `ToolException` subclasses and propagate without ever
+    reaching here.
+
+    Args:
+        error: The `ToolException` raised during tool execution.
+
+    Returns:
+        The already-converted content blocks carried by an `_MCPToolError`
+        (an MCP `isError=True` result), so the caller produces a
+        `ToolMessage` with `status="error"`.
+
+    Raises:
+        ToolException: Re-raised for any non-`_MCPToolError` `ToolException`
+            so it still propagates. Defensive: the adapter only ever raises
+            `_MCPToolError` into this path.
     """
     if isinstance(error, _MCPToolError):
         return error.tool_content
@@ -188,7 +204,7 @@ def _convert_call_tool_result(
 
     Raises:
         _MCPToolError: If the MCP tool reported an execution error
-            (``CallToolResult(isError=True)``).
+            (`CallToolResult(isError=True)`).
         NotImplementedError: If AudioContent is encountered.
     """
     # If the interceptor returned a ToolMessage directly, return it as the content
@@ -207,14 +223,22 @@ def _convert_call_tool_result(
     ]
 
     if call_tool_result.isError:
-        # Join text from all blocks
-        error_parts = []
-        for item in tool_content:
-            if isinstance(item, str):
-                error_parts.append(item)
-            elif isinstance(item, dict) and item.get("type") == "text":
-                error_parts.append(item.get("text", ""))
-        error_msg = "\n".join(error_parts) if error_parts else str(tool_content)
+        # Join text from all text blocks. Non-text blocks (image/file) carry no
+        # human-readable error text, so fall back to a summary rather than
+        # dumping their raw repr (which may include large base64 payloads).
+        error_parts: list[str] = [
+            block.get("text", "")
+            for block in tool_content
+            if block.get("type") == "text"
+        ]
+        error_msg = (
+            "\n".join(error_parts)
+            if error_parts
+            else (
+                "MCP tool returned an error with no text content "
+                f"({len(tool_content)} non-text content block(s))."
+            )
+        )
         raise _MCPToolError(error_msg, tool_content)
 
     # Extract structured content and wrap in MCPToolArtifact
@@ -326,9 +350,11 @@ def convert_mcp_tool_to_langchain_tool(
         handle_tool_errors: If `True` (default), an MCP tool execution error
             (`CallToolResult(isError=True)`) is returned to the model as a
             `ToolMessage` with `status="error"` so the agent can self-correct
-            instead of crashing the run. If `False`, the legacy behavior is kept
-            and a `ToolException` is raised. Protocol/transport/session failures
-            and adapter bugs always raise regardless of this setting.
+            instead of crashing the run. If `False`, a `ToolException` is raised
+            instead (legacy behavior). Transport/session failures and
+            content-conversion errors (e.g. unsupported audio content) always
+            raise regardless of this setting; only MCP execution errors
+            (`isError=True`) are governed by it.
 
     Returns:
         a LangChain tool
@@ -459,6 +485,12 @@ def convert_mcp_tool_to_langchain_tool(
     if tool_name_prefix and server_name:
         lc_tool_name = f"{server_name}_{tool.name}"
 
+    # `handle_tool_error` is typed to return `str`, but our callback returns a
+    # list of LangChain content blocks. `_format_output` preserves list content
+    # (it is recognized message content), so the blocks reach the `ToolMessage`
+    # unchanged. The type mismatch is intentional and load-bearing; see
+    # `_handle_mcp_tool_error`.
+    error_handler = _handle_mcp_tool_error if handle_tool_errors else False
     return StructuredTool(
         name=lc_tool_name,
         description=tool.description or "",
@@ -466,7 +498,7 @@ def convert_mcp_tool_to_langchain_tool(
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
-        handle_tool_error=_handle_mcp_tool_error if handle_tool_errors else False,
+        handle_tool_error=error_handler,  # type: ignore[arg-type]
     )
 
 
@@ -490,10 +522,14 @@ async def load_mcp_tools(
         server_name: Name of the server these tools belong to.
         tool_name_prefix: If `True` and `server_name` is provided, tool names will be
             prefixed w/ server name (e.g., `"weather_search"` instead of `"search"`).
-        handle_tool_errors: If `True` (default), MCP tool execution errors
-            (`CallToolResult(isError=True)`) are returned to the model as a
-            `ToolMessage` with `status="error"`. If `False`, a `ToolException` is
-            raised instead (legacy behavior).
+        handle_tool_errors: If `True` (default), an MCP tool execution error
+            (`CallToolResult(isError=True)`) is returned to the model as a
+            `ToolMessage` with `status="error"` so the agent can self-correct
+            instead of crashing the run. If `False`, a `ToolException` is raised
+            instead (legacy behavior). Transport/session failures and
+            content-conversion errors (e.g. unsupported audio content) always
+            raise regardless of this setting; only MCP execution errors
+            (`isError=True`) are governed by it.
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).

@@ -1,7 +1,7 @@
 import typing
 from collections.abc import Callable, Sequence
 from typing import Annotated, Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -663,6 +663,132 @@ async def test_adapter_bug_still_raises():
         await lc_tool.ainvoke(
             {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
         )
+
+
+async def test_mcp_tool_error_empty_content_uses_fallback_message():
+    """isError=True with no content yields a non-empty, non-repr error message."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(content=[], isError=True)
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    # Observe the synthesized message on the raising (opt-out) path.
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, handle_tool_errors=False
+    )
+    with pytest.raises(ToolException, match="no text content"):
+        await lc_tool.ainvoke(
+            {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+        )
+
+    # Default path still surfaces a failed ToolMessage (with empty content).
+    lc_tool_default = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+    result = await lc_tool_default.ainvoke(
+        {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+    )
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.content == []
+
+
+async def test_mcp_tool_error_preserves_non_text_content():
+    """Non-text error blocks (image/file) survive into the failed ToolMessage."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[
+            TextContent(type="text", text="render failed"),
+            ImageContent(type="image", mimeType="image/png", data="abc"),
+        ],
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=tool_input_schema
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(
+        {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert [block["type"] for block in result.content] == ["text", "image"]
+
+
+async def test_load_mcp_tools_threads_handle_tool_errors():
+    """handle_tool_errors flows through load_mcp_tools to the produced tools."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.list_tools.return_value = MagicMock(
+        tools=[
+            MCPTool(name="lookup", description="lookup", inputSchema=tool_input_schema)
+        ],
+        nextCursor=None,
+    )
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="boom")], isError=True
+    )
+
+    # opt-out raises
+    raising_tools = await load_mcp_tools(session, handle_tool_errors=False)
+    with pytest.raises(ToolException, match="boom"):
+        await raising_tools[0].ainvoke(
+            {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+        )
+
+    # default surfaces a failed ToolMessage
+    default_tools = await load_mcp_tools(session)
+    result = await default_tools[0].ainvoke(
+        {"args": {"param1": "x"}, "id": "1", "type": "tool_call"},
+    )
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+
+
+async def test_multi_server_client_threads_handle_tool_errors():
+    """MultiServerMCPClient forwards handle_tool_errors in both get_tools branches."""
+    connections = {
+        "math": {"transport": "stdio", "command": "echo", "args": []},
+        "weather": {"transport": "stdio", "command": "echo", "args": []},
+    }
+
+    with patch(
+        "langchain_mcp_adapters.client.load_mcp_tools",
+        new=AsyncMock(return_value=[]),
+    ) as mock_load:
+        client = MultiServerMCPClient(connections, handle_tool_errors=False)
+
+        # all-servers branch: one load per connection, flag forwarded each time
+        await client.get_tools()
+        assert mock_load.await_count == len(connections)
+        for call in mock_load.await_args_list:
+            assert call.kwargs["handle_tool_errors"] is False
+
+        mock_load.reset_mock()
+
+        # single-server branch
+        await client.get_tools(server_name="math")
+        mock_load.assert_awaited_once()
+        assert mock_load.await_args.kwargs["handle_tool_errors"] is False
 
 
 def _create_annotations_server():
