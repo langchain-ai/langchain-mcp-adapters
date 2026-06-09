@@ -102,8 +102,11 @@ class _MCPToolExecutionError(ToolException):
     Carries the already-converted LangChain content blocks so the error can be
     surfaced to the model as a failed tool output instead of crashing the run.
     The exception message is derived from `tool_content` (see
-    `_summarize_tool_error`) so the two cannot drift; the message is what the
-    model sees when error handling is disabled and the exception is raised.
+    `_summarize_tool_error`) when the error is constructed; the message is what
+    the model sees when error handling is disabled and the exception is raised.
+    The message is a snapshot taken at construction and is *not* recomputed, so
+    treat `tool_content` as read-only afterward — mutating it would leave the
+    message out of sync with the content.
 
     Deliberately narrow: only `isError=True` results use this type.
     Transport/session failures and content-conversion errors are *not*
