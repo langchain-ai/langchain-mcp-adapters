@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypedDict, get_args
 
@@ -413,6 +414,22 @@ def convert_mcp_tool_to_langchain_tool(
 
         return _convert_call_tool_result(call_tool_result)
 
+    def call_tool_sync(
+        runtime: Annotated[object | None, InjectedToolArg()] = None,
+        **arguments: dict[str, Any],
+    ) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
+        """Execute the async MCP tool call from a synchronous context."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(call_tool(runtime=runtime, **arguments))
+
+        msg = (
+            "MCP tools cannot be invoked synchronously from a running event loop. "
+            "Use ainvoke(...) instead."
+        )
+        raise RuntimeError(msg)
+
     meta = getattr(tool, "meta", None)
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
     meta = {"_meta": meta} if meta is not None else {}
@@ -427,6 +444,7 @@ def convert_mcp_tool_to_langchain_tool(
         name=lc_tool_name,
         description=tool.description or "",
         args_schema=tool.inputSchema,
+        func=call_tool_sync,
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,

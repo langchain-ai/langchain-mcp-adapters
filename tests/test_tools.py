@@ -452,6 +452,38 @@ async def test_convert_mcp_tool_to_langchain_tool():
     ]
 
 
+def test_converted_mcp_tool_supports_sync_invoke():
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+            "param2": {"title": "Param2", "type": "integer"},
+        },
+        "required": ["param1", "param2"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = lc_tool.invoke({"param1": "test", "param2": 42})
+
+    session.call_tool.assert_called_once_with(
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
+    )
+    assert result == [{"type": "text", "text": "tool result", "id": IsLangChainID}]
+
+
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
