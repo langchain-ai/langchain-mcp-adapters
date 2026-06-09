@@ -540,9 +540,7 @@ _TOOL_INPUT_SCHEMA = {
     "type": "object",
 }
 _TOOL_CALL = {"args": {"param1": "x"}, "id": "1", "type": "tool_call"}
-_EMPTY_ERROR_MESSAGE = (
-    "MCP tool returned an error with no text content (0 non-text content block(s))."
-)
+_EMPTY_ERROR_MESSAGE = "MCP tool returned an error with empty content."
 
 
 async def test_mcp_tool_error_returns_failed_tool_message():
@@ -673,23 +671,27 @@ async def test_adapter_bug_still_raises():
 
 
 async def test_mcp_tool_error_empty_content_uses_fallback_message():
-    """isError=True with no content yields a non-empty, non-repr error message."""
+    """isError=True with no content at all yields a minimal placeholder result.
+
+    An empty `ToolMessage` is a fragile shape for some model providers, so the
+    adapter substitutes one placeholder text block. This is the *only* case that
+    synthesizes content; results with real blocks pass through untouched.
+    """
     session = AsyncMock()
     session.call_tool.return_value = CallToolResult(content=[], isError=True)
     mcp_tool = MCPTool(
         name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
     )
 
-    # Observe the synthesized message on the raising (opt-out) path.
+    # Observe the placeholder message on the raising (opt-out) path.
     lc_tool = convert_mcp_tool_to_langchain_tool(
         session, mcp_tool, handle_tool_errors=False
     )
-    with pytest.raises(ToolException, match="no text content"):
+    with pytest.raises(ToolException, match="empty content"):
         await lc_tool.ainvoke(_TOOL_CALL)
 
-    # Default path surfaces a failed ToolMessage carrying the synthesized
-    # explanation as a text block, so the model has something to act on rather
-    # than a blank error.
+    # Default path surfaces a failed ToolMessage carrying the placeholder as a
+    # text block, so the result is not an empty tool message.
     lc_tool_default = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
     result = await lc_tool_default.ainvoke(_TOOL_CALL)
     assert isinstance(result, ToolMessage)
@@ -723,8 +725,13 @@ async def test_mcp_tool_error_preserves_non_text_content():
     assert [block["type"] for block in result.content_blocks] == ["text", "image"]
 
 
-async def test_mcp_tool_error_non_text_only_synthesizes_message():
-    """Image-only error content gets a synthesized text explanation, no base64 dump."""
+async def test_mcp_tool_error_non_text_only_passes_through():
+    """Image-only error content passes through untouched (no synthesized text).
+
+    The image plus `status="error"` is a faithful, complete representation;
+    prepending boilerplate would only add noise. Synthesis is reserved for
+    genuinely empty content.
+    """
     session = AsyncMock()
     session.call_tool.return_value = CallToolResult(
         content=[ImageContent(type="image", mimeType="image/png", data="abc")],
@@ -740,12 +747,14 @@ async def test_mcp_tool_error_non_text_only_synthesizes_message():
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    blocks = result.content_blocks
-    # A human-readable explanation is prepended, then the image is preserved.
-    assert [block["type"] for block in blocks] == ["text", "image"]
-    assert "non-text content" in blocks[0]["text"]
-    assert "abc" not in blocks[0]["text"]  # base64 payload is not dumped into text
-    assert blocks[1]["base64"] == "abc"  # image payload preserved as a block
+    assert result.content_blocks == [
+        {
+            "type": "image",
+            "base64": "abc",
+            "mime_type": "image/png",
+            "id": IsLangChainID,
+        }
+    ]
 
 
 async def test_load_mcp_tools_threads_handle_tool_errors():

@@ -72,24 +72,28 @@ def _summarize_tool_error(tool_content: list[ToolMessageContentBlock]) -> str:
 
     Joins the text from all text blocks. Non-text blocks (image/file) carry no
     human-readable error text, so fall back to a summary rather than dumping
-    their raw repr (which may include large base64 payloads).
+    their raw repr (which may include large base64 payloads). An error with no
+    content at all gets a minimal placeholder.
 
     Args:
         tool_content: The converted LangChain content blocks from an MCP
             `isError=True` result.
 
     Returns:
-        The joined text from all text blocks, or a summary if there are none.
+        The joined text from all text blocks, a summary if there are only
+            non-text blocks, or a placeholder if there is no content.
     """
     error_parts: list[str] = [
         block["text"] for block in tool_content if block["type"] == "text"
     ]
     if error_parts:
         return "\n".join(error_parts)
-    return (
-        "MCP tool returned an error with no text content "
-        f"({len(tool_content)} non-text content block(s))."
-    )
+    if tool_content:
+        return (
+            "MCP tool returned an error with no text content "
+            f"({len(tool_content)} non-text content block(s))."
+        )
+    return "MCP tool returned an error with empty content."
 
 
 class _MCPToolExecutionError(ToolException):
@@ -128,12 +132,14 @@ def _handle_mcp_tool_error(
         error: The `ToolException` raised during tool execution.
 
     Returns:
-        The already-converted content blocks carried by an
-            `_MCPToolExecutionError` (an MCP `isError=True` result), so the caller
-            produces a `ToolMessage` with `status="error"`. When the error carried
-            no text block (e.g. empty or image-only content), the synthesized error
-            message is prepended as a text block so the model always receives a
-            human-readable explanation it can act on.
+        The content blocks carried by an `_MCPToolExecutionError` (an MCP
+            `isError=True` result), so the caller produces a `ToolMessage` with
+            `status="error"`. Real content (text or image/file) is preserved
+            verbatim. Only when the MCP error carried no content at all
+            (`content=[]`) is a single minimal text block substituted, so the
+            `ToolMessage` is not empty (a fragile shape for some model providers);
+            that placeholder is an adapter-level fallback, not server-provided
+            error detail.
 
     Raises:
         ToolException: Re-raised for any non-`_MCPToolExecutionError`
@@ -143,9 +149,9 @@ def _handle_mcp_tool_error(
             rather than be swallowed.
     """
     if isinstance(error, _MCPToolExecutionError):
-        if any(block["type"] == "text" for block in error.tool_content):
+        if error.tool_content:
             return error.tool_content
-        return [create_text_block(text=str(error)), *error.tool_content]
+        return [create_text_block(text=str(error))]
     raise error
 
 

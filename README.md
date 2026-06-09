@@ -252,6 +252,8 @@ client = MultiServerMCPClient({...}, handle_tool_errors=False)
 tools = await load_mcp_tools(session, handle_tool_errors=False)
 ```
 
+> The error's content blocks are preserved verbatim on the `ToolMessage`. The one exception: if the MCP error has no content at all, a minimal placeholder text block is substituted so the tool message isn't empty (a fragile shape for some model providers) — this placeholder is adapter-generated, not server-provided error detail.
+>
 > Transport/session failures and content-conversion errors (e.g. unsupported audio content) always raise regardless of this setting; only MCP execution errors (`isError=True`) are governed by it.
 
 ## Using with LangGraph StateGraph
