@@ -55,6 +55,7 @@ class MultiServerMCPClient:
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
+        handle_tool_errors: bool = True,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -68,6 +69,14 @@ class MultiServerMCPClient:
                 using an underscore separator (e.g., `"weather_search"` instead of
                 `"search"`). This helps avoid conflicts when multiple servers have tools
                 with the same name. Defaults to `False`.
+            handle_tool_errors: If `True` (default), an MCP tool execution error
+                (`CallToolResult(isError=True)`) is returned to the model as a
+                `ToolMessage` with `status="error"` so the agent can self-correct
+                instead of crashing the run. If `False`, a `ToolException` is
+                raised instead (legacy behavior). Transport/session failures and
+                content-conversion errors (e.g. unsupported audio content) always
+                raise regardless of this setting; only MCP execution errors
+                (`isError=True`) are governed by it.
 
         !!! example "Basic usage (starting a new session on each tool call)"
 
@@ -110,6 +119,7 @@ class MultiServerMCPClient:
         self.callbacks = callbacks or Callbacks()
         self.tool_interceptors = tool_interceptors or []
         self.tool_name_prefix = tool_name_prefix
+        self.handle_tool_errors = handle_tool_errors
 
     @asynccontextmanager
     async def session(
@@ -178,6 +188,7 @@ class MultiServerMCPClient:
                 server_name=server_name,
                 tool_interceptors=self.tool_interceptors,
                 tool_name_prefix=self.tool_name_prefix,
+                handle_tool_errors=self.handle_tool_errors,
             )
 
         all_tools: list[BaseTool] = []
@@ -191,6 +202,7 @@ class MultiServerMCPClient:
                     server_name=name,
                     tool_interceptors=self.tool_interceptors,
                     tool_name_prefix=self.tool_name_prefix,
+                    handle_tool_errors=self.handle_tool_errors,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
