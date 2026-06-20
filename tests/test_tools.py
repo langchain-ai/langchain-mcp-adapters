@@ -452,6 +452,48 @@ async def test_convert_mcp_tool_to_langchain_tool():
     ]
 
 
+@pytest.mark.parametrize("argument_name", ["callbacks", "config", "run_manager"])
+async def test_convert_mcp_tool_preserves_langchain_reserved_argument_names(
+    argument_name: str,
+):
+    tool_input_schema = {
+        "properties": {
+            argument_name: {"title": argument_name.title(), "type": "string"},
+            "query": {"title": "Query", "type": "string"},
+        },
+        "required": [argument_name, "query"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="config_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    await lc_tool.ainvoke(
+        {
+            "args": {argument_name: "user_value", "query": "hello"},
+            "id": "1",
+            "type": "tool_call",
+        },
+    )
+
+    session.call_tool.assert_called_once_with(
+        "config_tool",
+        {argument_name: "user_value", "query": "hello"},
+        progress_callback=None,
+    )
+
+
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
