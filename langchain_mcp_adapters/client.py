@@ -5,6 +5,7 @@ to multiple MCP servers and loading tools, prompts, and resources from them.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -29,6 +30,8 @@ from langchain_mcp_adapters.sessions import (
     create_session,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
+
+logger = logging.getLogger(__name__)
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
     "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a "
@@ -170,6 +173,13 @@ class MultiServerMCPClient:
 
             A new session will be created for each tool call
 
+        !!! note
+
+            When loading from all servers, a failure on any single server is
+            isolated: a warning is logged for that server and tools from the
+            remaining healthy servers are still returned. When `server_name`
+            is provided, errors propagate to the caller as before.
+
         Returns:
             A list of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools)
 
@@ -192,8 +202,10 @@ class MultiServerMCPClient:
             )
 
         all_tools: list[BaseTool] = []
+        server_names = list(self.connections.keys())
         load_mcp_tool_tasks = []
-        for name, connection in self.connections.items():
+        for name in server_names:
+            connection = self.connections[name]
             load_mcp_tool_task = asyncio.create_task(
                 load_mcp_tools(
                     None,
@@ -206,9 +218,17 @@ class MultiServerMCPClient:
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
-        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
-        for tools in tools_list:
-            all_tools.extend(tools)
+        # Use return_exceptions=True so a single failing server (e.g. a stdio
+        # command that is not installed) does not cancel sibling tasks and lose
+        # tools from healthy servers. See issue #492.
+        results = await asyncio.gather(*load_mcp_tool_tasks, return_exceptions=True)
+        for name, result in zip(server_names, results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "Failed to load tools from MCP server %r: %s", name, result
+                )
+                continue
+            all_tools.extend(result)
         return all_tools
 
     async def get_prompt(
@@ -300,3 +320,4 @@ __all__ = [
     "StreamableHttpConnection",
     "WebsocketConnection",
 ]
+</content>
