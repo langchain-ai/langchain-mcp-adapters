@@ -30,7 +30,7 @@ def convert_mcp_resource_to_langchain_blob(
         data = base64.b64decode(contents.blob)
     else:
         msg = f"Unsupported content type for URI {resource_uri}"
-        raise TypeError(msg)
+        raise ValueError(msg)
 
     return Blob.from_data(
         data=data, mime_type=contents.mimeType, metadata={"uri": resource_uri}
