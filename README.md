@@ -348,3 +348,36 @@ In your [`langgraph.json`](https://langchain-ai.github.io/langgraph/cloud/refere
   }
 }
 ```
+
+## Connecting to public MCP servers
+
+You can connect to any public MCP server using `MultiServerMCPClient` — no extra setup needed beyond the URL.
+
+### Example: OpenAccountants
+
+[OpenAccountants](https://www.openaccountants.com) is an open library of 800+ accountant-verified tax skills across 190+ jurisdictions, served over a public MCP endpoint. Useful when your LangChain agent needs to compute VAT, classify bookkeeping transactions, or walk a user through a tax return — every skill is signed off by a named licensed accountant.
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain.agents import create_agent
+
+client = MultiServerMCPClient(
+    {
+        "openaccountants": {
+            "transport": "streamable_http",
+            "url": "https://www.openaccountants.com/api/mcp",
+        }
+    }
+)
+tools = await client.get_tools()
+agent = create_agent("anthropic:claude-sonnet-4-5", tools)
+
+response = await agent.ainvoke({
+    "messages": "I'm a Maltese freelancer earning EUR 45,000 from foreign clients. What VAT obligations do I have?"
+})
+print(response["messages"][-1].content)
+```
+
+Full working examples (bookkeeping classification, cross-border tax comparison, Jupyter notebook): [openaccountants/langchain-example](https://github.com/openaccountants/langchain-example).
+
+> If you maintain a public MCP server that's a useful real-world example, feel free to open a PR adding it to this section.
