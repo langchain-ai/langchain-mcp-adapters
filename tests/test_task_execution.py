@@ -1,4 +1,4 @@
-"""Tests for experimental MCP Tasks support."""
+"""Tests for the experimental use_task_execution flag."""
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -23,16 +23,17 @@ from langchain_mcp_adapters.tools import (
 )
 from tests.utils import IsLangChainID
 
+_SIMPLE_SCHEMA = {
+    "type": "object",
+    "properties": {"n": {"type": "integer"}},
+    "required": ["n"],
+    "title": "Schema",
+}
+
 
 def _make_task(task_id: str = "task-123", status=TASK_STATUS_COMPLETED) -> Task:
     now = datetime.now(timezone.utc)
-    return Task(
-        taskId=task_id,
-        status=status,
-        createdAt=now,
-        lastUpdatedAt=now,
-        ttl=None,
-    )
+    return Task(taskId=task_id, status=status, createdAt=now, lastUpdatedAt=now, ttl=None)
 
 
 def _make_session(
@@ -114,13 +115,6 @@ async def test_call_tool_as_task_input_required_cancels_and_raises():
 # Integration with convert_mcp_tool_to_langchain_tool
 # ---------------------------------------------------------------------------
 
-_SIMPLE_SCHEMA = {
-    "type": "object",
-    "properties": {"n": {"type": "integer"}},
-    "required": ["n"],
-    "title": "Schema",
-}
-
 
 async def test_convert_mcp_tool_routes_through_tasks_when_flag_set():
     """use_task_execution=True must call experimental API, not call_tool."""
@@ -141,6 +135,8 @@ async def test_convert_mcp_tool_routes_through_tasks_when_flag_set():
 
     session.experimental.call_tool_as_task.assert_called_once_with("calc", {"n": 7})
     session.call_tool.assert_not_called()
+    assert result.name == "calc"
+    assert result.tool_call_id == "tc1"
     assert result.content == [{"type": "text", "text": "42", "id": IsLangChainID}]
 
 
@@ -156,10 +152,15 @@ async def test_convert_mcp_tool_uses_regular_call_tool_by_default():
         session,
         MCPTool(name="calc", description="calc", inputSchema=_SIMPLE_SCHEMA),
     )
-    await lc_tool.ainvoke({"args": {"n": 1}, "id": "tc2", "type": "tool_call"})
+    result = await lc_tool.ainvoke(
+        {"args": {"n": 1}, "id": "tc2", "type": "tool_call"}
+    )
 
     session.call_tool.assert_called_once()
     session.experimental.call_tool_as_task.assert_not_called()
+    assert result.name == "calc"
+    assert result.tool_call_id == "tc2"
+    assert result.content == [{"type": "text", "text": "99", "id": IsLangChainID}]
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +185,9 @@ async def test_load_mcp_tools_propagates_use_task_execution():
     tools = await load_mcp_tools(session, use_task_execution=True)
     assert len(tools) == 1
 
-    await tools[0].ainvoke({"args": {"n": 5}, "id": "tc3", "type": "tool_call"})
+    result = await tools[0].ainvoke({"args": {"n": 5}, "id": "tc3", "type": "tool_call"})
 
     session.experimental.call_tool_as_task.assert_called_once()
     session.call_tool.assert_not_called()
+    assert result.name == "adder"
+    assert result.tool_call_id == "tc3"
