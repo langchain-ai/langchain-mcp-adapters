@@ -56,6 +56,7 @@ class MultiServerMCPClient:
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
         handle_tool_errors: bool = True,
+        use_task_execution: bool = False,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -77,6 +78,13 @@ class MultiServerMCPClient:
                 content-conversion errors (e.g. unsupported audio content) always
                 raise regardless of this setting; only MCP execution errors
                 (`isError=True`) are governed by it.
+            use_task_execution: If `True`, all tool calls are submitted as MCP tasks
+                via the experimental `session.experimental` API and polled until
+                completion. Requires the server to support MCP Tasks. Defaults to
+                `False`.
+
+                WARNING: Uses the experimental mcp SDK task API — may change without
+                notice.
 
         !!! example "Basic usage (starting a new session on each tool call)"
 
@@ -120,6 +128,7 @@ class MultiServerMCPClient:
         self.tool_interceptors = tool_interceptors or []
         self.tool_name_prefix = tool_name_prefix
         self.handle_tool_errors = handle_tool_errors
+        self.use_task_execution = use_task_execution
 
     @asynccontextmanager
     async def session(
@@ -189,6 +198,7 @@ class MultiServerMCPClient:
                 tool_interceptors=self.tool_interceptors,
                 tool_name_prefix=self.tool_name_prefix,
                 handle_tool_errors=self.handle_tool_errors,
+                use_task_execution=self.use_task_execution,
             )
 
         all_tools: list[BaseTool] = []
@@ -203,6 +213,7 @@ class MultiServerMCPClient:
                     tool_interceptors=self.tool_interceptors,
                     tool_name_prefix=self.tool_name_prefix,
                     handle_tool_errors=self.handle_tool_errors,
+                    use_task_execution=self.use_task_execution,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
