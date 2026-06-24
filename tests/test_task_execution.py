@@ -1,9 +1,19 @@
 """Tests for the experimental use_task_execution flag."""
 
+import asyncio
+import contextlib
+import multiprocessing
+import socket
+import time
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import uvicorn
+from mcp import types
+from mcp.server.experimental.task_context import ServerTaskContext
+from mcp.server.lowlevel.server import Server
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
     CallToolResult,
     CreateTaskResult,
@@ -16,12 +26,151 @@ from mcp.types import (
 )
 from mcp.types import Tool as MCPTool
 
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import (
     _call_tool_as_task,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
 )
 from tests.utils import IsLangChainID
+
+_TASK_SERVER_PORT = 8185
+
+
+# ---------------------------------------------------------------------------
+# Low-level task server — module-level for multiprocessing picklability
+# ---------------------------------------------------------------------------
+
+
+def _run_task_server(server_port: int) -> None:
+    """Entry point for the task server subprocess.
+
+    Uses the low-level mcp Server (not FastMCP) so the call_tool handler can
+    detect task metadata and return CreateTaskResult for background execution.
+    """
+    from mcp.server.fastmcp.server import StreamableHTTPASGIApp
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+
+    server = Server("langchain-mcp-task-test")
+    server.experimental.enable_tasks()
+
+    @server.list_tools()
+    async def list_tools() -> list[types.Tool]:
+        return [
+            types.Tool(
+                name="slow_add",
+                description="Add two numbers with an async delay",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "a": {"type": "integer"},
+                        "b": {"type": "integer"},
+                    },
+                    "required": ["a", "b"],
+                },
+            ),
+            types.Tool(
+                name="echo",
+                description="Return the message unchanged",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"message": {"type": "string"}},
+                    "required": ["message"],
+                },
+            ),
+        ]
+
+    @server.call_tool()
+    async def call_tool(
+        name: str, arguments: dict
+    ) -> types.CallToolResult | types.CreateTaskResult:
+        ctx = server.request_context
+        experimental = ctx.experimental
+        task_support = experimental._task_support
+
+        async def _execute() -> types.CallToolResult:
+            if name == "slow_add":
+                await asyncio.sleep(0.05)
+                total = arguments["a"] + arguments["b"]
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=str(total))],
+                    isError=False,
+                )
+            if name == "echo":
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=arguments["message"])],
+                    isError=False,
+                )
+            msg = f"Unknown tool: {name}"
+            raise ValueError(msg)
+
+        if experimental.is_task and task_support is not None:
+            task = await task_support.store.create_task(experimental.task_metadata)
+
+            async def background() -> None:
+                task_ctx = ServerTaskContext(
+                    task=task,
+                    store=task_support.store,
+                    session=ctx.session,
+                    queue=task_support.queue,
+                    handler=task_support.handler,
+                )
+                try:
+                    result = await _execute()
+                    await task_ctx.complete(result)
+                except Exception as exc:  # noqa: BLE001
+                    await task_ctx.fail(str(exc))
+
+            task_support.task_group.start_soon(background)
+            return types.CreateTaskResult(task=task)
+
+        return await _execute()
+
+    session_manager = StreamableHTTPSessionManager(app=server, stateless=False)
+    asgi_app = StreamableHTTPASGIApp(session_manager)
+    starlette_app = Starlette(
+        routes=[Route("/mcp", endpoint=asgi_app)],
+        lifespan=lambda _app: session_manager.run(),
+    )
+
+    uvicorn_server = uvicorn.Server(
+        config=uvicorn.Config(
+            app=starlette_app,
+            host="127.0.0.1",
+            port=server_port,
+            log_level="error",
+        )
+    )
+    uvicorn_server.run()
+
+
+@contextlib.contextmanager
+def _run_task_server_ctx(server_port: int):
+    """Context manager that starts the task server in a subprocess."""
+    proc = multiprocessing.Process(
+        target=_run_task_server,
+        kwargs={"server_port": server_port},
+        daemon=True,
+    )
+    proc.start()
+
+    for _ in range(40):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect(("127.0.0.1", server_port))
+                break
+        except ConnectionRefusedError:
+            time.sleep(0.1)
+    else:
+        proc.kill()
+        raise RuntimeError("Task server failed to start")
+
+    try:
+        yield
+    finally:
+        proc.kill()
+        proc.join(timeout=2)
 
 _SIMPLE_SCHEMA = {
     "type": "object",
@@ -191,3 +340,74 @@ async def test_load_mcp_tools_propagates_use_task_execution():
     session.call_tool.assert_not_called()
     assert result.name == "adder"
     assert result.tool_call_id == "tc3"
+
+
+# ---------------------------------------------------------------------------
+# Integration tests against a real FastMCP server with tasks enabled
+# ---------------------------------------------------------------------------
+
+
+async def test_task_execution_returns_correct_result(socket_enabled) -> None:
+    """Tool called via task API returns the expected result end-to-end."""
+    with _run_task_server_ctx(_TASK_SERVER_PORT):
+        client = MultiServerMCPClient(
+            {"test": {"url": f"http://localhost:{_TASK_SERVER_PORT}/mcp", "transport": "http"}},
+            use_task_execution=True,
+        )
+        tools = await client.get_tools()
+        tool_map = {t.name: t for t in tools}
+
+        result = await tool_map["slow_add"].ainvoke(
+            {"args": {"a": 3, "b": 4}, "id": "i1", "type": "tool_call"}
+        )
+
+        assert result.name == "slow_add"
+        assert result.tool_call_id == "i1"
+        assert result.content == [{"type": "text", "text": "7", "id": IsLangChainID}]
+
+
+async def test_task_execution_concurrent_calls(socket_enabled) -> None:
+    """Multiple tools can be called concurrently via the task API."""
+    with _run_task_server_ctx(_TASK_SERVER_PORT):
+        client = MultiServerMCPClient(
+            {"test": {"url": f"http://localhost:{_TASK_SERVER_PORT}/mcp", "transport": "http"}},
+            use_task_execution=True,
+        )
+        tools = await client.get_tools()
+        tool_map = {t.name: t for t in tools}
+
+        echo_result, add_result = await asyncio.gather(
+            tool_map["echo"].ainvoke(
+                {"args": {"message": "hello"}, "id": "i2", "type": "tool_call"}
+            ),
+            tool_map["slow_add"].ainvoke(
+                {"args": {"a": 10, "b": 20}, "id": "i3", "type": "tool_call"}
+            ),
+        )
+
+        assert echo_result.content[0]["text"] == "hello"
+        assert add_result.content[0]["text"] == "30"
+
+
+async def test_task_execution_transparent_to_agents(socket_enabled) -> None:
+    """use_task_execution=True and False produce identical content for agents."""
+    with _run_task_server_ctx(_TASK_SERVER_PORT):
+        client_task = MultiServerMCPClient(
+            {"test": {"url": f"http://localhost:{_TASK_SERVER_PORT}/mcp", "transport": "http"}},
+            use_task_execution=True,
+        )
+        client_direct = MultiServerMCPClient(
+            {"test": {"url": f"http://localhost:{_TASK_SERVER_PORT}/mcp", "transport": "http"}},
+        )
+
+        tools_task = {t.name: t for t in await client_task.get_tools()}
+        tools_direct = {t.name: t for t in await client_direct.get_tools()}
+
+        result_task = await tools_task["echo"].ainvoke(
+            {"args": {"message": "same"}, "id": "i4", "type": "tool_call"}
+        )
+        result_direct = await tools_direct["echo"].ainvoke(
+            {"args": {"message": "same"}, "id": "i5", "type": "tool_call"}
+        )
+
+        assert result_task.content[0]["text"] == result_direct.content[0]["text"]
