@@ -29,10 +29,12 @@ from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadat
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
+    CallToolResult,
     ContentBlock,
     EmbeddedResource,
     ImageContent,
     ResourceLink,
+    TASK_STATUS_INPUT_REQUIRED,
     TextContent,
     TextResourceContents,
 )
@@ -354,6 +356,44 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     return all_tools
 
 
+async def _call_tool_as_task(
+    session: ClientSession,
+    tool_name: str,
+    tool_args: dict[str, Any] | None,
+) -> CallToolResult:
+    """Execute a tool call via the MCP task API, polling until a terminal state.
+
+    WARNING: Uses session.experimental — the underlying mcp SDK API is
+    experimental and may change without notice.
+
+    Args:
+        session: Active MCP client session.
+        tool_name: The tool to invoke.
+        tool_args: Arguments to pass to the tool.
+
+    Returns:
+        The CallToolResult from the completed task.
+
+    Raises:
+        RuntimeError: If the task reaches 'input_required' status (not supported).
+    """
+    create_result = await session.experimental.call_tool_as_task(
+        tool_name, tool_args
+    )
+    task_id = create_result.task.taskId
+
+    async for status in session.experimental.poll_task(task_id):
+        if status.status == TASK_STATUS_INPUT_REQUIRED:
+            await session.experimental.cancel_task(task_id)
+            msg = (
+                f"Task '{tool_name}' (id={task_id}) reached 'input_required' status, "
+                "which is not currently supported. The task has been cancelled."
+            )
+            raise RuntimeError(msg)
+
+    return await session.experimental.get_task_result(task_id, CallToolResult)
+
+
 def convert_mcp_tool_to_langchain_tool(
     session: ClientSession | None,
     tool: MCPTool,
@@ -364,6 +404,7 @@ def convert_mcp_tool_to_langchain_tool(
     server_name: str | None = None,
     tool_name_prefix: bool = False,
     handle_tool_errors: bool = True,
+    use_task_execution: bool = False,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -387,6 +428,12 @@ def convert_mcp_tool_to_langchain_tool(
             content-conversion errors (e.g. unsupported audio content) always
             raise regardless of this setting; only MCP execution errors
             (`isError=True`) are governed by it.
+        use_task_execution: If `True`, tool calls are submitted as MCP tasks via
+            the experimental `session.experimental` API and polled until completion.
+            The final `CallToolResult` is returned transparently, so agents see no
+            difference. Requires the server to support MCP Tasks. Defaults to `False`.
+
+            WARNING: Uses the experimental mcp SDK task API — may change without notice.
 
     Returns:
         a LangChain tool
@@ -468,11 +515,16 @@ def convert_mcp_tool_to_langchain_tool(
                 ) as tool_session:
                     await tool_session.initialize()
                     try:
-                        call_tool_result = await tool_session.call_tool(
-                            tool_name,
-                            tool_args,
-                            progress_callback=mcp_callbacks.progress_callback,
-                        )
+                        if use_task_execution:
+                            call_tool_result = await _call_tool_as_task(
+                                tool_session, tool_name, tool_args
+                            )
+                        else:
+                            call_tool_result = await tool_session.call_tool(
+                                tool_name,
+                                tool_args,
+                                progress_callback=mcp_callbacks.progress_callback,
+                            )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
                         captured_exception = e
@@ -486,11 +538,16 @@ def convert_mcp_tool_to_langchain_tool(
                 if captured_exception is not None:
                     raise captured_exception
             else:
-                call_tool_result = await session.call_tool(
-                    tool_name,
-                    tool_args,
-                    progress_callback=mcp_callbacks.progress_callback,
-                )
+                if use_task_execution:
+                    call_tool_result = await _call_tool_as_task(
+                        session, tool_name, tool_args
+                    )
+                else:
+                    call_tool_result = await session.call_tool(
+                        tool_name,
+                        tool_args,
+                        progress_callback=mcp_callbacks.progress_callback,
+                    )
 
             return call_tool_result
 
@@ -545,6 +602,7 @@ async def load_mcp_tools(
     server_name: str | None = None,
     tool_name_prefix: bool = False,
     handle_tool_errors: bool = True,
+    use_task_execution: bool = False,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
@@ -564,6 +622,11 @@ async def load_mcp_tools(
             content-conversion errors (e.g. unsupported audio content) always
             raise regardless of this setting; only MCP execution errors
             (`isError=True`) are governed by it.
+        use_task_execution: If `True`, all tool calls are submitted as MCP tasks
+            via the experimental `session.experimental` API and polled until
+            completion. Requires the server to support MCP Tasks. Defaults to `False`.
+
+            WARNING: Uses the experimental mcp SDK task API — may change without notice.
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
@@ -605,6 +668,7 @@ async def load_mcp_tools(
             server_name=server_name,
             tool_name_prefix=tool_name_prefix,
             handle_tool_errors=handle_tool_errors,
+            use_task_execution=use_task_execution,
         )
         for tool in tools
     ]
