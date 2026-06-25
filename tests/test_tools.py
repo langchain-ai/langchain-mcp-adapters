@@ -35,7 +35,7 @@ from langchain_mcp_adapters.tools import (
     load_mcp_tools,
     to_fastmcp,
 )
-from tests.utils import IsLangChainID, run_streamable_http
+from tests.utils import run_streamable_http
 
 
 def test_convert_empty_text_content():
@@ -56,7 +56,7 @@ def test_convert_single_text_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [{"type": "text", "text": "test result", "id": IsLangChainID}]
+    assert content == [{"type": "text", "text": "test result"}]
     assert artifact is None
 
 
@@ -73,8 +73,8 @@ def test_convert_multiple_text_contents():
     content, artifact = _convert_call_tool_result(result)
 
     assert content == [
-        {"type": "text", "text": "result 1", "id": IsLangChainID},
-        {"type": "text", "text": "result 2", "id": IsLangChainID},
+        {"type": "text", "text": "result 1"},
+        {"type": "text", "text": "result 2"},
     ]
     assert artifact is None
 
@@ -102,17 +102,15 @@ def test_convert_with_non_text_content():
 
     # With mixed content, we get a list of LangChain content blocks
     assert content == [
-        {"type": "text", "text": "text result", "id": IsLangChainID},
+        {"type": "text", "text": "text result"},
         {
             "type": "image",
             "base64": "base64data",
             "mime_type": "image/png",
-            "id": IsLangChainID,
         },
         {
             "type": "text",
             "text": "hi",
-            "id": IsLangChainID,
         },  # EmbeddedResource with text -> text block
     ]
     # No structuredContent in this result
@@ -141,7 +139,7 @@ def test_convert_with_structured_content():
 
     content, artifact = _convert_call_tool_result(result)
 
-    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    assert content == [{"type": "text", "text": "text result"}]
     assert artifact == MCPToolArtifact(
         structured_content={"key": "value", "nested": {"data": 123}}
     )
@@ -164,7 +162,6 @@ def test_convert_image_content():
             "type": "image",
             "base64": "jpeg_base64_data",
             "mime_type": "image/jpeg",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -191,7 +188,6 @@ def test_convert_resource_link():
             "type": "file",
             "url": "file:///path/to/document.pdf",
             "mime_type": "application/pdf",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -218,7 +214,6 @@ def test_convert_resource_link_image():
             "type": "image",
             "url": "https://example.com/photo.png",
             "mime_type": "image/png",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -245,7 +240,6 @@ def test_convert_resource_link_image_jpeg():
             "type": "image",
             "url": "file:///photos/vacation.jpg",
             "mime_type": "image/jpeg",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -273,7 +267,6 @@ def test_convert_resource_link_text():
             "type": "file",
             "url": "file:///docs/readme.txt",
             "mime_type": "text/plain",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -298,7 +291,6 @@ def test_convert_resource_link_no_mime_type():
         {
             "type": "file",
             "url": "file:///data/unknown",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -327,7 +319,6 @@ def test_convert_embedded_resource_blob_image():
             "type": "image",
             "base64": "png_base64_data",
             "mime_type": "image/png",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -356,7 +347,6 @@ def test_convert_embedded_resource_blob_file():
             "type": "file",
             "base64": "pdf_base64_data",
             "mime_type": "application/pdf",
-            "id": IsLangChainID,
         }
     ]
     assert artifact is None
@@ -390,12 +380,11 @@ def test_convert_mixed_content_with_structured_content():
     content, artifact = _convert_call_tool_result(result)
 
     assert content == [
-        {"type": "text", "text": "Here's the analysis", "id": IsLangChainID},
+        {"type": "text", "text": "Here's the analysis"},
         {
             "type": "image",
             "base64": "chart_data",
             "mime_type": "image/png",
-            "id": IsLangChainID,
         },
     ]
     assert artifact == MCPToolArtifact(
@@ -447,9 +436,7 @@ async def test_convert_mcp_tool_to_langchain_tool():
     # Verify result
     assert result.name == "test_tool"
     assert result.tool_call_id == "1"
-    assert result.content == [
-        {"type": "text", "text": "tool result", "id": IsLangChainID}
-    ]
+    assert result.content == [{"type": "text", "text": "tool result"}]
 
 
 async def test_load_mcp_tools():
@@ -513,7 +500,6 @@ async def test_load_mcp_tools():
         {
             "type": "text",
             "text": "tool1 result with {'param1': 'test1', 'param2': 1}",
-            "id": IsLangChainID,
         }
     ]
 
@@ -527,7 +513,6 @@ async def test_load_mcp_tools():
         {
             "type": "text",
             "text": "tool2 result with {'param1': 'test2', 'param2': 2}",
-            "id": IsLangChainID,
         }
     ]
 
@@ -561,9 +546,7 @@ async def test_mcp_tool_error_returns_failed_tool_message():
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
     assert result.tool_call_id == "1"
-    assert result.content_blocks == [
-        {"type": "text", "text": "project not found", "id": IsLangChainID}
-    ]
+    assert result.content_blocks == [{"type": "text", "text": "project not found"}]
 
 
 async def test_mcp_tool_success_returns_successful_tool_message():
@@ -583,9 +566,7 @@ async def test_mcp_tool_success_returns_successful_tool_message():
 
     assert isinstance(result, ToolMessage)
     assert result.status == "success"
-    assert result.content_blocks == [
-        {"type": "text", "text": "ok", "id": IsLangChainID}
-    ]
+    assert result.content_blocks == [{"type": "text", "text": "ok"}]
 
 
 async def test_mcp_tool_success_returns_artifact_through_ainvoke():
@@ -696,9 +677,7 @@ async def test_mcp_tool_error_empty_content_uses_fallback_message():
     result = await lc_tool_default.ainvoke(_TOOL_CALL)
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert result.content_blocks == [
-        {"type": "text", "text": _EMPTY_ERROR_MESSAGE, "id": IsLangChainID}
-    ]
+    assert result.content_blocks == [{"type": "text", "text": _EMPTY_ERROR_MESSAGE}]
 
 
 async def test_mcp_tool_error_preserves_non_text_content():
@@ -752,7 +731,6 @@ async def test_mcp_tool_error_non_text_only_passes_through():
             "type": "image",
             "base64": "abc",
             "mime_type": "image/png",
-            "id": IsLangChainID,
         }
     ]
 
@@ -1022,9 +1000,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
         # Test that the tool works correctly
         result = await tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
-        assert result.content == [
-            {"type": "text", "text": "Server is running", "id": IsLangChainID}
-        ]
+        assert result.content == [{"type": "text", "text": "Server is running"}]
 
 
 def _create_info_server():
@@ -1403,7 +1379,6 @@ async def test_parallel_tool_invocation_across_multiple_servers(socket_enabled) 
             {
                 "type": "text",
                 "text": "Weather results for: sunny in Paris",
-                "id": IsLangChainID,
             }
         ]
 
@@ -1412,7 +1387,6 @@ async def test_parallel_tool_invocation_across_multiple_servers(socket_enabled) 
             {
                 "type": "text",
                 "text": "Flight results to: Tokyo",
-                "id": IsLangChainID,
             }
         ]
 
