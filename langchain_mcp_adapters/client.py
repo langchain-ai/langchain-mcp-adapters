@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
-from typing import Any
+from typing import Any, TypeVar
 
 from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
@@ -40,6 +40,30 @@ ASYNC_CONTEXT_MANAGER_ERROR = (
     "   async with client.session(server_name) as session:\n"
     "       tools = await load_mcp_tools(session)"
 )
+
+
+_T = TypeVar("_T")
+
+
+async def _gather_tasks_or_raise(tasks: list[asyncio.Task[_T]]) -> list[_T]:
+    """Await concurrent tasks with fail-fast semantics and no orphaned siblings.
+
+    Uses ``return_exceptions=True`` so a failing task does not abort ``gather`` while
+    sibling tasks are still running (which can leak stdio subprocesses / sockets).
+    If any task failed, cancel stragglers and re-raise the first exception.
+    """
+    if not tasks:
+        return []
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    exceptions = [result for result in results if isinstance(result, BaseException)]
+    if exceptions:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise exceptions[0]
+    return results
 
 
 class MultiServerMCPClient:
@@ -206,7 +230,7 @@ class MultiServerMCPClient:
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
-        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        tools_list = await _gather_tasks_or_raise(load_mcp_tool_tasks)
         for tools in tools_list:
             all_tools.extend(tools)
         return all_tools
@@ -259,7 +283,7 @@ class MultiServerMCPClient:
             asyncio.create_task(_load_resources_from_server(name))
             for name in self.connections
         ]
-        resources_list = await asyncio.gather(*load_tasks)
+        resources_list = await _gather_tasks_or_raise(load_tasks)
         for resources in resources_list:
             all_resources.extend(resources)
         return all_resources

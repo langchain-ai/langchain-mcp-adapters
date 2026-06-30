@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from collections.abc import Generator
@@ -351,3 +352,46 @@ async def test_get_resources_from_specific_server():
     assert len(weather_resources) == 1
     assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
     assert weather_resources[0].data == "Sunny with a chance of clouds"
+
+
+async def test_get_tools_waits_for_sibling_tasks_on_failure() -> None:
+    """Sibling loaders must finish (or be cancelled) when one server fails."""
+    events: list[str] = []
+
+    async def fake_load_mcp_tools(
+        _session,
+        *,
+        connection=None,
+        server_name=None,
+        **kwargs: object,
+    ):
+        del connection, kwargs
+        if server_name == "slow":
+            await asyncio.sleep(0.05)
+            events.append("slow_done")
+            return []
+        if server_name == "fail":
+            events.append("fail")
+            msg = "stdio server unavailable"
+            raise FileNotFoundError(msg)
+        return []
+
+    client = MultiServerMCPClient(
+        {
+            "slow": {
+                "command": "python3",
+                "args": ["-c", "pass"],
+                "transport": "stdio",
+            },
+            "fail": {"command": "nope", "args": [], "transport": "stdio"},
+        }
+    )
+
+    with patch(
+        "langchain_mcp_adapters.client.load_mcp_tools",
+        side_effect=fake_load_mcp_tools,
+    ):
+        with pytest.raises(FileNotFoundError, match="stdio server unavailable"):
+            await client.get_tools()
+
+    assert events == ["fail", "slow_done"]
