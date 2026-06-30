@@ -161,18 +161,18 @@ uv run mcp-simple-streamablehttp-stateless --port 3000
 
 Alternatively, you can use FastMCP directly (as in the examples above).
 
-To use it with Python MCP SDK `streamablehttp_client`:
+To use it with Python MCP SDK `streamable_http_client`:
 
 ```python
 # Use server from examples/servers/streamable-http-stateless/
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from langchain.agents import create_agent
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-async with streamablehttp_client("http://localhost:3000/mcp") as (read, write, _):
+async with streamable_http_client("http://localhost:3000/mcp") as (read, write, _):
     async with ClientSession(read, write) as session:
         # Initialize the connection
         await session.initialize()
