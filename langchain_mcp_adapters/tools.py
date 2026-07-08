@@ -435,6 +435,7 @@ def convert_mcp_tool_to_langchain_tool(
             """
             tool_name = request.name
             tool_args = request.args
+            tool_meta = request.meta
             effective_connection = connection
 
             # If headers were modified, create a new connection with updated headers
@@ -472,6 +473,7 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_name,
                             tool_args,
                             progress_callback=mcp_callbacks.progress_callback,
+                            meta=tool_meta,
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -490,6 +492,7 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_name,
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
+                    meta=tool_meta,
                 )
 
             return call_tool_result
@@ -501,6 +504,7 @@ def convert_mcp_tool_to_langchain_tool(
             args=arguments,
             server_name=server_name or "unknown",
             headers=None,
+            meta=None,
             runtime=runtime,
         )
         call_tool_result = await handler(request)
