@@ -14,10 +14,12 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
+from mcp.types import Prompt
+from typing_extensions import Self
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
-from langchain_mcp_adapters.prompts import load_mcp_prompt
+from langchain_mcp_adapters.prompts import list_all_mcp_prompts, load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
 from langchain_mcp_adapters.sessions import (
     Connection,
@@ -45,7 +47,8 @@ ASYNC_CONTEXT_MANAGER_ERROR = (
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers.
 
-    Loads LangChain-compatible tools, prompts and resources from MCP servers.
+    Loads LangChain-compatible tools, resources, and MCP prompts
+    (`prompts/list` via `list_prompts`, `prompts/get` via `get_prompt`) from MCP servers.
     """
 
     def __init__(
@@ -218,9 +221,65 @@ class MultiServerMCPClient:
         *,
         arguments: dict[str, Any] | None = None,
     ) -> list[HumanMessage | AIMessage]:
-        """Get a prompt from a given MCP server."""
+        """Fetch rendered prompt messages via MCP `prompts/get`.
+
+        For discovering available prompt templates (names, descriptions, arguments)
+        without loading content, use `list_prompts` (MCP `prompts/list`).
+        """
         async with self.session(server_name) as session:
             return await load_mcp_prompt(session, prompt_name, arguments=arguments)
+
+    async def list_prompts(
+        self,
+        server_name: str | None = None,
+    ) -> list[Prompt] | dict[str, list[Prompt]]:
+        """List prompt template metadata via MCP `prompts/list` (paginated per server).
+
+        This mirrors the MCP Inspector flow: list templates first, then call
+        `get_prompt` for a chosen name. Names are **not** prefixed with the server
+        name; use the dict keys when `server_name` is omitted to namespace by server.
+
+        Args:
+            server_name: If set, list prompts from that server only. If `None`, list
+                from every configured server concurrently and return a mapping
+                ``{server_name: [Prompt, ...], ...}``.
+
+        Returns:
+            A list of `mcp.types.Prompt` when `server_name` is set, or a dict mapping
+            each server name to its list of `Prompt` values when listing all servers.
+
+        Raises:
+            ValueError: If `server_name` is not a configured server.
+
+        !!! note
+
+            A new session is opened for each listing call (same pattern as
+            `get_tools` / `get_resources`).
+
+        """
+        if server_name is not None:
+            if server_name not in self.connections:
+                msg = (
+                    f"Couldn't find a server with name '{server_name}', "
+                    f"expected one of '{list(self.connections.keys())}'"
+                )
+                raise ValueError(msg)
+            async with self.session(server_name) as session:
+                return await list_all_mcp_prompts(session)
+
+        if not self.connections:
+            return {}
+
+        async def _load_prompts_from_server(name: str) -> tuple[str, list[Prompt]]:
+            async with self.session(name) as session:
+                return name, await list_all_mcp_prompts(session)
+
+        load_tasks = [
+            asyncio.create_task(_load_prompts_from_server(name))
+            for name in self.connections
+        ]
+        results = await asyncio.gather(*load_tasks)
+        return dict(results)
 
     async def get_resources(
         self,
@@ -264,7 +323,7 @@ class MultiServerMCPClient:
             all_resources.extend(resources)
         return all_resources
 
-    async def __aenter__(self) -> "MultiServerMCPClient":
+    async def __aenter__(self) -> Self:
         """Async context manager entry point.
 
         Raises:

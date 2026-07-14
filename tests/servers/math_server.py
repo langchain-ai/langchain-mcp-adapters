@@ -17,12 +17,42 @@ def multiply(a: int, b: int) -> int:
 
 @mcp.prompt()
 def configure_assistant(skills: str) -> list[dict]:
+    """Configure the assistant persona and allowed skills."""
     return [
         {
             "role": "assistant",
             "content": (
                 f"You are a helpful assistant. You have these skills: {skills}. "
                 "Always use only one tool at a time."
+            ),
+        },
+    ]
+
+
+@mcp.prompt()
+def math_problem_solver(problem_type: str) -> list[dict]:
+    """Expert prompt for solving math problems by category."""
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                f"You are a math expert specializing in {problem_type}. "
+                "Provide step-by-step solutions to problems."
+            ),
+        },
+    ]
+
+
+@mcp.prompt()
+def calculation_guide() -> list[dict]:
+    """Static reference for performing calculations safely."""
+    return [
+        {
+            "role": "assistant",
+            "content": (
+                "You are a calculation guide. "
+                "Help users understand how to perform "
+                "mathematical operations correctly."
             ),
         },
     ]
