@@ -5,6 +5,7 @@ to multiple MCP servers and loading tools, prompts, and resources from them.
 """
 
 import asyncio
+import warnings
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -207,7 +208,26 @@ class MultiServerMCPClient:
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
-        for tools in tools_list:
+        # Surface cross-server tool-name collisions instead of merging silently.
+        # When ``tool_name_prefix`` is False, two servers can expose the same tool
+        # name; downstream tool resolution is keyed by name (the last one wins),
+        # so a later server can shadow an earlier server's tool with no signal to
+        # the caller. Warn so the collision is at least visible.
+        server_names = list(self.connections.keys())
+        first_seen: dict[str, str] = {}
+        for server, tools in zip(server_names, tools_list):
+            for tool in tools:
+                owner = first_seen.setdefault(tool.name, server)
+                if owner != server:
+                    warnings.warn(
+                        f"Tool name collision: '{tool.name}' is exposed by both "
+                        f"server '{owner}' and server '{server}'. Tool calls are "
+                        f"resolved by name (the last one wins), so one tool will "
+                        f"silently shadow the other. Pass tool_name_prefix=True to "
+                        f"MultiServerMCPClient to namespace tools by server, or give "
+                        f"the tools distinct names.",
+                        stacklevel=2,
+                    )
             all_tools.extend(tools)
         return all_tools
 
