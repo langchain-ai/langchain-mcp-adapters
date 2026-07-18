@@ -452,6 +452,47 @@ async def test_convert_mcp_tool_to_langchain_tool():
     ]
 
 
+@pytest.mark.parametrize("reserved_name", ["config", "run_manager", "callbacks"])
+async def test_convert_mcp_tool_renames_reserved_arguments(
+    reserved_name: str,
+) -> None:
+    """Regression for #532: preserve MCP args that collide with LangChain kwargs."""
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="my_tool",
+        description="A tool with reserved argument names",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                reserved_name: {"type": "string"},
+                "query": {"type": "string"},
+            },
+            "required": [reserved_name, "query"],
+        },
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+    renamed_name = f"{reserved_name}__mcp_arg"
+
+    assert lc_tool.args_schema["properties"][renamed_name]["type"] == "string"
+    assert reserved_name not in lc_tool.args_schema["properties"]
+    assert renamed_name in lc_tool.args_schema["required"]
+    assert reserved_name not in lc_tool.args_schema["required"]
+
+    await lc_tool.ainvoke({renamed_name: "my_value", "query": "hello"})
+
+    session.call_tool.assert_called_once_with(
+        "my_tool",
+        {reserved_name: "my_value", "query": "hello"},
+        progress_callback=None,
+    )
+
+
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
