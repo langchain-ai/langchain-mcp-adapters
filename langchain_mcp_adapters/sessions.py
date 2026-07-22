@@ -106,6 +106,13 @@ class StdioConnection(TypedDict):
     cwd: NotRequired[str | Path | None]
     """The working directory to use when spawning the process."""
 
+    expand_env_vars: NotRequired[bool]
+    """Whether `${VAR}` placeholders in `env` values should be expanded.
+
+    Defaults to `False`. Enable only when the server configuration itself is
+    trusted to reference host secrets.
+    """
+
     encoding: NotRequired[str]
     """The text encoding used when sending/receiving messages to the server.
 
@@ -216,6 +223,7 @@ async def _create_stdio_session(
     args: list[str],
     env: dict[str, str] | None = None,
     cwd: str | Path | None = None,
+    expand_env_vars: bool = False,
     encoding: str = DEFAULT_ENCODING,
     encoding_error_handler: Literal[
         "strict", "ignore", "replace"
@@ -227,17 +235,22 @@ async def _create_stdio_session(
     Args:
         command: Command to execute.
         args: Arguments for the command.
-        env: Environment variables for the command. Values containing
-            `${VAR}` references are expanded from the current environment. Only
-            braced syntax is supported; bare `${VAR}` is **not** expanded so
-            that literal dollar signs in passwords or other values are never
-            silently corrupted. Only values (not keys) are expanded;
-            `${command}` and `${args}` are passed through unchanged.
+        env: Environment variables for the command.
+
+            By default, values are passed through literally. If
+            `expand_env_vars=True`, values containing `${VAR}` references are
+            expanded from the current environment. Only braced syntax is
+            supported; bare `$VAR` is left untouched so that literal dollar
+            signs in passwords or other values are never silently corrupted.
+            Only values (not keys) are expanded; `${command}` and `${args}` are
+            passed through unchanged.
 
             If not specified, inherits a subset of the current environment.
 
             The details are implemented in the MCP sdk.
         cwd: Working directory for the command.
+        expand_env_vars: Whether `${VAR}` placeholders in `env` values should
+            be expanded using the current process environment.
         encoding: Character encoding.
         encoding_error_handler: How to handle encoding errors.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
@@ -245,9 +258,10 @@ async def _create_stdio_session(
     Yields:
         An initialized ClientSession.
     """
-    resolved_env = (
-        {k: _expand_env_vars(v) for k, v in env.items()} if env is not None else None
-    )
+    resolved_env = env
+    if env is not None and expand_env_vars:
+        resolved_env = {k: _expand_env_vars(v) for k, v in env.items()}
+
     if resolved_env is not None:
         for k, v in resolved_env.items():
             if _BRACED_VAR_RE.search(v):
