@@ -137,6 +137,12 @@ math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
+> [!important]
+> When you connect to multiple MCP servers, conflicting tool names are rejected
+> by default to avoid ambiguous tool routing. Use `tool_name_prefix=True` to
+> namespace tool names (recommended), or set `allow_duplicate_tools=True` only
+> if you explicitly trust duplicate names.
+
 > [!note]
 > Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
 >
