@@ -1421,7 +1421,7 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
     """Test fetching tools with name conflict using tool_name_prefix.
 
     This test verifies that:
-    1. Without tool_name_prefix, both servers would have conflicting "search" tool names
+    1. Without tool_name_prefix, conflicting names are rejected by default
     2. With tool_name_prefix=True, tools get unique names
         (weather_search, flights_search)
     """
@@ -1429,7 +1429,7 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
         run_streamable_http(_create_weather_search_server, 8185),
         run_streamable_http(_create_flights_search_server, 8186),
     ):
-        # First, verify that without prefix both tools would have the same name
+        # Conflicting names are rejected unless the caller explicitly opts in.
         client_no_prefix = MultiServerMCPClient(
             {
                 "weather": {
@@ -1443,8 +1443,24 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
             },
             tool_name_prefix=False,
         )
-        tools_no_prefix = await client_no_prefix.get_tools()
-        # Both tools are named "search" without prefix
+        with pytest.raises(ValueError, match="Duplicate MCP tool names detected"):
+            await client_no_prefix.get_tools()
+
+        client_allow_duplicates = MultiServerMCPClient(
+            {
+                "weather": {
+                    "url": "http://localhost:8185/mcp",
+                    "transport": "streamable_http",
+                },
+                "flights": {
+                    "url": "http://localhost:8186/mcp",
+                    "transport": "streamable_http",
+                },
+            },
+            tool_name_prefix=False,
+            allow_duplicate_tools=True,
+        )
+        tools_no_prefix = await client_allow_duplicates.get_tools()
         assert all(t.name == "search" for t in tools_no_prefix)
 
         # Now test with prefix - tools should be disambiguated

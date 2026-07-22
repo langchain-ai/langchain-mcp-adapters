@@ -55,6 +55,7 @@ class MultiServerMCPClient:
         callbacks: Callbacks | None = None,
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
+        allow_duplicate_tools: bool = False,
         handle_tool_errors: bool = True,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
@@ -69,6 +70,9 @@ class MultiServerMCPClient:
                 using an underscore separator (e.g., `"weather_search"` instead of
                 `"search"`). This helps avoid conflicts when multiple servers have tools
                 with the same name. Defaults to `False`.
+            allow_duplicate_tools: If `True`, conflicting tool names from multiple
+                servers are returned as-is. Defaults to `False`, which rejects
+                cross-server name collisions unless `tool_name_prefix=True` is used.
             handle_tool_errors: If `True` (default), an MCP tool execution error
                 (`CallToolResult(isError=True)`) is returned to the model as a
                 `ToolMessage` with `status="error"` so the agent can self-correct
@@ -119,7 +123,36 @@ class MultiServerMCPClient:
         self.callbacks = callbacks or Callbacks()
         self.tool_interceptors = tool_interceptors or []
         self.tool_name_prefix = tool_name_prefix
+        self.allow_duplicate_tools = allow_duplicate_tools
         self.handle_tool_errors = handle_tool_errors
+
+    def _raise_on_duplicate_tool_names(self, tools_list: list[list[BaseTool]]) -> None:
+        """Reject ambiguous cross-server tool names unless explicitly allowed."""
+        if self.tool_name_prefix or self.allow_duplicate_tools:
+            return
+
+        seen: dict[str, str] = {}
+        duplicates: dict[str, set[str]] = {}
+        for server_name, tools in zip(self.connections, tools_list):
+            for tool in tools:
+                previous_server = seen.get(tool.name)
+                if previous_server is None:
+                    seen[tool.name] = server_name
+                    continue
+                duplicates.setdefault(tool.name, {previous_server}).add(server_name)
+
+        if duplicates:
+            conflicts = ", ".join(
+                f"{name} ({', '.join(sorted(servers))})"
+                for name, servers in sorted(duplicates.items())
+            )
+            msg = (
+                "Duplicate MCP tool names detected across multiple servers: "
+                f"{conflicts}. Enable `tool_name_prefix=True` to namespace tool "
+                "names, or set `allow_duplicate_tools=True` if you explicitly "
+                "trust ambiguous names."
+            )
+            raise ValueError(msg)
 
     @asynccontextmanager
     async def session(
@@ -207,6 +240,7 @@ class MultiServerMCPClient:
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
+        self._raise_on_duplicate_tool_names(tools_list)
         for tools in tools_list:
             all_tools.extend(tools)
         return all_tools
