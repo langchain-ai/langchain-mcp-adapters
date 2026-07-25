@@ -30,6 +30,24 @@ updates:
         update-types:
           - "major"
 
+  - package-ecosystem: "uv"
+    directory: "/examples/servers/streamable-http-stateless"
+    schedule:
+      interval: "monthly"
+    versioning-strategy: increase
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
