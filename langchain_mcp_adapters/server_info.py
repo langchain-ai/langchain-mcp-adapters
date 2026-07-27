@@ -27,23 +27,23 @@ async def load_mcp_server_info(
 
     Args:
         session: An **uninitialized** MCP client session. If provided, this
-            function will call ``initialize()`` on it. If ``None``, a
-            ``connection`` must be provided and a temporary session will be
+            function will call `initialize()` on it. If `None`, a
+            `connection` must be provided and a temporary session will be
             created automatically.
-        connection: Connection config to create a new session if ``session`` is
-            ``None``.
-        callbacks: Optional ``Callbacks`` for handling notifications and events.
+        connection: Connection config to create a new session if `session` is
+            `None`.
+        callbacks: Optional `Callbacks` for handling notifications and events.
         server_name: Name of the server (used for callback context).
 
     Returns:
-        The ``InitializeResult`` from the MCP server, containing:
-            - ``instructions``: Optional server instructions for the LLM.
-            - ``serverInfo``: Server implementation details (name, version).
-            - ``capabilities``: Server capabilities.
-            - ``protocolVersion``: MCP protocol version.
+        The `InitializeResult` from the MCP server, containing:
+            - `instructions`: Optional server instructions for the LLM.
+            - `serverInfo`: Server implementation details (name, version).
+            - `capabilities`: Server capabilities.
+            - `protocolVersion`: MCP protocol version.
 
     Raises:
-        ValueError: If neither ``session`` nor ``connection`` is provided.
+        ValueError: If neither `session` nor `connection` is provided.
 
     """
     if session is not None:

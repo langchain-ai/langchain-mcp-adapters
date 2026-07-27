@@ -215,11 +215,11 @@ class MultiServerMCPClient:
     async def get_info(self) -> dict[str, InitializeResult]:
         """Get server info from all connected MCP servers.
 
-        Returns the ``InitializeResult`` for each server, which includes
+        Returns the `InitializeResult` for each server, which includes
         server instructions, capabilities, and implementation details.
 
         Returns:
-            A dict mapping server names to their ``InitializeResult``.
+            A dict mapping server names to their `InitializeResult`.
 
         """
         tasks = [
