@@ -3,7 +3,10 @@ def test_import() -> None:
     from langchain_mcp_adapters import (  # noqa: F401, PLC0415
         callbacks,
         client,
+        interceptors,
         prompts,
         resources,
+        server_info,
+        sessions,
         tools,
     )
