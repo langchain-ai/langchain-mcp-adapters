@@ -113,7 +113,7 @@ async def load_mcp_server_info(
         # `initialize()` returning, which would otherwise return `None` in
         # violation of this function's return type.
         msg = (
-            f"The MCP initialize handshake with server '{server_name or connection}' "
+            f"The MCP initialize handshake with server '{server_name or '[unknown server]'}' "
             "produced no result and raised no error; the session was closed by the "
             "transport. Check that the server is running and speaking MCP on the "
             "configured endpoint."
