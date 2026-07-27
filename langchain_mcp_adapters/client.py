@@ -1,7 +1,8 @@
 """Client for connecting to multiple MCP servers and loading LC tools/resources.
 
 This module provides the `MultiServerMCPClient` class for managing connections
-to multiple MCP servers and loading tools, prompts, and resources from them.
+to multiple MCP servers and loading tools, prompts, resources, and server info
+from them.
 """
 
 import asyncio
@@ -14,11 +15,13 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
+from mcp.types import InitializeResult
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
+from langchain_mcp_adapters.server_info import load_mcp_server_info
 from langchain_mcp_adapters.sessions import (
     Connection,
     McpHttpClientFactory,
@@ -45,7 +48,8 @@ ASYNC_CONTEXT_MANAGER_ERROR = (
 class MultiServerMCPClient:
     """Client for connecting to multiple MCP servers.
 
-    Loads LangChain-compatible tools, prompts and resources from MCP servers.
+    Loads LangChain-compatible tools, prompts and resources from MCP servers, and
+    retrieves server info from them.
     """
 
     def __init__(
@@ -210,6 +214,90 @@ class MultiServerMCPClient:
         for tools in tools_list:
             all_tools.extend(tools)
         return all_tools
+
+    async def get_server_info(
+        self,
+        *,
+        server_name: str | None = None,
+    ) -> dict[str, InitializeResult]:
+        """Get server info from MCP server(s).
+
+        Returns the `InitializeResult` for each server, which includes
+        server instructions, capabilities, and implementation details.
+
+        Args:
+            server_name: Optional name of the server to get info from.
+                If `None`, info from all servers will be returned.
+
+        !!! note
+
+            A new temporary session is created for each server on every call and
+            results are not cached, so each call performs a fresh handshake with
+            every server queried (for `stdio` servers, that means starting a new
+            subprocess each time).
+
+        Returns:
+            A dict mapping server names to their `InitializeResult`. Empty if no
+                connections are configured.
+
+        Raises:
+            ValueError: If `server_name` is provided but not found in the
+                connections.
+            RuntimeError: If any queried server fails. Every server is queried
+                and the message names each one that failed; partial results are
+                not returned.
+
+        """
+        if server_name is not None:
+            if server_name not in self.connections:
+                msg = (
+                    f"Couldn't find a server with name '{server_name}', "
+                    f"expected one of '{list(self.connections.keys())}'"
+                )
+                raise ValueError(msg)
+            names = [server_name]
+        else:
+            # Snapshot the names before awaiting: `connections` is public and
+            # mutable, so re-reading it afterwards could misalign names with
+            # results.
+            names = list(self.connections)
+
+        tasks = [
+            asyncio.create_task(
+                load_mcp_server_info(
+                    None,
+                    connection=self.connections[name],
+                    callbacks=self.callbacks,
+                    server_name=name,
+                )
+            )
+            for name in names
+        ]
+        # `return_exceptions=True` lets every task run to completion so each
+        # session unwinds its context manager (tearing down subprocesses and
+        # connections) instead of being orphaned mid-`async with`, and lets the
+        # error below name every server that failed rather than only the first.
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        server_info: dict[str, InitializeResult] = {}
+        errors: dict[str, BaseException] = {}
+        for name, result in zip(names, results, strict=True):
+            if isinstance(result, BaseException):
+                errors[name] = result
+            else:
+                server_info[name] = result
+
+        if errors:
+            detail = ", ".join(
+                f"'{name}': {type(exc).__name__}: {exc}" for name, exc in errors.items()
+            )
+            msg = (
+                f"Failed to retrieve server info from {len(errors)} of "
+                f"{len(names)} MCP server(s) - {detail}"
+            )
+            raise RuntimeError(msg) from next(iter(errors.values()))
+
+        return server_info
 
     async def get_prompt(
         self,
