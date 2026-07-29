@@ -43,8 +43,10 @@ def mock_stdio_session() -> Generator[dict, None, None]:
         yield captured
 
 
-async def test_stdio_session_expands_env_vars(monkeypatch, mock_stdio_session):
-    """Test that ${VAR} references in the env dict are expanded before spawning."""
+async def test_stdio_session_does_not_expand_env_vars_by_default(
+    monkeypatch, mock_stdio_session
+):
+    """Env placeholders should stay literal unless expansion is explicitly enabled."""
     monkeypatch.setenv("TEST_MCP_TOKEN", "secret123")
 
     async with _create_stdio_session(
@@ -55,6 +57,30 @@ async def test_stdio_session_expands_env_vars(monkeypatch, mock_stdio_session):
             "LITERAL": "plain",
             "EMBEDDED": "Bearer ${TEST_MCP_TOKEN}",
         },
+    ):
+        pass
+
+    resolved_env = mock_stdio_session["server_params"].env
+    assert resolved_env["API_TOKEN"] == "${TEST_MCP_TOKEN}"  # noqa: S105
+    assert resolved_env["LITERAL"] == "plain"
+    assert resolved_env["EMBEDDED"] == "Bearer ${TEST_MCP_TOKEN}"
+
+
+async def test_stdio_session_expands_env_vars_when_enabled(
+    monkeypatch, mock_stdio_session
+):
+    """Trusted configs can opt in to env placeholder expansion."""
+    monkeypatch.setenv("TEST_MCP_TOKEN", "secret123")
+
+    async with _create_stdio_session(
+        command="npx",
+        args=["-y", "@some/mcp-server"],
+        env={
+            "API_TOKEN": "${TEST_MCP_TOKEN}",
+            "LITERAL": "plain",
+            "EMBEDDED": "Bearer ${TEST_MCP_TOKEN}",
+        },
+        expand_env_vars=True,
     ):
         pass
 
@@ -106,6 +132,7 @@ async def test_stdio_session_warns_on_undefined_env_var(
             command="npx",
             args=[],
             env={"SECRET": "${TOTALLY_UNDEFINED_VAR_XYZ}"},
+            expand_env_vars=True,
         ):
             pass
 

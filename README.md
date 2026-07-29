@@ -235,6 +235,26 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 
 > Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
 
+## Stdio environment variables
+
+For `stdio` transports, `env` values are now passed through literally by
+default. If you need `${VAR}` placeholders to be expanded from the current
+process environment, opt in explicitly with `expand_env_vars=True`:
+
+```python
+client = MultiServerMCPClient(
+    {
+        "trusted_stdio_server": {
+            "transport": "stdio",
+            "command": "python",
+            "args": ["/path/to/server.py"],
+            "env": {"API_TOKEN": "${MCP_API_TOKEN}"},
+            "expand_env_vars": True,
+        },
+    }
+)
+```
+
 ## Tool error handling
 
 MCP distinguishes a tool *execution* error (`CallToolResult(isError=True)`, e.g. "project not found") from a protocol/transport failure. By default, an execution error is returned to the model as a `ToolMessage` with `status="error"`, so the agent can see what went wrong and self-correct instead of the run crashing:
