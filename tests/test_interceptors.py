@@ -62,6 +62,63 @@ class TestInterceptorModifiesRequest:
             result = await add_tool.ainvoke({"a": 2, "b": 3})
             assert "10" in str(result)
 
+    async def test_meta_extracted_from_arguments(self, socket_enabled):
+        """Test that _meta in tool arguments is extracted into request.meta."""
+        captured_request = {}
+
+        async def capture_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            captured_request["meta"] = request.meta
+            captured_request["args"] = request.args
+            return await handler(request)
+
+        with run_streamable_http(_create_math_server, 8202):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8202/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[capture_meta_interceptor],
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke(
+                {"a": 2, "b": 3, "_meta": {"session_id": "abc123"}}
+            )
+            assert "5" in str(result)
+            assert captured_request["meta"] == {"session_id": "abc123"}
+            assert "_meta" not in captured_request["args"]
+
+    async def test_interceptor_overrides_meta(self, socket_enabled):
+        """Test that interceptor can override meta via request.override(meta=...)."""
+        captured_meta = {}
+
+        async def override_meta_interceptor(
+            request: MCPToolCallRequest,
+            handler,
+        ) -> CallToolResult:
+            modified = request.override(meta={"user_id": "current-user"})
+            captured_meta["meta"] = modified.meta
+            return await handler(modified)
+
+        with run_streamable_http(_create_math_server, 8210):
+            tools = await load_mcp_tools(
+                None,
+                connection={
+                    "url": "http://localhost:8210/mcp",
+                    "transport": "streamable_http",
+                },
+                tool_interceptors=[override_meta_interceptor],
+            )
+
+            add_tool = next(tool for tool in tools if tool.name == "add")
+            result = await add_tool.ainvoke({"a": 1, "b": 2})
+            assert "3" in str(result)
+            assert captured_meta["meta"] == {"user_id": "current-user"}
+
     async def test_interceptor_modifies_tool_name(self, socket_enabled):
         """Test that interceptor can redirect to different tool."""
 
