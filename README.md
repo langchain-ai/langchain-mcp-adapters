@@ -138,15 +138,62 @@ weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?
 ```
 
 > [!note]
-> Example above will start a new MCP `ClientSession` for each tool invocation. If you would like to explicitly start a session for a given server, you can do:
->
-> ```python
-> from langchain_mcp_adapters.tools import load_mcp_tools
->
-> client = MultiServerMCPClient({...})
-> async with client.session("math") as session:
->     tools = await load_mcp_tools(session)
+> The example above starts a **new MCP session for every individual tool call** (stateless). This works well for
+> stateless servers like math or weather where each call is independent.
+
+## Stateful MCP Servers (e.g. Playwright browser)
+
+Some MCP servers are **stateful** — they maintain context between calls. The most common example is a
+browser automation server like [Playwright MCP](https://github.com/microsoft/playwright-mcp): after
+`browser_navigate` opens a page, follow-up calls (`browser_snapshot`, `browser_click`, etc.) must
+reach the **same browser session**, or all references (element handles, page state) are gone.
+
+> [!IMPORTANT]
+> Using `client.get_tools()` with a stateful server causes a **new MCP process to be spawned for each
+> tool call**. The browser closes between calls, so element refs like `e13` no longer exist and you
+> will see errors like:
 > ```
+> Error: Ref e13 not found in the current page snapshot. Try capturing new snapshot.
+> ```
+> To keep the server alive for the full agent run, use `client.session()` and pass the session
+> directly to `load_mcp_tools()`.
+
+### Correct pattern for stateful servers
+
+```python
+import asyncio
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain.agents import create_agent
+
+client = MultiServerMCPClient(
+    {
+        "playwright": {
+            "command": "npx",
+            "args": ["@playwright/mcp@latest"],
+            "transport": "stdio",
+        }
+    }
+)
+
+async def run():
+    # Keep a single MCP session open for the entire agent run.
+    # All tools loaded from this session share the same browser process.
+    async with client.session("playwright") as session:
+        tools = await load_mcp_tools(session)
+        agent = create_agent("openai:gpt-4.1", tools)
+        result = await agent.ainvoke({"messages": "Go to example.com and tell me the page title."})
+        print(result)
+
+asyncio.run(run())
+```
+
+The key difference is where the agent invocation happens:
+
+| Approach | Session lifetime | Use when |
+|---|---|---|
+| `client.get_tools()` | New session **per tool call** | Server is stateless (math, weather, file reads) |
+| `client.session()` + `load_mcp_tools(session)` | Single session for **entire `async with` block** | Server is stateful (browser, database transactions) |
 
 ## Streamable HTTP
 
