@@ -10,7 +10,7 @@ request / result lifecycle, for example to support elicitation.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, runtime_checkable
 
 from langchain_core.messages import ToolMessage
 from mcp.types import CallToolResult
@@ -28,7 +28,10 @@ except ImportError:
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-if LANGGRAPH_PRESENT:
+    from langgraph.types import Command
+
+    MCPToolCallResult: TypeAlias = CallToolResult | ToolMessage | Command[Any]
+elif LANGGRAPH_PRESENT:
     from langgraph.types import Command
 
     MCPToolCallResult = CallToolResult | ToolMessage | Command
