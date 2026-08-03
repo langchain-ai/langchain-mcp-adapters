@@ -455,6 +455,7 @@ def convert_mcp_tool_to_langchain_tool(
                     }
                     effective_connection = updated_connection
 
+            call_tool_result = None
             captured_exception = None
 
             if session is None:
@@ -473,8 +474,12 @@ def convert_mcp_tool_to_langchain_tool(
                             tool_args,
                             progress_callback=mcp_callbacks.progress_callback,
                         )
-                    except Exception as e:  # noqa: BLE001
-                        # Capture exception to re-raise outside context manager
+                    except BaseException as e:  # noqa: BLE001
+                        # Capture exception to re-raise outside context manager.
+                        # Must catch BaseException (not just Exception) so
+                        # asyncio.CancelledError from client disconnect is
+                        # captured before the MCP SDK context manager can
+                        # suppress it (see issue #314).
                         captured_exception = e
 
                 # Re-raise the exception outside the context manager
@@ -491,6 +496,15 @@ def convert_mcp_tool_to_langchain_tool(
                     tool_args,
                     progress_callback=mcp_callbacks.progress_callback,
                 )
+
+            if call_tool_result is None:
+                msg = (
+                    "Tool call failed: no result returned from the underlying MCP SDK. "
+                    "This may indicate that an exception was handled or suppressed "
+                    "by the MCP SDK (e.g., client disconnection, network issue, "
+                    "or other execution error)."
+                )
+                raise RuntimeError(msg)
 
             return call_tool_result
 
