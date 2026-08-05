@@ -203,6 +203,46 @@ agent = create_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
 ```
 
+## Remote MCP servers (HTTP + stdio)
+
+Production setups often mix **remote HTTP** MCP servers with **local stdio** servers in one `MultiServerMCPClient`. Do not use `async with MultiServerMCPClient(...)` — context-manager support was removed; construct the client and call `get_tools()` instead:
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain.agents import create_agent
+
+client = MultiServerMCPClient(
+    {
+        # Remote streamable-HTTP MCP server (replace with your server URL)
+        "docs": {
+            "transport": "http",
+            "url": "https://mcp.example.com/mcp",
+            # Optional auth / tracing headers for remote servers
+            "headers": {
+                "Authorization": "Bearer YOUR_TOKEN",
+            },
+        },
+        # Local stdio MCP server running via npx
+        "filesystem": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"],
+        },
+    }
+)
+tools = await client.get_tools()
+agent = create_agent("openai:gpt-4.1", tools)
+response = await agent.ainvoke(
+    {"messages": "Summarize README.md and list tools from the docs server"}
+)
+```
+
+This pattern shows:
+
+1. Several servers in one client (remote HTTP + local stdio)
+2. Optional `headers` for authenticated remote endpoints
+3. The agent routing across tools from every configured server
+
 ## Passing runtime headers
 
 When connecting to MCP servers, you can include custom headers (e.g., for authentication or tracing) using the `headers` field in the connection configuration. This is supported for the following transports:
