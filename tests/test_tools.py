@@ -1,4 +1,5 @@
 import typing
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -880,6 +881,7 @@ async def test_load_mcp_tools_with_annotations(socket_enabled) -> None:
             "idempotentHint": False,
             "destructiveHint": None,
             "openWorldHint": None,
+            "mcp_server_name": "time",
         }
 
 
@@ -1443,9 +1445,18 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
             },
             tool_name_prefix=False,
         )
-        tools_no_prefix = await client_no_prefix.get_tools()
-        # Both tools are named "search" without prefix
+        # Without a prefix the collision is surfaced as a warning instead of
+        # silently merging (last-wins shadowing).
+        with pytest.warns(UserWarning, match="Tool name collision: 'search'"):
+            tools_no_prefix = await client_no_prefix.get_tools()
+        # Both tools are still named "search" without prefix
         assert all(t.name == "search" for t in tools_no_prefix)
+        # Each tool carries its originating server as provenance metadata, so a
+        # caller can still distinguish the two colliding tools.
+        assert {t.metadata["mcp_server_name"] for t in tools_no_prefix} == {
+            "weather",
+            "flights",
+        }
 
         # Now test with prefix - tools should be disambiguated
         client = MultiServerMCPClient(
@@ -1461,7 +1472,11 @@ async def test_get_tools_with_name_conflict(socket_enabled) -> None:
             },
             tool_name_prefix=True,
         )
-        tools = await client.get_tools()
+        # With prefixing there is no name collision, so no warning should fire.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            tools = await client.get_tools()
+        assert not [w for w in caught if "Tool name collision" in str(w.message)]
 
         # Verify we have both prefixed tools with unique names
         assert len(tools) == 2
