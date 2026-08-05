@@ -4,8 +4,12 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+from __future__ import annotations
+
+import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, TypedDict, get_args
+from concurrent.futures import ThreadPoolExecutor
+from typing import Annotated, Any, TypedDict, TypeVar, get_args
 
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
@@ -65,6 +69,51 @@ else:
     ConvertedToolResult = list[ToolMessageContentBlock] | ToolMessage
 
 MAX_ITERATIONS = 1000
+
+_T = TypeVar("_T")
+
+
+def _run_coroutine_sync(
+    coro_factory: Callable[[], Awaitable[_T]],
+    *,
+    allow_thread_hop: bool,
+) -> _T:
+    """Run an async callable from synchronous code.
+
+    Args:
+        coro_factory: Zero-arg factory that creates a fresh coroutine each call.
+            The factory is invoked in the event loop that will execute it so the
+            coroutine is never bound to the wrong loop.
+        allow_thread_hop: When an event loop is already running, whether it is safe
+            to execute the coroutine on a new loop in a worker thread. Connection-
+            based MCP tools can do this; tools that captured an active session
+            cannot, because that session is bound to the original loop.
+
+    Returns:
+        The coroutine result.
+
+    Raises:
+        NotImplementedError: If a loop is already running and thread-hopping is
+            not allowed for this tool.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro_factory())
+
+    if not allow_thread_hop:
+        msg = (
+            "MCP tools bound to an active ClientSession cannot be invoked "
+            "synchronously while an event loop is running. Use "
+            "`await tool.ainvoke(...)` / `await agent.ainvoke(...)`, or load tools "
+            "via a connection config (for example `MultiServerMCPClient.get_tools()`) "
+            "so each call can open its own session."
+        )
+        raise NotImplementedError(msg)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(lambda: asyncio.run(coro_factory()))
+        return future.result()
 
 
 def _summarize_tool_error(tool_content: list[ToolMessageContentBlock]) -> str:
@@ -507,6 +556,16 @@ def convert_mcp_tool_to_langchain_tool(
 
         return _convert_call_tool_result(call_tool_result)
 
+    def call_tool_sync(
+        runtime: Annotated[object | None, InjectedToolArg()] = None,
+        **arguments: dict[str, Any],
+    ) -> tuple[ConvertedToolResult, MCPToolArtifact | None]:
+        """Synchronous wrapper around the async MCP tool call."""
+        return _run_coroutine_sync(
+            lambda: call_tool(runtime=runtime, **arguments),
+            allow_thread_hop=session is None,
+        )
+
     meta = getattr(tool, "meta", None)
     base = tool.annotations.model_dump() if tool.annotations is not None else {}
     meta = {"_meta": meta} if meta is not None else {}
@@ -529,6 +588,7 @@ def convert_mcp_tool_to_langchain_tool(
         name=lc_tool_name,
         description=tool.description or "",
         args_schema=tool.inputSchema,
+        func=call_tool_sync,
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
