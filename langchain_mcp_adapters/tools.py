@@ -172,7 +172,27 @@ class MCPToolArtifact(TypedDict):
     structured_content: dict[str, Any]
 
 
-def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
+def _resource_link_to_text_block(content: ResourceLink) -> TextContentBlock:
+    """Represent an MCP ResourceLink as text instead of a URL file block.
+
+    ResourceLinks are pointers to MCP resources that must be fetched via
+    ``resources/read`` on the MCP session. They are not dereferenceable URLs,
+    and mapping them onto URL-based file/image blocks breaks providers (e.g.
+    Bedrock) that only accept inline bytes.
+    """
+    label = content.title or content.name or str(content.uri)
+    lines = [f"Resource link: {label}", f"URI: {content.uri}"]
+    mime_type = content.mimeType or None
+    if mime_type:
+        lines.append(f"MIME type: {mime_type}")
+    if content.description:
+        lines.append(f"Description: {content.description}")
+    if content.size is not None:
+        lines.append(f"Size: {content.size}")
+    return create_text_block(text="\n".join(lines))
+
+
+def _convert_mcp_content_to_lc_block(
     content: ContentBlock,
 ) -> ToolMessageContentBlock:
     """Convert any MCP content block to a LangChain content block.
@@ -202,10 +222,7 @@ def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
         raise NotImplementedError(msg)
 
     if isinstance(content, ResourceLink):
-        mime_type = content.mimeType or None
-        if mime_type and mime_type.startswith("image/"):
-            return create_image_block(url=str(content.uri), mime_type=mime_type)
-        return create_file_block(url=str(content.uri), mime_type=mime_type)
+        return _resource_link_to_text_block(content)
 
     if isinstance(content, EmbeddedResource):
         resource = content.resource
@@ -231,8 +248,7 @@ def _convert_call_tool_result(
     Converts MCP content blocks to LangChain content blocks:
     - TextContent -> {"type": "text", "text": ...}
     - ImageContent -> {"type": "image", "base64": ..., "mime_type": ...}
-    - ResourceLink (image/*) -> {"type": "image", "url": ..., "mime_type": ...}
-    - ResourceLink (other) -> {"type": "file", "url": ..., "mime_type": ...}
+    - ResourceLink -> {"type": "text", "text": ...} (resource reference metadata)
     - EmbeddedResource (text) -> {"type": "text", "text": ...}
     - EmbeddedResource (blob) -> {"type": "image", ...} or {"type": "file", ...}
     - AudioContent -> raises NotImplementedError

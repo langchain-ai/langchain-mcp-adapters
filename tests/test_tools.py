@@ -31,6 +31,7 @@ from langchain_mcp_adapters.interceptors import MCPToolCallRequest, MCPToolCallR
 from langchain_mcp_adapters.tools import (
     MCPToolArtifact,
     _convert_call_tool_result,
+    _convert_mcp_content_to_lc_block,
     convert_mcp_tool_to_langchain_tool,
     load_mcp_tools,
     to_fastmcp,
@@ -171,7 +172,7 @@ def test_convert_image_content():
 
 
 def test_convert_resource_link():
-    """Test ResourceLink conversion to LangChain file block for non-image types."""
+    """Test ResourceLink conversion to a text block for non-image types."""
     result = CallToolResult(
         content=[
             ResourceLink(
@@ -188,9 +189,12 @@ def test_convert_resource_link():
 
     assert content == [
         {
-            "type": "file",
-            "url": "file:///path/to/document.pdf",
-            "mime_type": "application/pdf",
+            "type": "text",
+            "text": (
+                "Resource link: document.pdf\n"
+                "URI: file:///path/to/document.pdf\n"
+                "MIME type: application/pdf"
+            ),
             "id": IsLangChainID,
         }
     ]
@@ -198,7 +202,7 @@ def test_convert_resource_link():
 
 
 def test_convert_resource_link_image():
-    """Test ResourceLink with image mime type converts to image block with URL."""
+    """Test ResourceLink with image mime type converts to a text block."""
     result = CallToolResult(
         content=[
             ResourceLink(
@@ -215,9 +219,12 @@ def test_convert_resource_link_image():
 
     assert content == [
         {
-            "type": "image",
-            "url": "https://example.com/photo.png",
-            "mime_type": "image/png",
+            "type": "text",
+            "text": (
+                "Resource link: photo.png\n"
+                "URI: https://example.com/photo.png\n"
+                "MIME type: image/png"
+            ),
             "id": IsLangChainID,
         }
     ]
@@ -225,7 +232,7 @@ def test_convert_resource_link_image():
 
 
 def test_convert_resource_link_image_jpeg():
-    """Test ResourceLink with JPEG image mime type converts to image block."""
+    """Test ResourceLink with JPEG image mime type converts to a text block."""
     result = CallToolResult(
         content=[
             ResourceLink(
@@ -242,9 +249,12 @@ def test_convert_resource_link_image_jpeg():
 
     assert content == [
         {
-            "type": "image",
-            "url": "file:///photos/vacation.jpg",
-            "mime_type": "image/jpeg",
+            "type": "text",
+            "text": (
+                "Resource link: vacation.jpg\n"
+                "URI: file:///photos/vacation.jpg\n"
+                "MIME type: image/jpeg"
+            ),
             "id": IsLangChainID,
         }
     ]
@@ -252,7 +262,7 @@ def test_convert_resource_link_image_jpeg():
 
 
 def test_convert_resource_link_text():
-    """Test ResourceLink with text mime type converts to file block (can't inline)."""
+    """Test ResourceLink with text mime type converts to a text block."""
     result = CallToolResult(
         content=[
             ResourceLink(
@@ -267,12 +277,14 @@ def test_convert_resource_link_text():
 
     content, artifact = _convert_call_tool_result(result)
 
-    # Text ResourceLinks become file blocks since we only have URL, not content
     assert content == [
         {
-            "type": "file",
-            "url": "file:///docs/readme.txt",
-            "mime_type": "text/plain",
+            "type": "text",
+            "text": (
+                "Resource link: readme.txt\n"
+                "URI: file:///docs/readme.txt\n"
+                "MIME type: text/plain"
+            ),
             "id": IsLangChainID,
         }
     ]
@@ -280,7 +292,7 @@ def test_convert_resource_link_text():
 
 
 def test_convert_resource_link_no_mime_type():
-    """Test ResourceLink without mime type converts to file block."""
+    """Test ResourceLink without mime type converts to a text block."""
     result = CallToolResult(
         content=[
             ResourceLink(
@@ -296,12 +308,28 @@ def test_convert_resource_link_no_mime_type():
 
     assert content == [
         {
-            "type": "file",
-            "url": "file:///data/unknown",
+            "type": "text",
+            "text": "Resource link: unknown\nURI: file:///data/unknown",
             "id": IsLangChainID,
         }
     ]
     assert artifact is None
+
+
+def test_convert_resource_link_custom_scheme():
+    """Regression: non-dereferenceable MCP URIs must not become URL file blocks."""
+    link = ResourceLink(
+        type="resource_link",
+        uri="demo://resource/dynamic/blob/1",
+        name="Resource 1",
+        mimeType="text/plain",
+    )
+
+    block = _convert_mcp_content_to_lc_block(link)
+
+    assert block["type"] == "text"
+    assert "demo://resource/dynamic/blob/1" in block["text"]
+    assert "url" not in block
 
 
 def test_convert_embedded_resource_blob_image():
