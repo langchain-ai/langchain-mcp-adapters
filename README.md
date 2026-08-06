@@ -209,6 +209,7 @@ When connecting to MCP servers, you can include custom headers (e.g., for authen
 
 - `sse`
 - `http` (or `streamable_http`)
+- `websocket` (sent during the WebSocket handshake)
 
 ### Example: passing headers with `MultiServerMCPClient`
 
@@ -233,7 +234,7 @@ agent = create_agent("openai:gpt-4.1", tools)
 response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
-> Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
+> `sse` and `http` headers are sent with every HTTP request to the MCP server. `websocket` headers are sent only on the initial WebSocket handshake (typical for `Authorization: Bearer ...` tokens).
 
 ## Tool error handling
 

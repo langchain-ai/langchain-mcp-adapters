@@ -11,7 +11,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.sessions import _create_stdio_session
+from langchain_mcp_adapters.sessions import (
+    _create_stdio_session,
+    _create_websocket_session,
+)
 from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID
 
@@ -115,6 +118,93 @@ async def test_stdio_session_warns_on_undefined_env_var(
         mock_stdio_session["server_params"].env["SECRET"]
         == "${TOTALLY_UNDEFINED_VAR_XYZ}"  # noqa: S105
     )
+
+
+async def test_websocket_session_forwards_custom_headers():
+    """Custom headers must reach the WebSocket handshake.
+
+    Regression test for https://github.com/langchain-ai/langchain-mcp-adapters/issues/489.
+    The upstream MCP SDK's `websocket_client(url)` does not accept a `headers`
+    kwarg, so when headers are provided we route through our local
+    `_websocket_client_with_headers` instead. This test pins that behavior:
+    when `headers=` is passed to `_create_websocket_session`, our local
+    header-aware client receives them.
+    """
+    captured: dict = {}
+
+    @asynccontextmanager
+    async def fake_client(url, headers):
+        captured["url"] = url
+        captured["headers"] = headers
+        yield AsyncMock(), AsyncMock()
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch(
+            "langchain_mcp_adapters.sessions._websocket_client_with_headers",
+            fake_client,
+        ),
+        patch(
+            "langchain_mcp_adapters.sessions.ClientSession",
+            return_value=mock_session,
+        ),
+    ):
+        async with _create_websocket_session(
+            url="ws://example.test/ws",
+            headers={"Authorization": "Bearer token-123"},
+        ):
+            pass
+
+    assert captured["url"] == "ws://example.test/ws"
+    assert captured["headers"] == {"Authorization": "Bearer token-123"}
+
+
+async def test_websocket_session_without_headers_uses_upstream_client():
+    """When no headers are provided, the upstream `websocket_client` is used.
+
+    Keeps the path that calls into the MCP SDK unchanged for full
+    backward-compatibility.
+    """
+    captured: dict = {}
+
+    @asynccontextmanager
+    async def fake_upstream(url):
+        captured["url"] = url
+        captured["called"] = True
+        yield AsyncMock(), AsyncMock()
+
+    @asynccontextmanager
+    async def fake_with_headers(url, headers):  # pragma: no cover - must not run
+        captured["with_headers_called"] = True
+        yield AsyncMock(), AsyncMock()
+
+    mock_session = MagicMock()
+    mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
+    mock_session.__aexit__ = AsyncMock(return_value=None)
+
+    # Patch the import target inside `_create_websocket_session`. The function
+    # does `from mcp.client.websocket import websocket_client` at call time, so
+    # we must patch it at the source.
+    with (
+        patch("mcp.client.websocket.websocket_client", fake_upstream),
+        patch(
+            "langchain_mcp_adapters.sessions._websocket_client_with_headers",
+            fake_with_headers,
+        ),
+        patch(
+            "langchain_mcp_adapters.sessions.ClientSession",
+            return_value=mock_session,
+        ),
+    ):
+        async with _create_websocket_session(url="ws://example.test/ws"):
+            pass
+
+    assert captured.get("called") is True
+    assert captured["url"] == "ws://example.test/ws"
+    assert "with_headers_called" not in captured
 
 
 async def test_multi_server_mcp_client(
