@@ -452,6 +452,130 @@ async def test_convert_mcp_tool_to_langchain_tool():
     ]
 
 
+def test_convert_mcp_tool_supports_sync_invoke_without_running_loop():
+    """Connection-based tools expose a sync `func` for StructuredTool.invoke()."""
+    tool_input_schema = {
+        "properties": {
+            "param1": {"title": "Param1", "type": "string"},
+            "param2": {"title": "Param2", "type": "integer"},
+        },
+        "required": ["param1", "param2"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+    mock_session = AsyncMock()
+    mock_session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="sync tool result")],
+        isError=False,
+    )
+    mock_session.initialize = AsyncMock()
+
+    # Fake async context manager returned by create_session
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = mock_session
+    session_cm.__aexit__.return_value = None
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session",
+        return_value=session_cm,
+    ):
+        lc_tool = convert_mcp_tool_to_langchain_tool(
+            None,
+            mcp_tool,
+            connection={
+                "transport": "stdio",
+                "command": "echo",
+                "args": [],
+            },
+        )
+        assert lc_tool.func is not None
+        assert lc_tool.coroutine is not None
+
+        result = lc_tool.invoke(
+            {"args": {"param1": "test", "param2": 42}, "id": "1", "type": "tool_call"},
+        )
+
+    mock_session.call_tool.assert_called_once_with(
+        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
+    )
+    assert result.content == [
+        {"type": "text", "text": "sync tool result", "id": IsLangChainID}
+    ]
+
+
+async def test_convert_mcp_tool_sync_invoke_from_async_context_connection_based():
+    """Sync invoke works from a running loop when tools use a connection config."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+    mock_session = AsyncMock()
+    mock_session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="thread-hop result")],
+        isError=False,
+    )
+    mock_session.initialize = AsyncMock()
+    session_cm = AsyncMock()
+    session_cm.__aenter__.return_value = mock_session
+    session_cm.__aexit__.return_value = None
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session",
+        return_value=session_cm,
+    ):
+        lc_tool = convert_mcp_tool_to_langchain_tool(
+            None,
+            mcp_tool,
+            connection={
+                "transport": "stdio",
+                "command": "echo",
+                "args": [],
+            },
+        )
+        # Calling sync invoke while this async test has a running loop.
+        result = lc_tool.invoke(
+            {"args": {"param1": "test"}, "id": "2", "type": "tool_call"},
+        )
+
+    assert result.content == [
+        {"type": "text", "text": "thread-hop result", "id": IsLangChainID}
+    ]
+
+
+async def test_convert_mcp_tool_sync_invoke_session_bound_while_loop_running():
+    """Session-bound tools refuse unsafe sync invoke while a loop is running."""
+    tool_input_schema = {
+        "properties": {"param1": {"title": "Param1", "type": "string"}},
+        "required": ["param1"],
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    with pytest.raises(NotImplementedError, match="active ClientSession"):
+        lc_tool.invoke(
+            {"args": {"param1": "test"}, "id": "3", "type": "tool_call"},
+        )
+
+
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
