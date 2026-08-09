@@ -452,6 +452,44 @@ async def test_convert_mcp_tool_to_langchain_tool():
     ]
 
 
+async def test_convert_mcp_tool_with_input_schema_missing_properties():
+    tool_input_schema = {
+        "title": "ToolSchema",
+        "type": "object",
+    }
+    # Mock session and MCP tool
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="tool result")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    # Convert MCP tool to LangChain tool
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    # Verify the converted tool
+    assert lc_tool.name == "test_tool"
+    assert lc_tool.description == "Test tool description"
+    assert lc_tool.args_schema == {**tool_input_schema, "properties": {}}
+
+    # Test calling the tool
+    result = await lc_tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
+
+    # Verify session.call_tool was called with correct arguments
+    session.call_tool.assert_called_once_with("test_tool", {}, progress_callback=None)
+
+    # Verify result
+    assert result == ToolMessage(
+        content="tool result", name="test_tool", tool_call_id="1"
+    )
+
+
 async def test_load_mcp_tools():
     tool_input_schema = {
         "properties": {
