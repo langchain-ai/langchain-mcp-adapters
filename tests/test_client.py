@@ -351,3 +351,14 @@ async def test_get_resources_from_specific_server():
     assert len(weather_resources) == 1
     assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
     assert weather_resources[0].data == "Sunny with a chance of clouds"
+
+
+async def test_client_async_context_manager_raises_not_implemented_error():
+    """Test that using MultiServerMCPClient as an async context manager raises NotImplementedError."""
+    client = MultiServerMCPClient({})
+    
+    from langchain_mcp_adapters.client import ASYNC_CONTEXT_MANAGER_ERROR
+    
+    with pytest.raises(NotImplementedError, match=ASYNC_CONTEXT_MANAGER_ERROR[:50]):
+        async with client:
+            pass

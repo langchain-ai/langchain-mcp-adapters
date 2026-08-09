@@ -53,7 +53,10 @@ def test_convert_mcp_resource_to_langchain_blob_with_invalid_type():
         pass
 
     with pytest.raises(ValueError):
-        convert_mcp_resource_to_langchain_blob("file:///dummy", DummyContent())
+        # We need to construct DummyContent manually to bypass pydantic validation
+        # so we can actually reach the else branch in convert_mcp_resource_to_langchain_blob
+        dummy = object.__new__(DummyContent)
+        convert_mcp_resource_to_langchain_blob("file:///dummy", dummy)
 
 
 async def test_get_mcp_resource_with_contents():
