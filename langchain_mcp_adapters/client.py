@@ -6,6 +6,7 @@ from them.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -32,6 +33,8 @@ from langchain_mcp_adapters.sessions import (
     create_session,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
+
+logger = logging.getLogger(__name__)
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
     "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a "
@@ -196,9 +199,9 @@ class MultiServerMCPClient:
             )
 
         all_tools: list[BaseTool] = []
-        load_mcp_tool_tasks = []
-        for name, connection in self.connections.items():
-            load_mcp_tool_task = asyncio.create_task(
+        server_names = list(self.connections.keys())
+        load_mcp_tool_tasks = [
+            asyncio.create_task(
                 load_mcp_tools(
                     None,
                     connection=connection,
@@ -209,10 +212,16 @@ class MultiServerMCPClient:
                     handle_tool_errors=self.handle_tool_errors,
                 )
             )
-            load_mcp_tool_tasks.append(load_mcp_tool_task)
-        tools_list = await asyncio.gather(*load_mcp_tool_tasks)
-        for tools in tools_list:
-            all_tools.extend(tools)
+            for name, connection in self.connections.items()
+        ]
+        results = await asyncio.gather(*load_mcp_tool_tasks, return_exceptions=True)
+        for name, result in zip(server_names, results):
+            if isinstance(result, BaseException):
+                logger.warning(
+                    "Failed to load tools from server '%s': %s", name, result
+                )
+            else:
+                all_tools.extend(result)
         return all_tools
 
     async def get_server_info(

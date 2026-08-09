@@ -351,3 +351,53 @@ async def test_get_resources_from_specific_server():
     assert len(weather_resources) == 1
     assert str(weather_resources[0].metadata["uri"]) == "weather://forecast"
     assert weather_resources[0].data == "Sunny with a chance of clouds"
+
+
+async def test_get_tools_partial_failure(caplog):
+    """Test that get_tools() returns tools from healthy servers even when one fails.
+
+    If one server fails to connect, tools from all other servers must still
+    be returned instead of propagating the error and returning nothing.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from langchain_core.tools import BaseTool
+
+    healthy_tool = MagicMock(spec=BaseTool)
+    healthy_tool.name = "healthy_tool"
+
+    async def fake_load_mcp_tools(session, *, connection, server_name, **kwargs):
+        if server_name == "broken":
+            raise FileNotFoundError("command 'npx' not found in PATH")
+        return [healthy_tool]
+
+    client = MultiServerMCPClient(
+        {
+            "broken": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                "transport": "stdio",
+            },
+            "healthy": {
+                "url": "http://localhost:9999/mcp",
+                "transport": "streamable_http",
+            },
+        }
+    )
+
+    with (
+        patch(
+            "langchain_mcp_adapters.client.load_mcp_tools",
+            side_effect=fake_load_mcp_tools,
+        ),
+        caplog.at_level(logging.WARNING, logger="langchain_mcp_adapters.client"),
+    ):
+        tools = await client.get_tools()
+
+    # Should still get tools from the healthy server
+    assert len(tools) == 1
+    assert tools[0].name == "healthy_tool"
+
+    # Should have logged a warning about the broken server
+    assert "broken" in caplog.text
+    assert "Failed to load tools" in caplog.text
