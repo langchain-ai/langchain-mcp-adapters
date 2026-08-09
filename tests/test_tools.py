@@ -441,7 +441,10 @@ async def test_convert_mcp_tool_to_langchain_tool():
 
     # Verify session.call_tool was called with correct arguments
     session.call_tool.assert_called_once_with(
-        "test_tool", {"param1": "test", "param2": 42}, progress_callback=None
+        "test_tool",
+        {"param1": "test", "param2": 42},
+        progress_callback=None,
+        meta=None,
     )
 
     # Verify result
@@ -450,6 +453,78 @@ async def test_convert_mcp_tool_to_langchain_tool():
     assert result.content == [
         {"type": "text", "text": "tool result", "id": IsLangChainID}
     ]
+
+
+async def test_convert_mcp_tool_forwards_meta_from_interceptor():
+    """Test an interceptor can set the tool call meta via request.override."""
+    tool_input_schema = {
+        "properties": {},
+        "required": [],
+        "title": "EmptySchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    async def meta_interceptor(
+        request: MCPToolCallRequest,
+        handler: Callable[[MCPToolCallRequest], typing.Awaitable[MCPToolCallResult]],
+    ) -> MCPToolCallResult:
+        return await handler(request.override(meta={"trace_id": "abc-123"}))
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, tool_interceptors=[meta_interceptor]
+    )
+
+    await lc_tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
+
+    session.call_tool.assert_called_once_with(
+        "test_tool",
+        {},
+        progress_callback=None,
+        meta={"trace_id": "abc-123"},
+    )
+
+
+async def test_convert_mcp_tool_meta_defaults_to_none():
+    """Test meta defaults to None when no interceptor sets it."""
+    tool_input_schema = {
+        "properties": {},
+        "required": [],
+        "title": "EmptySchema",
+        "type": "object",
+    }
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+    )
+
+    mcp_tool = MCPTool(
+        name="test_tool",
+        description="Test tool description",
+        inputSchema=tool_input_schema,
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    await lc_tool.ainvoke({"args": {}, "id": "1", "type": "tool_call"})
+
+    session.call_tool.assert_called_once_with(
+        "test_tool",
+        {},
+        progress_callback=None,
+        meta=None,
+    )
 
 
 async def test_load_mcp_tools():
@@ -479,7 +554,7 @@ async def test_load_mcp_tools():
     session.list_tools.return_value = MagicMock(tools=mcp_tools, nextCursor=None)
 
     # Mock call_tool to return different results for different tools
-    async def mock_call_tool(tool_name, arguments, progress_callback=None):
+    async def mock_call_tool(tool_name, arguments, progress_callback=None, meta=None):
         if tool_name == "tool1":
             return CallToolResult(
                 content=[
