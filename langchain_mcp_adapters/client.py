@@ -192,9 +192,14 @@ class MultiServerMCPClient:
                 handle_tool_errors=self.handle_tool_errors,
             )
 
+        # Snapshot the (name, connection) pairs once, before awaiting, so the
+        # names used to pair results and attribute collisions stay aligned with
+        # the gathered tool lists even if ``self.connections`` is mutated during
+        # the await (the constructor stores the caller's dict by reference).
+        connection_items = list(self.connections.items())
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
-        for name, connection in self.connections.items():
+        for name, connection in connection_items:
             load_mcp_tool_task = asyncio.create_task(
                 load_mcp_tools(
                     None,
@@ -213,9 +218,10 @@ class MultiServerMCPClient:
         # name; downstream tool resolution is keyed by name (the last one wins),
         # so a later server can shadow an earlier server's tool with no signal to
         # the caller. Warn so the collision is at least visible.
-        server_names = list(self.connections.keys())
         first_seen: dict[str, str] = {}
-        for server, tools in zip(server_names, tools_list):
+        for (server, _connection), tools in zip(
+            connection_items, tools_list, strict=True
+        ):
             for tool in tools:
                 owner = first_seen.setdefault(tool.name, server)
                 if owner != server:

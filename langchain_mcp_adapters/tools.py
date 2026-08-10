@@ -513,8 +513,10 @@ def convert_mcp_tool_to_langchain_tool(
     metadata = {**base, **meta}
     # Record the originating MCP server so agents and policy layers can attribute
     # and disambiguate tools (e.g. when two servers expose the same tool name).
-    # Only added when the server name is known.
-    if server_name:
+    # Added whenever a server name is provided; an empty string is a valid
+    # (if unusual) server name, so test against None rather than truthiness to
+    # stay consistent with get_tools(server_name=...), which checks `is not None`.
+    if server_name is not None:
         metadata["mcp_server_name"] = server_name
     metadata = metadata or None
 

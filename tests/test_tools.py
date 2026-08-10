@@ -404,6 +404,18 @@ def test_convert_mixed_content_with_structured_content():
     )
 
 
+async def test_convert_preserves_empty_server_name_provenance():
+    """An empty string is a valid server name and must still be recorded as
+    provenance (regression guard for the ``is not None`` check)."""
+    session = AsyncMock()
+    mcp_tool = MCPTool(name="t", description="d", inputSchema={"type": "object"})
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool, server_name="")
+
+    assert lc_tool.metadata is not None
+    assert lc_tool.metadata["mcp_server_name"] == ""
+
+
 async def test_convert_mcp_tool_to_langchain_tool():
     tool_input_schema = {
         "properties": {
