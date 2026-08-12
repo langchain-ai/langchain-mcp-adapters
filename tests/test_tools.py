@@ -113,6 +113,7 @@ def test_convert_with_non_text_content():
             "type": "text",
             "text": "hi",
             "id": IsLangChainID,
+            "extras": {"uri": "resource://test"},
         },  # EmbeddedResource with text -> text block
     ]
     # No structuredContent in this result
@@ -192,6 +193,7 @@ def test_convert_resource_link():
             "url": "file:///path/to/document.pdf",
             "mime_type": "application/pdf",
             "id": IsLangChainID,
+            "extras": {"name": "document.pdf"},
         }
     ]
     assert artifact is None
@@ -219,6 +221,7 @@ def test_convert_resource_link_image():
             "url": "https://example.com/photo.png",
             "mime_type": "image/png",
             "id": IsLangChainID,
+            "extras": {"name": "photo.png"},
         }
     ]
     assert artifact is None
@@ -246,6 +249,7 @@ def test_convert_resource_link_image_jpeg():
             "url": "file:///photos/vacation.jpg",
             "mime_type": "image/jpeg",
             "id": IsLangChainID,
+            "extras": {"name": "vacation.jpg"},
         }
     ]
     assert artifact is None
@@ -274,6 +278,7 @@ def test_convert_resource_link_text():
             "url": "file:///docs/readme.txt",
             "mime_type": "text/plain",
             "id": IsLangChainID,
+            "extras": {"name": "readme.txt"},
         }
     ]
     assert artifact is None
@@ -299,6 +304,43 @@ def test_convert_resource_link_no_mime_type():
             "type": "file",
             "url": "file:///data/unknown",
             "id": IsLangChainID,
+            "extras": {"name": "unknown"},
+        }
+    ]
+    assert artifact is None
+
+
+def test_convert_resource_link_full_metadata():
+    """Test ResourceLink preserves title, description, and size when present."""
+    result = CallToolResult(
+        content=[
+            ResourceLink(
+                type="resource_link",
+                uri="file:///path/to/report.pdf",
+                name="report.pdf",
+                title="Quarterly Report",
+                description="Q3 financial report",
+                mimeType="application/pdf",
+                size=2048,
+            )
+        ],
+        isError=False,
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [
+        {
+            "type": "file",
+            "url": "file:///path/to/report.pdf",
+            "mime_type": "application/pdf",
+            "id": IsLangChainID,
+            "extras": {
+                "name": "report.pdf",
+                "title": "Quarterly Report",
+                "description": "Q3 financial report",
+                "size": 2048,
+            },
         }
     ]
     assert artifact is None
@@ -328,6 +370,7 @@ def test_convert_embedded_resource_blob_image():
             "base64": "png_base64_data",
             "mime_type": "image/png",
             "id": IsLangChainID,
+            "extras": {"uri": "resource://image"},
         }
     ]
     assert artifact is None
@@ -357,6 +400,7 @@ def test_convert_embedded_resource_blob_file():
             "base64": "pdf_base64_data",
             "mime_type": "application/pdf",
             "id": IsLangChainID,
+            "extras": {"uri": "resource://data"},
         }
     ]
     assert artifact is None
