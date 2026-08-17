@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-import httpx
+import httpx2
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
@@ -58,15 +58,15 @@ DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
 
 
 class McpHttpClientFactory(Protocol):
-    """Protocol for creating httpx.AsyncClient instances for MCP connections."""
+    """Protocol for creating httpx2.AsyncClient instances for MCP connections."""
 
     def __call__(
         self,
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
-        """Create an httpx.AsyncClient instance.
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+    ) -> httpx2.AsyncClient:
+        """Create an httpx2.AsyncClient instance.
 
         Args:
             headers: HTTP headers to include in requests.
@@ -74,7 +74,7 @@ class McpHttpClientFactory(Protocol):
             auth: Authentication configuration.
 
         Returns:
-            Configured httpx.AsyncClient instance.
+            Configured httpx2.AsyncClient instance.
         """
         ...
 
@@ -155,9 +155,9 @@ class SSEConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession."""
 
     httpx_client_factory: NotRequired[McpHttpClientFactory | None]
-    """Custom factory for httpx.AsyncClient (optional)."""
+    """Custom factory for httpx2.AsyncClient (optional)."""
 
-    auth: NotRequired[httpx.Auth]
+    auth: NotRequired[httpx2.Auth]
     """Optional authentication for the HTTP client."""
 
 
@@ -186,9 +186,9 @@ class StreamableHttpConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession."""
 
     httpx_client_factory: NotRequired[McpHttpClientFactory | None]
-    """Custom factory for httpx.AsyncClient (optional)."""
+    """Custom factory for httpx2.AsyncClient (optional)."""
 
-    auth: NotRequired[httpx.Auth]
+    auth: NotRequired[httpx2.Auth]
     """Optional authentication for the HTTP client."""
 
 
@@ -280,7 +280,7 @@ async def _create_sse_session(
     sse_read_timeout: float = DEFAULT_SSE_READ_TIMEOUT,
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
-    auth: httpx.Auth | None = None,
+    auth: httpx2.Auth | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using SSE.
 
@@ -290,7 +290,7 @@ async def _create_sse_session(
         timeout: HTTP timeout.
         sse_read_timeout: SSE read timeout.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
-        httpx_client_factory: Custom factory for httpx.AsyncClient (optional).
+        httpx_client_factory: Custom factory for httpx2.AsyncClient (optional).
         auth: Authentication for the HTTP client.
 
     Yields:
@@ -321,7 +321,7 @@ async def _create_streamable_http_session(
     terminate_on_close: bool = True,
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
-    auth: httpx.Auth | None = None,
+    auth: httpx2.Auth | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using Streamable HTTP.
 
@@ -333,7 +333,7 @@ async def _create_streamable_http_session(
             disconnecting.
         terminate_on_close: Whether to terminate the session on close.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
-        httpx_client_factory: Custom factory for httpx.AsyncClient (optional).
+        httpx_client_factory: Custom factory for httpx2.AsyncClient (optional).
         auth: Authentication for the HTTP client.
 
     Yields:
@@ -351,7 +351,7 @@ async def _create_streamable_http_session(
     )
     client = client_factory(
         headers=headers,
-        timeout=httpx.Timeout(timeout_seconds, read=sse_read_timeout_seconds),
+        timeout=httpx2.Timeout(timeout_seconds, read=sse_read_timeout_seconds),
         auth=auth,
     )
 
