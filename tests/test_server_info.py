@@ -110,11 +110,11 @@ async def test_load_mcp_server_info_no_instructions(socket_enabled) -> None:
 async def test_load_mcp_server_info_with_session() -> None:
     """Test that a provided session is initialized and its result returned."""
     mock_result = _mock_initialize_result()
-    # `spec` keeps sync methods (`get_server_capabilities`) sync and async ones
-    # (`initialize`) async, matching the real `ClientSession`.
+    # `spec` keeps the `server_capabilities` property and async `initialize`
+    # consistent with the real `ClientSession`.
     session = AsyncMock(spec=ClientSession)
     # `None` capabilities means the session has not been initialized yet.
-    session.get_server_capabilities.return_value = None
+    session.server_capabilities = None
     session.initialize.return_value = mock_result
 
     result = await load_mcp_server_info(session)
@@ -127,7 +127,7 @@ async def test_load_mcp_server_info_with_session() -> None:
 async def test_load_mcp_server_info_rejects_initialized_session() -> None:
     """Test that an already-initialized session is rejected, not re-initialized."""
     session = AsyncMock(spec=ClientSession)
-    session.get_server_capabilities.return_value = ServerCapabilities()
+    session.server_capabilities = ServerCapabilities()
 
     with pytest.raises(ValueError, match="already been initialized"):
         await load_mcp_server_info(session)
