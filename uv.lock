@@ -547,7 +547,6 @@ test = [
     { name = "pytest-timeout" },
     { name = "ruff" },
     { name = "types-setuptools" },
-    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -569,7 +568,6 @@ test = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "ruff", specifier = ">=0.9.4" },
     { name = "types-setuptools", specifier = ">=69.0.0" },
-    { name = "websockets", specifier = ">=15.0.1" },
 ]
 
 [[package]]

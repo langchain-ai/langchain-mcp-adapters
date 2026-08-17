@@ -117,16 +117,40 @@ async def test_stdio_session_warns_on_undefined_env_var(
     )
 
 
-async def test_multi_server_mcp_client(
-    socket_enabled,
-    websocket_server,
-    websocket_server_port: int,
-):
+async def test_websocket_transport_raises_migration_error() -> None:
+    """`transport="websocket"` is rejected with an actionable migration message."""
+    client = MultiServerMCPClient(
+        {"time": {"url": "ws://127.0.0.1:1/ws", "transport": "websocket"}},
+    )
+
+    with pytest.raises(ValueError, match="not supported") as exc_info:
+        await client.get_tools()
+
+    message = str(exc_info.value)
+    # The error must name the replacement transport, not just refuse.
+    assert "Streamable HTTP" in message
+    assert '"transport": "http"' in message
+
+
+async def test_unsupported_transport_error_omits_websocket() -> None:
+    """An unknown transport lists only the transports that still exist."""
+    client = MultiServerMCPClient(
+        {"nope": {"url": "http://127.0.0.1:1/mcp", "transport": "carrier-pigeon"}},
+    )
+
+    with pytest.raises(ValueError, match="Unsupported transport") as exc_info:
+        await client.get_tools()
+
+    assert "websocket" not in str(exc_info.value)
+
+
+async def test_multi_server_mcp_client():
     """Test that MultiServerMCPClient can connect to multiple servers and load tools."""
     # Get the absolute path to the server scripts
     current_dir = Path(__file__).parent
     math_server_path = os.path.join(current_dir, "servers/math_server.py")
     weather_server_path = os.path.join(current_dir, "servers/weather_server.py")
+    time_server_path = os.path.join(current_dir, "servers/time_server.py")
 
     client = MultiServerMCPClient(
         {
@@ -141,8 +165,9 @@ async def test_multi_server_mcp_client(
                 "transport": "stdio",
             },
             "time": {
-                "url": f"ws://127.0.0.1:{websocket_server_port}/ws",
-                "transport": "websocket",
+                "command": "python3",
+                "args": [time_server_path],
+                "transport": "stdio",
             },
         },
     )
@@ -199,15 +224,12 @@ async def test_multi_server_mcp_client(
     assert result == [{"type": "text", "text": "5:20:00 PM EST", "id": IsLangChainID}]
 
 
-async def test_multi_server_connect_methods(
-    socket_enabled,
-    websocket_server,
-    websocket_server_port: int,
-):
+async def test_multi_server_connect_methods():
     """Test the different connect methods for MultiServerMCPClient."""
     # Get the absolute path to the server scripts
     current_dir = Path(__file__).parent
     math_server_path = os.path.join(current_dir, "servers/math_server.py")
+    time_server_path = os.path.join(current_dir, "servers/time_server.py")
 
     # Initialize client without initial connections
     client = MultiServerMCPClient(
@@ -218,8 +240,9 @@ async def test_multi_server_connect_methods(
                 "transport": "stdio",
             },
             "time": {
-                "url": f"ws://127.0.0.1:{websocket_server_port}/ws",
-                "transport": "websocket",
+                "command": "python3",
+                "args": [time_server_path],
+                "transport": "stdio",
             },
         },
     )

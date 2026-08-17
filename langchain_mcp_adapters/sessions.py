@@ -1,7 +1,7 @@
 """Session management for different MCP transport types.
 
 This module provides connection configurations and session management for various
-MCP transport types including stdio, SSE, WebSocket, and streamable HTTP.
+MCP transport types including stdio, SSE, and Streamable HTTP.
 """
 
 from __future__ import annotations
@@ -193,7 +193,15 @@ class StreamableHttpConnection(TypedDict):
 
 
 class WebsocketConnection(TypedDict):
-    """Configuration for WebSocket transport connections to MCP servers."""
+    """Deprecated. WebSocket is not supported as of langchain-mcp-adapters 0.4.0.
+
+    MCP SDK v2 removed its WebSocket client and server modules; WebSocket was
+    never an MCP-spec transport. This `TypedDict` remains importable so existing
+    imports do not break, but it is no longer part of the `Connection` union and
+    passing `transport="websocket"` to `create_session` raises `ValueError`.
+
+    Use Streamable HTTP (`transport="http"`) instead.
+    """
 
     transport: Literal["websocket"]
 
@@ -204,8 +212,15 @@ class WebsocketConnection(TypedDict):
     """Additional keyword arguments to pass to the ClientSession"""
 
 
-Connection = (
-    StdioConnection | SSEConnection | StreamableHttpConnection | WebsocketConnection
+Connection = StdioConnection | SSEConnection | StreamableHttpConnection
+
+WEBSOCKET_REMOVED_ERROR = (
+    "The 'websocket' transport is not supported as of langchain-mcp-adapters "
+    "0.4.0. MCP SDK v2 removed its WebSocket client, and WebSocket was never an "
+    "MCP-spec transport. Use Streamable HTTP instead:\n"
+    '    {"url": "http://localhost:8000/mcp", "transport": "http"}\n'
+    "If your server only speaks WebSocket, it needs to expose a Streamable HTTP "
+    "endpoint to be reachable from this version."
 )
 
 
@@ -368,41 +383,6 @@ async def _create_streamable_http_session(
 
 
 @asynccontextmanager
-async def _create_websocket_session(
-    *,
-    url: str,
-    session_kwargs: dict[str, Any] | None = None,
-) -> AsyncIterator[ClientSession]:
-    """Create a new session to an MCP server using Websockets.
-
-    Args:
-        url: URL of the Websocket endpoint.
-        session_kwargs: Additional keyword arguments to pass to the ClientSession.
-
-    Yields:
-        An initialized ClientSession.
-
-    Raises:
-        ImportError: If websockets package is not installed.
-    """
-    try:
-        from mcp.client.websocket import websocket_client  # noqa: PLC0415
-    except ImportError:
-        msg = (
-            "Could not import websocket_client. "
-            "To use Websocket connections, please install the required dependency: "
-            "'pip install mcp[ws]' or 'pip install websockets'"
-        )
-        raise ImportError(msg) from None
-
-    async with (
-        websocket_client(url) as (read, write),
-        ClientSession(read, write, **(session_kwargs or {})) as session,
-    ):
-        yield session
-
-
-@asynccontextmanager
 async def create_session(
     connection: Connection, *, mcp_callbacks: _MCPCallbacks | None = None
 ) -> AsyncIterator[ClientSession]:
@@ -423,7 +403,7 @@ async def create_session(
         msg = (
             "Configuration error: Missing 'transport' key in server configuration. "
             "Each server must include 'transport' with one of: "
-            "'stdio', 'sse', 'websocket', 'http'. "
+            "'stdio', 'sse', 'http'. "
             "Please refer to the langchain-mcp-adapters documentation for more details."
         )
         raise ValueError(msg)
@@ -464,14 +444,10 @@ async def create_session(
         async with _create_stdio_session(**params) as session:
             yield session
     elif transport == "websocket":
-        if "url" not in params:
-            msg = "'url' parameter is required for Websocket connection"
-            raise ValueError(msg)
-        async with _create_websocket_session(**params) as session:
-            yield session
+        raise ValueError(WEBSOCKET_REMOVED_ERROR)
     else:
         msg = (
             f"Unsupported transport: {transport}. "
-            f"Must be one of: 'stdio', 'sse', 'websocket', 'http'"
+            f"Must be one of: 'stdio', 'sse', 'http'"
         )
         raise ValueError(msg)
