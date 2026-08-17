@@ -24,8 +24,8 @@ from langchain_core.tools import (
 )
 from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
-from mcp.server.fastmcp.tools import Tool as FastMCPTool
-from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase, FuncMetadata
+from mcp.server.mcpserver.tools import Tool as FastMCPTool
+from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
