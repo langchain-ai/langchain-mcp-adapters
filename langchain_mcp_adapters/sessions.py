@@ -376,7 +376,7 @@ async def _create_streamable_http_session(
             url,
             http_client=client,
             terminate_on_close=terminate_on_close,
-        ) as (read, write, _),
+        ) as (read, write),
         ClientSession(read, write, **(session_kwargs or {})) as session,
     ):
         yield session
