@@ -963,7 +963,7 @@ async def test_convert_langchain_tool_to_fastmcp_tool(tool_instance):
     }
 
     arguments = {"a": 1, "b": 2}
-    assert await fastmcp_tool.run(arguments=arguments) == 3
+    assert await fastmcp_tool.run(arguments, None) == 3
 
 
 def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
