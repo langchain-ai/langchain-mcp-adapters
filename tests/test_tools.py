@@ -11,7 +11,7 @@ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool, InjectedToolArg, ToolException, tool
-from mcp.server import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
@@ -823,7 +823,7 @@ async def test_multi_server_client_threads_handle_tool_errors():
 
 
 def _create_annotations_server():
-    server = FastMCP(port=8181)
+    server = MCPServer()
 
     @server.tool(
         annotations=ToolAnnotations(
@@ -972,7 +972,7 @@ def test_convert_langchain_tool_to_fastmcp_tool_with_injection():
 
 
 def _create_status_server():
-    server = FastMCP(port=8182)
+    server = MCPServer()
 
     @server.tool()
     def get_status() -> str:
@@ -1028,7 +1028,7 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
 
 
 def _create_info_server():
-    server = FastMCP(port=8183)
+    server = MCPServer()
 
     @server.tool()
     def get_info() -> str:
@@ -1151,7 +1151,7 @@ async def test_convert_mcp_tool_metadata_variants():
 
 
 def _create_increment_server():
-    server = FastMCP(port=8183)
+    server = MCPServer()
 
     @server.tool()
     def increment(value: int) -> str:
@@ -1289,7 +1289,7 @@ async def test_mcp_tools_with_agent_and_command_interceptor(socket_enabled) -> N
 
 def _create_weather_search_server():
     """Create a weather server with a search tool."""
-    server = FastMCP(port=8185)
+    server = MCPServer()
 
     @server.tool()
     def search(query: str) -> str:
@@ -1301,7 +1301,7 @@ def _create_weather_search_server():
 
 def _create_flights_search_server():
     """Create a flights server with a search tool."""
-    server = FastMCP(port=8186)
+    server = MCPServer()
 
     @server.tool()
     def search(destination: str) -> str:

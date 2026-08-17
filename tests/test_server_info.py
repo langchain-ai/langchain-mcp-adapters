@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from mcp import ClientSession
-from mcp.server import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
     InitializeResult,
@@ -24,10 +24,9 @@ CLOSED_PORT = 8189
 
 
 def _create_server_with_instructions():
-    server = FastMCP(
+    server = MCPServer(
         "test-server",
         instructions="Use this server for testing purposes only.",
-        port=8187,
     )
 
     @server.tool()
@@ -39,7 +38,7 @@ def _create_server_with_instructions():
 
 
 def _create_server_without_instructions():
-    server = FastMCP("no-instructions-server", port=8188)
+    server = MCPServer("no-instructions-server")
 
     @server.tool()
     def ping() -> str:

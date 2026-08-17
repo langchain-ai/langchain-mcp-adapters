@@ -2,7 +2,7 @@
 
 import pytest
 from langchain_core.messages import ToolMessage
-from mcp.server import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     CallToolResult,
     TextContent,
@@ -15,9 +15,9 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from tests.utils import IsLangChainID, run_streamable_http
 
 
-def _create_math_server(port: int = 8200):
+def _create_math_server():
     """Create a math server with add and multiply tools."""
-    server = FastMCP(port=port)
+    server = MCPServer()
 
     @server.tool()
     def add(a: int, b: int) -> int:
