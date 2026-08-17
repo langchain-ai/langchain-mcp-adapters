@@ -32,6 +32,7 @@ from mcp.types import (
     ContentBlock,
     EmbeddedResource,
     ImageContent,
+    PaginatedRequestParams,
     ResourceLink,
     TextContent,
     TextResourceContents,
@@ -340,7 +341,9 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
             msg = "Reached max of 1000 iterations while listing tools."
             raise RuntimeError(msg)
 
-        list_tools_page_result = await session.list_tools(cursor=current_cursor)
+        list_tools_page_result = await session.list_tools(
+            params=PaginatedRequestParams(cursor=current_cursor)
+        )
 
         if list_tools_page_result.tools:
             all_tools.extend(list_tools_page_result.tools)
