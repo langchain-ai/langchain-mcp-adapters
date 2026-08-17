@@ -170,7 +170,7 @@ class MCPToolArtifact(TypedDict):
             corresponding to the structuredContent field in CallToolResult.
     """
 
-    structured_content: dict[str, Any]
+    structured_content: Any
 
 
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
