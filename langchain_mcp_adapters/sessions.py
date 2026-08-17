@@ -56,6 +56,8 @@ DEFAULT_SSE_READ_TIMEOUT = 60 * 5
 DEFAULT_STREAMABLE_HTTP_TIMEOUT = timedelta(seconds=30)
 DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
 
+DEFAULT_STDIO_READ_TIMEOUT = timedelta(seconds=60)
+
 
 class McpHttpClientFactory(Protocol):
     """Protocol for creating httpx.AsyncClient instances for MCP connections."""
@@ -241,6 +243,9 @@ async def _create_stdio_session(
         encoding: Character encoding.
         encoding_error_handler: How to handle encoding errors.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
+            `read_timeout_seconds` defaults to 60 seconds so a non-responsive
+            server surfaces as a catchable error instead of hanging forever;
+            pass an explicit `None` to opt out.
 
     Yields:
         An initialized ClientSession.
@@ -264,9 +269,12 @@ async def _create_stdio_session(
     )
 
     # Create and store the connection
+    session_kwargs = dict(session_kwargs or {})
+    session_kwargs.setdefault("read_timeout_seconds", DEFAULT_STDIO_READ_TIMEOUT)
+
     async with (
         stdio_client(server_params) as (read, write),
-        ClientSession(read, write, **(session_kwargs or {})) as session,
+        ClientSession(read, write, **session_kwargs) as session,
     ):
         yield session
 
