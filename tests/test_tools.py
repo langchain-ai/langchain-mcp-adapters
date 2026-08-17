@@ -3,7 +3,7 @@ from collections.abc import Callable, Sequence
 from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2
 import pytest
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.language_models import LanguageModelInput
@@ -636,14 +636,14 @@ async def test_mcp_tool_error_raises_with_opt_out_flag():
 async def test_transport_failure_still_raises():
     """Transport/session failures propagate, even with error handling enabled."""
     session = AsyncMock()
-    session.call_tool.side_effect = httpx.ConnectError("connection refused")
+    session.call_tool.side_effect = httpx2.ConnectError("connection refused")
     mcp_tool = MCPTool(
         name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
     )
 
     lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
 
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx2.ConnectError):
         await lc_tool.ainvoke(_TOOL_CALL)
 
 
@@ -991,16 +991,16 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory(socket_enabled) -
     # Custom httpx client factory
     def custom_httpx_client_factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
-        """Custom factory for creating httpx.AsyncClient with specific configuration."""
-        return httpx.AsyncClient(
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+    ) -> httpx2.AsyncClient:
+        """Custom factory for creating httpx2.AsyncClient with specific configuration."""
+        return httpx2.AsyncClient(
             headers=headers,
-            timeout=timeout or httpx.Timeout(30.0),
+            timeout=timeout or httpx2.Timeout(30.0),
             auth=auth,
             # Custom configuration
-            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            limits=httpx2.Limits(max_keepalive_connections=5, max_connections=10),
         )
 
     with run_streamable_http(_create_status_server, 8182):
@@ -1046,16 +1046,16 @@ async def test_load_mcp_tools_with_custom_httpx_client_factory_sse(
     # Custom httpx client factory
     def custom_httpx_client_factory(
         headers: dict[str, str] | None = None,
-        timeout: httpx.Timeout | None = None,
-        auth: httpx.Auth | None = None,
-    ) -> httpx.AsyncClient:
-        """Custom factory for creating httpx.AsyncClient with specific configuration."""
-        return httpx.AsyncClient(
+        timeout: httpx2.Timeout | None = None,
+        auth: httpx2.Auth | None = None,
+    ) -> httpx2.AsyncClient:
+        """Custom factory for creating httpx2.AsyncClient with specific configuration."""
+        return httpx2.AsyncClient(
             headers=headers,
-            timeout=timeout or httpx.Timeout(30.0),
+            timeout=timeout or httpx2.Timeout(30.0),
             auth=auth,
             # Custom configuration for SSE
-            limits=httpx.Limits(max_keepalive_connections=3, max_connections=5),
+            limits=httpx2.Limits(max_keepalive_connections=3, max_connections=5),
         )
 
     with run_streamable_http(_create_info_server, 8183):
