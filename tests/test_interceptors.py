@@ -116,7 +116,7 @@ class TestInterceptorModifiesResponse:
 
             return CallToolResult(
                 content=modified_content,
-                isError=result.isError,
+                is_error=result.is_error,
             )
 
         with run_streamable_http(_create_math_server, 8203):

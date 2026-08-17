@@ -33,7 +33,7 @@ def convert_mcp_resource_to_langchain_blob(
         raise TypeError(msg)
 
     return Blob.from_data(
-        data=data, mime_type=contents.mimeType, metadata={"uri": resource_uri}
+        data=data, mime_type=contents.mime_type, metadata={"uri": resource_uri}
     )
 
 

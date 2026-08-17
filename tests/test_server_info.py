@@ -69,10 +69,10 @@ async def test_load_mcp_server_info_with_connection(socket_enabled) -> None:
         )
         assert isinstance(result, InitializeResult)
         assert result.instructions == "Use this server for testing purposes only."
-        assert result.serverInfo.name == "test-server"
+        assert result.server_info.name == "test-server"
         # The server registers a `ping` tool, so it must advertise tool support.
         assert result.capabilities.tools is not None
-        assert result.protocolVersion
+        assert result.protocol_version
 
 
 async def test_load_mcp_server_info_over_stdio() -> None:
@@ -88,7 +88,7 @@ async def test_load_mcp_server_info_over_stdio() -> None:
         },
     )
     assert isinstance(result, InitializeResult)
-    assert result.serverInfo.name == "Math"
+    assert result.server_info.name == "Math"
     assert result.capabilities.tools is not None
 
 
@@ -104,7 +104,7 @@ async def test_load_mcp_server_info_no_instructions(socket_enabled) -> None:
         )
         assert isinstance(result, InitializeResult)
         assert result.instructions is None
-        assert result.serverInfo.name == "no-instructions-server"
+        assert result.server_info.name == "no-instructions-server"
 
 
 async def test_load_mcp_server_info_with_session() -> None:
@@ -121,7 +121,7 @@ async def test_load_mcp_server_info_with_session() -> None:
 
     session.initialize.assert_called_once()
     assert result.instructions == "Mock instructions"
-    assert result.serverInfo.name == "mock-server"
+    assert result.server_info.name == "mock-server"
 
 
 async def test_load_mcp_server_info_rejects_initialized_session() -> None:
@@ -159,7 +159,7 @@ async def test_load_mcp_server_info_rejects_initialized_real_session(
             "with_instructions", auto_initialize=False
         ) as session:
             result = await load_mcp_server_info(session)
-            assert result.serverInfo.name == "test-server"
+            assert result.server_info.name == "test-server"
             # The session is usable afterwards, since it is now initialized.
             tools = await session.list_tools()
             assert [tool.name for tool in tools.tools] == ["ping"]
@@ -232,9 +232,9 @@ async def test_client_get_server_info(socket_enabled) -> None:
         assert info["with_instructions"].instructions == (
             "Use this server for testing purposes only."
         )
-        assert info["with_instructions"].serverInfo.name == "test-server"
+        assert info["with_instructions"].server_info.name == "test-server"
         assert info["without_instructions"].instructions is None
-        assert info["without_instructions"].serverInfo.name == "no-instructions-server"
+        assert info["without_instructions"].server_info.name == "no-instructions-server"
 
 
 async def test_client_get_server_info_single_server(socket_enabled) -> None:
@@ -255,7 +255,7 @@ async def test_client_get_server_info_single_server(socket_enabled) -> None:
         )
         info = await client.get_server_info(server_name="with_instructions")
         assert list(info) == ["with_instructions"]
-        assert info["with_instructions"].serverInfo.name == "test-server"
+        assert info["with_instructions"].server_info.name == "test-server"
 
 
 async def test_client_get_server_info_unknown_server() -> None:

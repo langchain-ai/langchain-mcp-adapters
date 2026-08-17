@@ -192,17 +192,17 @@ def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
         return create_text_block(text=content.text)
 
     if isinstance(content, ImageContent):
-        return create_image_block(base64=content.data, mime_type=content.mimeType)
+        return create_image_block(base64=content.data, mime_type=content.mime_type)
 
     if isinstance(content, AudioContent):
         msg = (
             "AudioContent conversion to LangChain content blocks is not yet "
-            f"supported. Received audio with mime type: {content.mimeType}"
+            f"supported. Received audio with mime type: {content.mime_type}"
         )
         raise NotImplementedError(msg)
 
     if isinstance(content, ResourceLink):
-        mime_type = content.mimeType or None
+        mime_type = content.mime_type or None
         if mime_type and mime_type.startswith("image/"):
             return create_image_block(url=str(content.uri), mime_type=mime_type)
         return create_file_block(url=str(content.uri), mime_type=mime_type)
@@ -212,7 +212,7 @@ def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
         if isinstance(resource, TextResourceContents):
             return create_text_block(text=resource.text)
         if isinstance(resource, BlobResourceContents):
-            mime_type = resource.mimeType or None
+            mime_type = resource.mime_type or None
             if mime_type and mime_type.startswith("image/"):
                 return create_image_block(base64=resource.blob, mime_type=mime_type)
             return create_file_block(base64=resource.blob, mime_type=mime_type)
@@ -270,14 +270,14 @@ def _convert_call_tool_result(
         for content in call_tool_result.content
     ]
 
-    if call_tool_result.isError:
+    if call_tool_result.is_error:
         raise _MCPToolExecutionError(tool_content)
 
     # Extract structured content and wrap in MCPToolArtifact
     artifact: MCPToolArtifact | None = None
-    if call_tool_result.structuredContent is not None:
+    if call_tool_result.structured_content is not None:
         artifact = MCPToolArtifact(
-            structured_content=call_tool_result.structuredContent
+            structured_content=call_tool_result.structured_content
         )
 
     return tool_content, artifact
@@ -347,10 +347,10 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
 
         # Pagination spec: https://modelcontextprotocol.io/specification/2025-06-18/server/utilities/pagination
         # compatible with None or ""
-        if not list_tools_page_result.nextCursor:
+        if not list_tools_page_result.next_cursor:
             break
 
-        current_cursor = list_tools_page_result.nextCursor
+        current_cursor = list_tools_page_result.next_cursor
     return all_tools
 
 
@@ -528,7 +528,7 @@ def convert_mcp_tool_to_langchain_tool(
     return StructuredTool(
         name=lc_tool_name,
         description=tool.description or "",
-        args_schema=tool.inputSchema,
+        args_schema=tool.input_schema,
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
