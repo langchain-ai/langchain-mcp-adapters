@@ -147,6 +147,56 @@ def test_convert_with_structured_content():
     )
 
 
+def test_convert_with_result_meta():
+    """Test that a result-level `_meta` object is returned as MCPToolArtifact.
+
+    Regression test: `CallToolResult.meta` (the MCP-spec `_meta` extension
+    point) was parsed by the MCP SDK but silently dropped by the adapter,
+    unlike `structuredContent`, which was already forwarded.
+    """
+    result = CallToolResult(
+        content=[TextContent(type="text", text="text result")],
+        isError=False,
+        _meta={"sponsored": {"label": "Ad", "url": "https://example.com"}},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == [{"type": "text", "text": "text result", "id": IsLangChainID}]
+    assert artifact == MCPToolArtifact(
+        meta={"sponsored": {"label": "Ad", "url": "https://example.com"}}
+    )
+
+
+def test_convert_with_structured_content_and_meta():
+    """Test that both `structuredContent` and `_meta` survive conversion together."""
+    result = CallToolResult(
+        content=[],
+        isError=False,
+        structuredContent={"key": "value"},
+        _meta={"trace_id": "abc-123"},
+    )
+
+    content, artifact = _convert_call_tool_result(result)
+
+    assert content == []
+    assert artifact == MCPToolArtifact(
+        structured_content={"key": "value"}, meta={"trace_id": "abc-123"}
+    )
+
+
+def test_convert_without_structured_content_or_meta():
+    """Test that no artifact is produced when neither field is present."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="text result")],
+        isError=False,
+    )
+
+    _content, artifact = _convert_call_tool_result(result)
+
+    assert artifact is None
+
+
 def test_convert_image_content():
     """Test ImageContent conversion to LangChain image block."""
     result = CallToolResult(
@@ -612,6 +662,32 @@ async def test_mcp_tool_success_returns_artifact_through_ainvoke():
     assert isinstance(result, ToolMessage)
     assert result.status == "success"
     assert result.artifact == {"structured_content": {"result": "ok"}}
+
+
+async def test_mcp_tool_success_returns_result_meta_through_ainvoke():
+    """Result-level `_meta` reaches `ToolMessage.artifact` on the success path.
+
+    Regression test for the same drop as
+    `test_mcp_tool_success_returns_artifact_through_ainvoke`, but for
+    `CallToolResult.meta` (`_meta` on the wire) instead of `structuredContent`.
+    """
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        isError=False,
+        _meta={"sponsored": {"label": "Ad"}},
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(_TOOL_CALL)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "success"
+    assert result.artifact == {"meta": {"sponsored": {"label": "Ad"}}}
 
 
 async def test_mcp_tool_error_raises_with_opt_out_flag():
