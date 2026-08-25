@@ -59,6 +59,7 @@ if __name__ == "__main__":
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from langchain_mcp_adapters.sessions import negotiate_protocol
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain.agents import create_agent
 
@@ -70,8 +71,9 @@ server_params = StdioServerParameters(
 
 async with stdio_client(server_params) as (read, write):
     async with ClientSession(read, write) as session:
-        # Initialize the connection
-        await session.initialize()
+        # Negotiate the protocol revision. Prefer this over `session.initialize()`:
+        # `initialize` is the handshake-era path and can never reach MCP 2026-07-28.
+        await negotiate_protocol(session)
 
         # Get tools
         tools = await load_mcp_tools(session)
@@ -167,15 +169,16 @@ To use it with Python MCP SDK `streamablehttp_client`:
 # Use server from examples/servers/streamable-http-stateless/
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from langchain.agents import create_agent
+from langchain_mcp_adapters.sessions import negotiate_protocol
 from langchain_mcp_adapters.tools import load_mcp_tools
 
-async with streamablehttp_client("http://localhost:3000/mcp") as (read, write, _):
+async with streamable_http_client("http://localhost:3000/mcp") as (read, write):
     async with ClientSession(read, write) as session:
-        # Initialize the connection
-        await session.initialize()
+        # Negotiate the protocol revision (see "Protocol versions" below).
+        await negotiate_protocol(session)
 
         # Get tools
         tools = await load_mcp_tools(session)
@@ -234,6 +237,64 @@ response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
 ```
 
 > Only `sse` and `http` transports support runtime headers. These headers are passed with every HTTP request to the MCP server.
+
+## Protocol versions
+
+MCP has two negotiation eras. Everything up to `2025-11-25` is reached through
+the `initialize` handshake. `2026-07-28` is not: it is reached through a
+`server/discover` probe, and drops server-to-client requests in favor of a
+stateless per-request envelope.
+
+By default the adapter negotiates `"auto"` — it probes for `2026-07-28` and
+falls back to the handshake for servers that predate it. Set `protocol` to
+change that, either per connection or for the whole client:
+
+```python
+client = MultiServerMCPClient(
+    {
+        # Inherits the client-wide default below.
+        "weather": {"url": "http://localhost:8000/mcp", "transport": "http"},
+        # Requires 2026-07-28; no probe, no fallback.
+        "docs": {
+            "url": "http://localhost:8001/mcp",
+            "transport": "http",
+            "protocol": "2026-07-28",
+        },
+        # Pinned to the handshake era.
+        "legacy-server": {
+            "url": "http://localhost:8002/mcp",
+            "transport": "http",
+            "protocol": "legacy",
+        },
+    },
+    protocol="auto",  # client-wide default; a connection's own key wins
+)
+
+info = await client.get_server_info()
+print(info["weather"].protocol_version)  # e.g. "2026-07-28"
+```
+
+| Value | Behavior |
+| --- | --- |
+| `"auto"` (default) | Probe `server/discover`, fall back to `initialize`. The only value that can reach `2026-07-28`. |
+| `"legacy"` | Force the `initialize` handshake. Never probes. |
+| `"2026-07-28"` | Adopt that revision directly, without probing. |
+
+### What changes at 2026-07-28
+
+- **Elicitation and sampling no longer use a back-channel.** The server returns
+  an `InputRequiredResult` and the adapter answers it through your existing
+  `Callbacks`, so `on_elicitation` behaves the same on either era.
+- **A server that calls `ctx.elicit()` directly inside a tool body cannot
+  elicit.** That path needs a server-to-client request, which the revision
+  removes. Such servers need to move to resolver-based elicitation
+  (`Annotated[T, Resolve(fn)]` returning `Elicit(...)`), or the client can pin
+  `protocol="legacy"`.
+- **Logging is opt-in.** Servers only emit log messages for requests that ask
+  for them. The adapter opts in automatically whenever
+  `Callbacks.on_logging_message` is set; narrow it with `Callbacks.log_level`.
+- **`resources/subscribe` and `ping` are gone**, and client-to-server progress
+  is deprecated. Server-to-client progress is unaffected.
 
 ## Tool error handling
 

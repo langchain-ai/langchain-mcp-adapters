@@ -15,21 +15,24 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
-from mcp.types import InitializeResult
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
-from langchain_mcp_adapters.server_info import load_mcp_server_info
+from langchain_mcp_adapters.server_info import MCPServerInfo, load_mcp_server_info
 from langchain_mcp_adapters.sessions import (
+    DEFAULT_PROTOCOL,
     Connection,
     McpHttpClientFactory,
+    ProtocolMode,
     SSEConnection,
     StdioConnection,
     StreamableHttpConnection,
     WebsocketConnection,
     create_session,
+    negotiate_protocol,
+    resolve_protocol,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
 
@@ -60,6 +63,7 @@ class MultiServerMCPClient:
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
         handle_tool_errors: bool = True,
+        protocol: ProtocolMode = DEFAULT_PROTOCOL,
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -124,6 +128,9 @@ class MultiServerMCPClient:
         self.tool_interceptors = tool_interceptors or []
         self.tool_name_prefix = tool_name_prefix
         self.handle_tool_errors = handle_tool_errors
+        # Validate now: a typo here would otherwise surface as a silent
+        # downgrade on the first connection rather than a construction error.
+        self.protocol = resolve_protocol(None, default=protocol)
 
     @asynccontextmanager
     async def session(
@@ -131,18 +138,25 @@ class MultiServerMCPClient:
         server_name: str,
         *,
         auto_initialize: bool = True,
+        protocol: ProtocolMode | None = None,
     ) -> AsyncIterator[ClientSession]:
-        """Connect to an MCP server and initialize a session.
+        """Connect to an MCP server and negotiate a session.
 
         Args:
             server_name: Name to identify this server connection
-            auto_initialize: Whether to automatically initialize the session
+            auto_initialize: Whether to automatically negotiate the session's
+                protocol revision. Pass `False` to yield an un-negotiated
+                session, e.g. for
+                [`load_mcp_server_info`][langchain_mcp_adapters.server_info.load_mcp_server_info].
+            protocol: Negotiation policy for this session, overriding both the
+                connection's own `protocol` key and the client-wide default.
 
         Raises:
-            ValueError: If the server name is not found in the connections
+            ValueError: If the server name is not found in the connections, or
+                `protocol` is not a recognized policy.
 
         Yields:
-            An initialized `ClientSession`
+            A negotiated `ClientSession`
 
         """
         if server_name not in self.connections:
@@ -156,11 +170,16 @@ class MultiServerMCPClient:
             context=CallbackContext(server_name=server_name)
         )
 
-        async with create_session(
-            self.connections[server_name], mcp_callbacks=mcp_callbacks
-        ) as session:
+        connection = self.connections[server_name]
+        resolved_protocol = (
+            protocol
+            if protocol is not None
+            else resolve_protocol(connection, default=self.protocol)
+        )
+
+        async with create_session(connection, mcp_callbacks=mcp_callbacks) as session:
             if auto_initialize:
-                await session.initialize()
+                await negotiate_protocol(session, protocol=resolved_protocol)
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
@@ -193,6 +212,9 @@ class MultiServerMCPClient:
                 tool_interceptors=self.tool_interceptors,
                 tool_name_prefix=self.tool_name_prefix,
                 handle_tool_errors=self.handle_tool_errors,
+                protocol=resolve_protocol(
+                    self.connections[server_name], default=self.protocol
+                ),
             )
 
         all_tools: list[BaseTool] = []
@@ -207,6 +229,7 @@ class MultiServerMCPClient:
                     tool_interceptors=self.tool_interceptors,
                     tool_name_prefix=self.tool_name_prefix,
                     handle_tool_errors=self.handle_tool_errors,
+                    protocol=resolve_protocol(connection, default=self.protocol),
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
@@ -219,11 +242,14 @@ class MultiServerMCPClient:
         self,
         *,
         server_name: str | None = None,
-    ) -> dict[str, InitializeResult]:
+    ) -> dict[str, MCPServerInfo]:
         """Get server info from MCP server(s).
 
-        Returns the `InitializeResult` for each server, which includes
-        server instructions, capabilities, and implementation details.
+        Returns an
+        [`MCPServerInfo`][langchain_mcp_adapters.server_info.MCPServerInfo] for
+        each server, covering the negotiated protocol revision, server
+        instructions, capabilities, and implementation details. The shape is the
+        same whichever revision a server negotiated.
 
         Args:
             server_name: Optional name of the server to get info from.
@@ -237,7 +263,7 @@ class MultiServerMCPClient:
             subprocess each time).
 
         Returns:
-            A dict mapping server names to their `InitializeResult`. Empty if no
+            A dict mapping server names to their `MCPServerInfo`. Empty if no
                 connections are configured.
 
         Raises:
@@ -269,6 +295,9 @@ class MultiServerMCPClient:
                     connection=self.connections[name],
                     callbacks=self.callbacks,
                     server_name=name,
+                    protocol=resolve_protocol(
+                        self.connections[name], default=self.protocol
+                    ),
                 )
             )
             for name in names
@@ -279,7 +308,7 @@ class MultiServerMCPClient:
         # error below name every server that failed rather than only the first.
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        server_info: dict[str, InitializeResult] = {}
+        server_info: dict[str, MCPServerInfo] = {}
         errors: dict[str, BaseException] = {}
         for name, result in zip(names, results, strict=True):
             if isinstance(result, BaseException):
@@ -381,8 +410,10 @@ class MultiServerMCPClient:
 
 __all__ = [
     "Callbacks",
+    "MCPServerInfo",
     "McpHttpClientFactory",
     "MultiServerMCPClient",
+    "ProtocolMode",
     "SSEConnection",
     "StdioConnection",
     "StreamableHttpConnection",

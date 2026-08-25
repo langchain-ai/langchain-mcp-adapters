@@ -16,7 +16,7 @@ from mcp.types import (
 from langchain_mcp_adapters import server_info as server_info_module
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.server_info import load_mcp_server_info
+from langchain_mcp_adapters.server_info import MCPServerInfo, load_mcp_server_info
 from tests.utils import run_streamable_http
 
 # A port nothing listens on, used to exercise unreachable-server handling.
@@ -67,7 +67,7 @@ async def test_load_mcp_server_info_with_connection(socket_enabled) -> None:
                 "transport": "streamable_http",
             },
         )
-        assert isinstance(result, InitializeResult)
+        assert isinstance(result, MCPServerInfo)
         assert result.instructions == "Use this server for testing purposes only."
         assert result.server_info.name == "test-server"
         # The server registers a `ping` tool, so it must advertise tool support.
@@ -87,7 +87,7 @@ async def test_load_mcp_server_info_over_stdio() -> None:
             "transport": "stdio",
         },
     )
-    assert isinstance(result, InitializeResult)
+    assert isinstance(result, MCPServerInfo)
     assert result.server_info.name == "Math"
     assert result.capabilities.tools is not None
 
@@ -102,26 +102,41 @@ async def test_load_mcp_server_info_no_instructions(socket_enabled) -> None:
                 "transport": "streamable_http",
             },
         )
-        assert isinstance(result, InitializeResult)
+        assert isinstance(result, MCPServerInfo)
         assert result.instructions is None
         assert result.server_info.name == "no-instructions-server"
 
 
 async def test_load_mcp_server_info_with_session() -> None:
-    """Test that a provided session is initialized and its result returned."""
+    """Test that a provided session is negotiated and its metadata returned."""
     mock_result = _mock_initialize_result()
     # `spec` keeps the `server_capabilities` property and async `initialize`
     # consistent with the real `ClientSession`.
     session = AsyncMock(spec=ClientSession)
-    # `None` capabilities means the session has not been initialized yet.
+    # `None` capabilities means the session has not been negotiated yet.
     session.server_capabilities = None
     session.initialize.return_value = mock_result
 
-    result = await load_mcp_server_info(session)
+    async def fake_initialize() -> InitializeResult:
+        # Mirror what a real `initialize()` does to the session's own state,
+        # which is where `MCPServerInfo` reads from.
+        session.server_capabilities = mock_result.capabilities
+        session.initialize_result = mock_result
+        session.discover_result = None
+        session.protocol_version = mock_result.protocol_version
+        session.server_info = mock_result.server_info
+        session.instructions = mock_result.instructions
+        return mock_result
+
+    session.initialize.side_effect = fake_initialize
+
+    result = await load_mcp_server_info(session, protocol="legacy")
 
     session.initialize.assert_called_once()
     assert result.instructions == "Mock instructions"
     assert result.server_info.name == "mock-server"
+    assert result.raw is mock_result
+    assert not result.is_modern
 
 
 async def test_load_mcp_server_info_rejects_initialized_session() -> None:

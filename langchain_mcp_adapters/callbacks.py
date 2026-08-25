@@ -14,6 +14,9 @@ from mcp.types import (
     ElicitResult as MCPElicitResult,
 )
 from mcp.types import (
+    LoggingLevel as MCPLoggingLevel,
+)
+from mcp.types import (
     LoggingMessageNotificationParams as MCPLoggingMessageNotificationParams,
 )
 
@@ -24,6 +27,15 @@ ElicitationFnT = MCPElicitationFnT
 LoggingMessageNotificationParams = MCPLoggingMessageNotificationParams
 ElicitRequestParams = MCPElicitRequestParams
 ClientRequestContext = MCPClientRequestContext
+LoggingLevel = MCPLoggingLevel
+
+DEFAULT_LOG_LEVEL: LoggingLevel = "debug"
+"""Level opted into on 2026-07-28+ connections when a logging callback is set.
+
+The most permissive level, chosen to match handshake-era behavior: there, a
+client that never sends `logging/setLevel` receives whatever the server emits.
+Narrow it with [`Callbacks.log_level`][langchain_mcp_adapters.callbacks.Callbacks].
+"""
 
 
 @dataclass
@@ -92,6 +104,7 @@ class _MCPCallbacks:
     logging_callback: LoggingFnT | None = None
     progress_callback: ProgressFnT | None = None
     elicitation_callback: ElicitationFnT | None = None
+    log_level: LoggingLevel = DEFAULT_LOG_LEVEL
 
 
 @dataclass
@@ -101,6 +114,17 @@ class Callbacks:
     on_logging_message: LoggingMessageCallback | None = None
     on_progress: ProgressCallback | None = None
     on_elicitation: ElicitationCallback | None = None
+
+    log_level: LoggingLevel = DEFAULT_LOG_LEVEL
+    """Minimum severity `on_logging_message` should receive.
+
+    Only meaningful on 2026-07-28+ connections, where a server emits log
+    messages solely for requests that opt in at or above a stated level
+    (SEP-2577). Handshake-era connections ignore this; there, delivery is
+    governed by the deprecated `logging/setLevel` request instead.
+
+    Has no effect unless `on_logging_message` is also set.
+    """
 
     def to_mcp_format(self, *, context: CallbackContext) -> _MCPCallbacks:
         """Convert the LangChain MCP client callbacks to MCP SDK callbacks.
@@ -139,4 +163,5 @@ class Callbacks:
             logging_callback=mcp_logging_callback,
             progress_callback=mcp_progress_callback,
             elicitation_callback=mcp_elicitation_callback,
+            log_level=self.log_level,
         )

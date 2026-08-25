@@ -29,9 +29,12 @@ from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase, FuncMetad
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
+    CallToolResult,
     ContentBlock,
     EmbeddedResource,
     ImageContent,
+    InputRequiredResult,
+    InputResponses,
     PaginatedRequestParams,
     ResourceLink,
     TextContent,
@@ -41,12 +44,19 @@ from mcp.types import Tool as MCPTool
 from pydantic import BaseModel, create_model
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
+from langchain_mcp_adapters.input_required import resolve_input_required
 from langchain_mcp_adapters.interceptors import (
     MCPToolCallRequest,
     MCPToolCallResult,
     ToolCallInterceptor,
 )
-from langchain_mcp_adapters.sessions import Connection, create_session
+from langchain_mcp_adapters.sessions import (
+    Connection,
+    ProtocolMode,
+    create_session,
+    negotiate_protocol,
+    resolve_protocol,
+)
 
 try:
     # langgraph installed
@@ -318,6 +328,39 @@ def _build_interceptor_chain(
     return handler
 
 
+async def _call_tool(
+    session: ClientSession,
+    tool_name: str,
+    tool_args: dict[str, Any] | None,
+    mcp_callbacks: _MCPCallbacks,
+) -> CallToolResult:
+    """Call a tool, resolving any input the server asks for along the way.
+
+    On 2026-07-28+ a server that needs elicitation, sampling, or a roots
+    listing answers with an `InputRequiredResult` rather than opening a
+    server-to-client request. Each embedded question is routed through the
+    session's callback table and the call is re-issued with the answers, so a
+    caller's `Callbacks` behave the same on either side of that boundary.
+    """
+
+    async def attempt(
+        input_responses: InputResponses | None,
+        request_state: str | None,
+    ) -> CallToolResult | InputRequiredResult:
+        return await session.call_tool(
+            tool_name,
+            tool_args,
+            progress_callback=mcp_callbacks.progress_callback,
+            input_responses=input_responses,
+            request_state=request_state,
+            # `request_state` is opaque server-minted data. It is echoed back
+            # verbatim and never parsed, logged, or persisted here.
+            allow_input_required=True,
+        )
+
+    return await resolve_input_required(session, await attempt(None, None), attempt)
+
+
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     """List all available tools from an MCP session with pagination support.
 
@@ -367,6 +410,7 @@ def convert_mcp_tool_to_langchain_tool(
     server_name: str | None = None,
     tool_name_prefix: bool = False,
     handle_tool_errors: bool = True,
+    protocol: ProtocolMode | None = None,
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -390,6 +434,11 @@ def convert_mcp_tool_to_langchain_tool(
             content-conversion errors (e.g. unsupported audio content) always
             raise regardless of this setting; only MCP execution errors
             (`isError=True`) are governed by it.
+        protocol: Negotiation policy for sessions created from `connection`.
+            Takes precedence over the connection's own `protocol` key; when
+            omitted, that key is used, falling back to `"auto"`. Ignored when
+            `session` is provided, since the caller owns that session. See
+            [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
 
     Returns:
         a LangChain tool
@@ -469,12 +518,15 @@ def convert_mcp_tool_to_langchain_tool(
                 async with create_session(
                     effective_connection, mcp_callbacks=mcp_callbacks
                 ) as tool_session:
-                    await tool_session.initialize()
+                    await negotiate_protocol(
+                        tool_session,
+                        protocol=protocol
+                        if protocol is not None
+                        else resolve_protocol(effective_connection),
+                    )
                     try:
-                        call_tool_result = await tool_session.call_tool(
-                            tool_name,
-                            tool_args,
-                            progress_callback=mcp_callbacks.progress_callback,
+                        call_tool_result = await _call_tool(
+                            tool_session, tool_name, tool_args, mcp_callbacks
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -489,10 +541,8 @@ def convert_mcp_tool_to_langchain_tool(
                 if captured_exception is not None:
                     raise captured_exception
             else:
-                call_tool_result = await session.call_tool(
-                    tool_name,
-                    tool_args,
-                    progress_callback=mcp_callbacks.progress_callback,
+                call_tool_result = await _call_tool(
+                    session, tool_name, tool_args, mcp_callbacks
                 )
 
             return call_tool_result
@@ -548,6 +598,7 @@ async def load_mcp_tools(
     server_name: str | None = None,
     tool_name_prefix: bool = False,
     handle_tool_errors: bool = True,
+    protocol: ProtocolMode | None = None,
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
@@ -567,6 +618,11 @@ async def load_mcp_tools(
             content-conversion errors (e.g. unsupported audio content) always
             raise regardless of this setting; only MCP execution errors
             (`isError=True`) are governed by it.
+        protocol: Negotiation policy for sessions created from `connection`.
+            Takes precedence over the connection's own `protocol` key; when
+            omitted, that key is used, falling back to `"auto"`. Ignored when
+            `session` is provided, since the caller owns that session. See
+            [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
@@ -593,7 +649,12 @@ async def load_mcp_tools(
         async with create_session(
             connection, mcp_callbacks=mcp_callbacks
         ) as tool_session:
-            await tool_session.initialize()
+            await negotiate_protocol(
+                tool_session,
+                protocol=protocol
+                if protocol is not None
+                else resolve_protocol(connection),
+            )
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
@@ -608,6 +669,7 @@ async def load_mcp_tools(
             server_name=server_name,
             tool_name_prefix=tool_name_prefix,
             handle_tool_errors=handle_tool_errors,
+            protocol=protocol,
         )
         for tool in tools
     ]

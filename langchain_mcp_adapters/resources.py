@@ -8,7 +8,16 @@ import base64
 
 from langchain_core.documents.base import Blob
 from mcp import ClientSession
-from mcp.types import BlobResourceContents, ResourceContents, TextResourceContents
+from mcp.types import (
+    BlobResourceContents,
+    InputRequiredResult,
+    InputResponses,
+    ReadResourceResult,
+    ResourceContents,
+    TextResourceContents,
+)
+
+from langchain_mcp_adapters.input_required import resolve_input_required
 
 
 def convert_mcp_resource_to_langchain_blob(
@@ -47,7 +56,23 @@ async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
     Returns:
         A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
     """  # noqa: E501
-    contents_result = await session.read_resource(uri)
+
+    async def attempt(
+        input_responses: InputResponses | None,
+        request_state: str | None,
+    ) -> ReadResourceResult | InputRequiredResult:
+        return await session.read_resource(
+            uri,
+            input_responses=input_responses,
+            request_state=request_state,
+            allow_input_required=True,
+        )
+
+    # A 2026-07-28 server may answer with questions of its own before it can
+    # serve the resource; resolve those, then use the terminal result.
+    contents_result = await resolve_input_required(
+        session, await attempt(None, None), attempt
+    )
     if not contents_result.contents or len(contents_result.contents) == 0:
         return []
 

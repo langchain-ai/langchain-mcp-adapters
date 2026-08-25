@@ -8,7 +8,14 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 from mcp import ClientSession
-from mcp.types import PromptMessage
+from mcp.types import (
+    GetPromptResult,
+    InputRequiredResult,
+    InputResponses,
+    PromptMessage,
+)
+
+from langchain_mcp_adapters.input_required import resolve_input_required
 
 
 def convert_mcp_prompt_message_to_langchain_message(
@@ -52,7 +59,22 @@ async def load_mcp_prompt(
         A list of LangChain [messages](https://docs.langchain.com/oss/python/langchain/messages)
             converted from the MCP prompt.
     """
-    response = await session.get_prompt(name, arguments)
+
+    async def attempt(
+        input_responses: InputResponses | None,
+        request_state: str | None,
+    ) -> GetPromptResult | InputRequiredResult:
+        return await session.get_prompt(
+            name,
+            arguments,
+            input_responses=input_responses,
+            request_state=request_state,
+            allow_input_required=True,
+        )
+
+    # A 2026-07-28 server may answer with questions of its own before it can
+    # render the prompt; resolve those, then use the terminal result.
+    response = await resolve_input_required(session, await attempt(None, None), attempt)
     return [
         convert_mcp_prompt_message_to_langchain_message(message)
         for message in response.messages

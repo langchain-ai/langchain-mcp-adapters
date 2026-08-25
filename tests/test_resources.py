@@ -119,7 +119,9 @@ async def test_get_mcp_resource_with_empty_contents():
     blobs = await get_mcp_resource(session, uri)
 
     assert len(blobs) == 0
-    session.read_resource.assert_called_once_with(uri)
+    session.read_resource.assert_called_once_with(
+        uri, input_responses=None, request_state=None, allow_input_required=True
+    )
 
 
 async def test_load_mcp_resources_with_list_of_uris():
@@ -176,7 +178,9 @@ async def test_load_mcp_resources_with_single_uri_string():
     assert isinstance(blobs[0], Blob)
     assert blobs[0].data == "Content from test"
     assert blobs[0].metadata["uri"] == uri
-    session.read_resource.assert_called_once_with(uri)
+    session.read_resource.assert_called_once_with(
+        uri, input_responses=None, request_state=None, allow_input_required=True
+    )
 
 
 async def test_load_mcp_resources_with_all_resources():

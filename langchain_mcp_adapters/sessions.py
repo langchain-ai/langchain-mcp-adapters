@@ -15,9 +15,12 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import httpx2
 from mcp import ClientSession, StdioServerParameters
+from mcp.client._probe import negotiate_auto
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from mcp.types import DiscoverResult, ServerCapabilities
+from mcp.types.version import MODERN_PROTOCOL_VERSIONS
 from typing_extensions import NotRequired, TypedDict
 
 if TYPE_CHECKING:
@@ -55,6 +58,34 @@ DEFAULT_SSE_READ_TIMEOUT = 60 * 5
 
 DEFAULT_STREAMABLE_HTTP_TIMEOUT = timedelta(seconds=30)
 DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
+
+# The `str` arm is forward-compat for revisions a newer SDK may add; the two
+# literals are spelled out so editors complete them. Mirrors the SDK's own
+# `mcp.client.client.ConnectMode`. Values are validated at use, not by the type.
+ProtocolMode = Literal["auto", "legacy"] | str  # noqa: PYI051
+"""How to negotiate the MCP protocol revision on a new session.
+
+- `"auto"` (default): probe `server/discover` and adopt the newest mutually
+  supported modern revision, falling back to the `initialize` handshake for
+  servers that predate it. This is the only value that can reach 2026-07-28.
+- `"legacy"`: force the `initialize` handshake. Caps negotiation at the newest
+  handshake-era revision and never sends `server/discover`.
+- A modern revision string (e.g. `"2026-07-28"`): adopt that revision directly
+  without probing. Use this to pin against a server that could otherwise talk
+  the connection down to a handshake-era revision.
+"""
+
+DEFAULT_PROTOCOL: ProtocolMode = "auto"
+"""Negotiation policy used when a connection does not set `protocol`."""
+
+_PROTOCOL_MODES: frozenset[str] = frozenset(
+    {"auto", "legacy", *MODERN_PROTOCOL_VERSIONS}
+)
+"""Every accepted `protocol` value.
+
+Validated eagerly so that a typo surfaces as an error rather than a silent
+downgrade to a handshake-era revision.
+"""
 
 
 class McpHttpClientFactory(Protocol):
@@ -125,6 +156,15 @@ class StdioConnection(TypedDict):
     session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession."""
 
+    protocol: NotRequired[ProtocolMode]
+    """Which MCP protocol revision to negotiate.
+
+    `"auto"` (the default) probes `server/discover` and falls back to the
+    `initialize` handshake; `"legacy"` forces the handshake; a modern revision
+    string such as `"2026-07-28"` adopts that revision without probing. See
+    [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+    """
+
 
 class SSEConnection(TypedDict):
     """Configuration for Server-Sent Events (SSE) transport connections to MCP."""
@@ -160,6 +200,15 @@ class SSEConnection(TypedDict):
     auth: NotRequired[httpx2.Auth]
     """Optional authentication for the HTTP client."""
 
+    protocol: NotRequired[ProtocolMode]
+    """Which MCP protocol revision to negotiate.
+
+    `"auto"` (the default) probes `server/discover` and falls back to the
+    `initialize` handshake; `"legacy"` forces the handshake; a modern revision
+    string such as `"2026-07-28"` adopts that revision without probing. See
+    [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+    """
+
 
 class StreamableHttpConnection(TypedDict):
     """Connection configuration for Streamable HTTP transport."""
@@ -190,6 +239,15 @@ class StreamableHttpConnection(TypedDict):
 
     auth: NotRequired[httpx2.Auth]
     """Optional authentication for the HTTP client."""
+
+    protocol: NotRequired[ProtocolMode]
+    """Which MCP protocol revision to negotiate.
+
+    `"auto"` (the default) probes `server/discover` and falls back to the
+    `initialize` handshake; `"legacy"` forces the handshake; a modern revision
+    string such as `"2026-07-28"` adopts that revision without probing. See
+    [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+    """
 
 
 class WebsocketConnection(TypedDict):
@@ -222,6 +280,94 @@ WEBSOCKET_REMOVED_ERROR = (
     "If your server only speaks WebSocket, it needs to expose a Streamable HTTP "
     "endpoint to be reachable from this version."
 )
+
+
+def _validate_protocol(protocol: ProtocolMode) -> ProtocolMode:
+    """Return `protocol` if it names a known policy.
+
+    Raises:
+        ValueError: The value is not a recognized negotiation policy. Rejected
+            eagerly rather than passed through, so that a typo surfaces as an
+            error instead of silently leaving the connection on a handshake-era
+            revision.
+    """
+    if protocol not in _PROTOCOL_MODES:
+        accepted = ", ".join(repr(mode) for mode in sorted(_PROTOCOL_MODES))
+        msg = (
+            f"Unsupported protocol {protocol!r}. Must be one of: {accepted}. "
+            "Use 'auto' to negotiate the newest revision the server supports, "
+            "'legacy' to force the initialize handshake, or a modern revision "
+            "string to pin it."
+        )
+        raise ValueError(msg)
+    return protocol
+
+
+def resolve_protocol(
+    connection: Connection | None,
+    *,
+    default: ProtocolMode = DEFAULT_PROTOCOL,
+) -> ProtocolMode:
+    """Read and validate the `protocol` key of a connection config.
+
+    Args:
+        connection: Connection config to read `protocol` from. `None` and a
+            config without the key both fall back to `default`.
+        default: Policy to use when the connection does not specify one. A
+            connection's own `protocol` always wins over this.
+
+    Returns:
+        A validated [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+
+    Raises:
+        ValueError: Either value is not a recognized negotiation policy.
+    """
+    _validate_protocol(default)
+    return _validate_protocol((connection or {}).get("protocol", default))
+
+
+async def negotiate_protocol(
+    session: ClientSession,
+    *,
+    protocol: ProtocolMode = DEFAULT_PROTOCOL,
+) -> None:
+    """Negotiate the MCP protocol revision on a freshly created session.
+
+    Replaces a bare `session.initialize()` call. `initialize()` only ever
+    negotiates a handshake-era revision, so a client that calls it directly can
+    never reach 2026-07-28 even against a server that speaks it.
+
+    Args:
+        session: An un-negotiated session from
+            [`create_session`][langchain_mcp_adapters.sessions.create_session].
+        protocol: Negotiation policy. See
+            [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+
+    Raises:
+        ValueError: `protocol` is not a recognized policy.
+        McpError: The server is modern-only and shares no revision with this
+            client, or the handshake failed.
+    """
+    protocol = _validate_protocol(protocol)
+    if protocol == "legacy":
+        await session.initialize()
+    elif protocol == "auto":
+        # The SDK owns this policy: probe `server/discover`, and fall back to
+        # `initialize` on anything that is not positive evidence of a modern
+        # peer. Reimplementing the denylist here would drift from the SDK's.
+        await negotiate_auto(session)
+    else:
+        # A pinned modern revision skips the probe entirely. `supported_versions`
+        # is what the client is asserting, not something the server told us.
+        session.adopt(
+            DiscoverResult(
+                supported_versions=[protocol],
+                capabilities=ServerCapabilities(),
+                result_type="complete",
+                ttl_ms=0,
+                cache_scope="public",
+            )
+        )
 
 
 @asynccontextmanager
@@ -409,14 +555,21 @@ async def create_session(
         raise ValueError(msg)
 
     transport = connection["transport"]
-    params = {k: v for k, v in connection.items() if k != "transport"}
+    # `protocol` is negotiation policy, not transport configuration: it is
+    # consumed by `negotiate_protocol` and must not reach a transport kwarg.
+    params = {k: v for k, v in connection.items() if k not in ("transport", "protocol")}
 
     if mcp_callbacks is not None:
-        params["session_kwargs"] = params.get("session_kwargs", {})
+        params["session_kwargs"] = dict(params.get("session_kwargs") or {})
         if mcp_callbacks.logging_callback is not None:
             params["session_kwargs"]["logging_callback"] = (
                 mcp_callbacks.logging_callback
             )
+            # SEP-2577: a 2026-07-28 server emits `notifications/message` only
+            # for requests that opt in via `_meta`, and only at or above the
+            # requested level. Without this a registered logging callback goes
+            # silent the moment a connection negotiates a modern revision.
+            params["session_kwargs"].setdefault("log_level", mcp_callbacks.log_level)
         if mcp_callbacks.elicitation_callback is not None:
             params["session_kwargs"]["elicitation_callback"] = (
                 mcp_callbacks.elicitation_callback
