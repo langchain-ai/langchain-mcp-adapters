@@ -2,9 +2,7 @@
 
 import asyncio
 
-from mcp.server import FastMCP
-from mcp.server.fastmcp import Context
-from mcp.server.session import ServerSession
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import LoggingMessageNotificationParams
 
 from langchain_mcp_adapters.callbacks import (
@@ -61,10 +59,10 @@ async def test_to_mcp_format_with_callbacks() -> None:
 
 def _create_callback_server():
     """Create a server with a tool for testing callbacks."""
-    server = FastMCP(port=8186)
+    server = MCPServer()
 
     @server.tool()
-    async def execute_task(task: str, ctx: Context[ServerSession, None]) -> str:
+    async def execute_task(task: str, ctx: Context) -> str:
         """Execute a task with progress and logging"""
         await ctx.info(f"Starting task: {task}")
         await ctx.report_progress(progress=0.0, total=1.0)

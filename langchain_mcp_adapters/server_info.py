@@ -80,7 +80,7 @@ async def load_mcp_server_info(
 
     """
     if session is not None:
-        if session.get_server_capabilities() is not None:
+        if session.server_capabilities is not None:
             raise ValueError(ALREADY_INITIALIZED_ERROR)
         return await session.initialize()
 

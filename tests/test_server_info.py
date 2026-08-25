@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from mcp import ClientSession
-from mcp.server import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
     InitializeResult,
@@ -24,10 +24,9 @@ CLOSED_PORT = 8189
 
 
 def _create_server_with_instructions():
-    server = FastMCP(
+    server = MCPServer(
         "test-server",
         instructions="Use this server for testing purposes only.",
-        port=8187,
     )
 
     @server.tool()
@@ -39,7 +38,7 @@ def _create_server_with_instructions():
 
 
 def _create_server_without_instructions():
-    server = FastMCP("no-instructions-server", port=8188)
+    server = MCPServer("no-instructions-server")
 
     @server.tool()
     def ping() -> str:
@@ -70,10 +69,10 @@ async def test_load_mcp_server_info_with_connection(socket_enabled) -> None:
         )
         assert isinstance(result, InitializeResult)
         assert result.instructions == "Use this server for testing purposes only."
-        assert result.serverInfo.name == "test-server"
+        assert result.server_info.name == "test-server"
         # The server registers a `ping` tool, so it must advertise tool support.
         assert result.capabilities.tools is not None
-        assert result.protocolVersion
+        assert result.protocol_version
 
 
 async def test_load_mcp_server_info_over_stdio() -> None:
@@ -89,7 +88,7 @@ async def test_load_mcp_server_info_over_stdio() -> None:
         },
     )
     assert isinstance(result, InitializeResult)
-    assert result.serverInfo.name == "Math"
+    assert result.server_info.name == "Math"
     assert result.capabilities.tools is not None
 
 
@@ -105,30 +104,30 @@ async def test_load_mcp_server_info_no_instructions(socket_enabled) -> None:
         )
         assert isinstance(result, InitializeResult)
         assert result.instructions is None
-        assert result.serverInfo.name == "no-instructions-server"
+        assert result.server_info.name == "no-instructions-server"
 
 
 async def test_load_mcp_server_info_with_session() -> None:
     """Test that a provided session is initialized and its result returned."""
     mock_result = _mock_initialize_result()
-    # `spec` keeps sync methods (`get_server_capabilities`) sync and async ones
-    # (`initialize`) async, matching the real `ClientSession`.
+    # `spec` keeps the `server_capabilities` property and async `initialize`
+    # consistent with the real `ClientSession`.
     session = AsyncMock(spec=ClientSession)
     # `None` capabilities means the session has not been initialized yet.
-    session.get_server_capabilities.return_value = None
+    session.server_capabilities = None
     session.initialize.return_value = mock_result
 
     result = await load_mcp_server_info(session)
 
     session.initialize.assert_called_once()
     assert result.instructions == "Mock instructions"
-    assert result.serverInfo.name == "mock-server"
+    assert result.server_info.name == "mock-server"
 
 
 async def test_load_mcp_server_info_rejects_initialized_session() -> None:
     """Test that an already-initialized session is rejected, not re-initialized."""
     session = AsyncMock(spec=ClientSession)
-    session.get_server_capabilities.return_value = ServerCapabilities()
+    session.server_capabilities = ServerCapabilities()
 
     with pytest.raises(ValueError, match="already been initialized"):
         await load_mcp_server_info(session)
@@ -160,7 +159,7 @@ async def test_load_mcp_server_info_rejects_initialized_real_session(
             "with_instructions", auto_initialize=False
         ) as session:
             result = await load_mcp_server_info(session)
-            assert result.serverInfo.name == "test-server"
+            assert result.server_info.name == "test-server"
             # The session is usable afterwards, since it is now initialized.
             tools = await session.list_tools()
             assert [tool.name for tool in tools.tools] == ["ping"]
@@ -233,9 +232,9 @@ async def test_client_get_server_info(socket_enabled) -> None:
         assert info["with_instructions"].instructions == (
             "Use this server for testing purposes only."
         )
-        assert info["with_instructions"].serverInfo.name == "test-server"
+        assert info["with_instructions"].server_info.name == "test-server"
         assert info["without_instructions"].instructions is None
-        assert info["without_instructions"].serverInfo.name == "no-instructions-server"
+        assert info["without_instructions"].server_info.name == "no-instructions-server"
 
 
 async def test_client_get_server_info_single_server(socket_enabled) -> None:
@@ -256,7 +255,7 @@ async def test_client_get_server_info_single_server(socket_enabled) -> None:
         )
         info = await client.get_server_info(server_name="with_instructions")
         assert list(info) == ["with_instructions"]
-        assert info["with_instructions"].serverInfo.name == "test-server"
+        assert info["with_instructions"].server_info.name == "test-server"
 
 
 async def test_client_get_server_info_unknown_server() -> None:

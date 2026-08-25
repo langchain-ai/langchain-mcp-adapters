@@ -1,7 +1,7 @@
 """Tests for MCP elicitation callback support."""
 
-from mcp.server.fastmcp import Context, FastMCP
-from mcp.shared.context import RequestContext
+from mcp.client import ClientRequestContext
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.types import ElicitRequestParams, ElicitResult
 from pydantic import BaseModel
 
@@ -15,7 +15,7 @@ def _create_elicitation_server():
         email: str
         age: int
 
-    server = FastMCP(port=8184)
+    server = MCPServer()
 
     # Track how many times code before elicit runs (should be exactly once)
     server._pre_elicit_call_count = 0
@@ -52,11 +52,11 @@ def _create_elicitation_server():
 async def test_elicitation_callback_accept(socket_enabled) -> None:
     """Test elicitation callback with user accepting and providing data."""
     elicitation_requests: list[
-        tuple[RequestContext, ElicitRequestParams, CallbackContext]
+        tuple[ClientRequestContext, ElicitRequestParams, CallbackContext]
     ] = []
 
     async def on_elicitation(
-        mcp_context: RequestContext,
+        mcp_context: ClientRequestContext,
         params: ElicitRequestParams,
         context: CallbackContext,
     ) -> ElicitResult:
@@ -106,7 +106,7 @@ async def test_elicitation_callback_decline(socket_enabled) -> None:
     """Test elicitation callback with user declining."""
 
     async def on_elicitation(
-        mcp_context: RequestContext,
+        mcp_context: ClientRequestContext,
         params: ElicitRequestParams,
         context: CallbackContext,
     ) -> ElicitResult:
@@ -137,7 +137,7 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
     """Test elicitation callback with user cancelling."""
 
     async def on_elicitation(
-        mcp_context: RequestContext,
+        mcp_context: ClientRequestContext,
         params: ElicitRequestParams,
         context: CallbackContext,
     ) -> ElicitResult:

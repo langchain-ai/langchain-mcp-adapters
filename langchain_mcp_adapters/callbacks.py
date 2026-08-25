@@ -3,10 +3,10 @@
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from mcp.client import ClientRequestContext as MCPClientRequestContext
 from mcp.client.session import ElicitationFnT as MCPElicitationFnT
 from mcp.client.session import LoggingFnT as MCPLoggingFnT
-from mcp.shared.context import RequestContext as MCPRequestContext
-from mcp.shared.session import ProgressFnT as MCPProgressFnT
+from mcp.shared.dispatcher import ProgressFnT as MCPProgressFnT
 from mcp.types import (
     ElicitRequestParams as MCPElicitRequestParams,
 )
@@ -23,6 +23,7 @@ ProgressFnT = MCPProgressFnT
 ElicitationFnT = MCPElicitationFnT
 LoggingMessageNotificationParams = MCPLoggingMessageNotificationParams
 ElicitRequestParams = MCPElicitRequestParams
+ClientRequestContext = MCPClientRequestContext
 
 
 @dataclass
@@ -76,7 +77,7 @@ class ElicitationCallback(Protocol):
 
     async def __call__(
         self,
-        mcp_context: MCPRequestContext,
+        mcp_context: MCPClientRequestContext,
         params: ElicitRequestParams,
         context: CallbackContext,
     ) -> MCPElicitResult:
@@ -127,7 +128,7 @@ class Callbacks:
         if (on_elicitation := self.on_elicitation) is not None:
 
             async def mcp_elicitation_callback(
-                mcp_context: MCPRequestContext,
+                mcp_context: MCPClientRequestContext,
                 params: ElicitRequestParams,
             ) -> MCPElicitResult:
                 return await on_elicitation(mcp_context, params, context)
