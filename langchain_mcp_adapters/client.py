@@ -34,7 +34,7 @@ from langchain_mcp_adapters.sessions import (
     negotiate_protocol,
     resolve_protocol,
 )
-from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain_mcp_adapters.tools import ElicitationMode, load_mcp_tools
 
 ASYNC_CONTEXT_MANAGER_ERROR = (
     "As of langchain-mcp-adapters 0.1.0, MultiServerMCPClient cannot be used as a "
@@ -64,6 +64,7 @@ class MultiServerMCPClient:
         tool_name_prefix: bool = False,
         handle_tool_errors: bool = True,
         protocol: ProtocolMode = DEFAULT_PROTOCOL,
+        elicitation: ElicitationMode = "callback",
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -114,7 +115,7 @@ class MultiServerMCPClient:
 
             ```python
             from langchain_mcp_adapters.client import MultiServerMCPClient
-            from langchain_mcp_adapters.tools import load_mcp_tools
+            from langchain_mcp_adapters.tools import ElicitationMode, load_mcp_tools
 
             client = MultiServerMCPClient({...})
             async with client.session("math") as session:
@@ -131,6 +132,13 @@ class MultiServerMCPClient:
         # Validate now: a typo here would otherwise surface as a silent
         # downgrade on the first connection rather than a construction error.
         self.protocol = resolve_protocol(None, default=protocol)
+        if elicitation not in ("callback", "interrupt"):
+            msg = (
+                f"Unsupported elicitation mode {elicitation!r}. "
+                "Must be 'callback' or 'interrupt'."
+            )
+            raise ValueError(msg)
+        self.elicitation: ElicitationMode = elicitation
 
     @asynccontextmanager
     async def session(
@@ -215,6 +223,7 @@ class MultiServerMCPClient:
                 protocol=resolve_protocol(
                     self.connections[server_name], default=self.protocol
                 ),
+                elicitation=self.elicitation,
             )
 
         all_tools: list[BaseTool] = []
@@ -230,6 +239,7 @@ class MultiServerMCPClient:
                     tool_name_prefix=self.tool_name_prefix,
                     handle_tool_errors=self.handle_tool_errors,
                     protocol=resolve_protocol(connection, default=self.protocol),
+                    elicitation=self.elicitation,
                 )
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
@@ -410,6 +420,7 @@ class MultiServerMCPClient:
 
 __all__ = [
     "Callbacks",
+    "ElicitationMode",
     "MCPServerInfo",
     "McpHttpClientFactory",
     "MultiServerMCPClient",

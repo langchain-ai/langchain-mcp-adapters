@@ -296,6 +296,74 @@ print(info["weather"].protocol_version)  # e.g. "2026-07-28"
 - **`resources/subscribe` and `ping` are gone**, and client-to-server progress
   is deprecated. Server-to-client progress is unaffected.
 
+## Human-in-the-loop elicitation
+
+When an MCP server needs input mid-call, `elicitation="interrupt"` surfaces it
+as a LangGraph [interrupt](https://langchain-ai.github.io/langgraph/how-tos/human_in_the_loop/add-human-in-the-loop/)
+so a person can answer, instead of answering it inline from a callback.
+
+```python
+client = MultiServerMCPClient(
+    {"profiles": {"url": "http://localhost:8000/mcp", "transport": "http"}},
+    elicitation="interrupt",
+)
+tools = await client.get_tools()
+
+# ... inside a graph node ...
+result = await tools[0].ainvoke({"args": {"name": "Alice"}, "id": "1", "type": "tool_call"})
+```
+
+The graph suspends with a JSON payload describing what was asked:
+
+```python
+paused = await app.ainvoke({}, config)
+paused["__interrupt__"][0].value
+# {
+#   "type": "mcp_input_required",
+#   "server": "profiles",
+#   "tool": "create_profile",
+#   "requests": {
+#     "<key>": {
+#       "kind": "elicit",
+#       "mode": "form",
+#       "message": "Please provide details for Alice's profile:",
+#       "requested_schema": {"type": "object", "properties": {...}},
+#     }
+#   },
+# }
+```
+
+Resume with the answer. A single question can be answered directly; several are
+answered with a mapping keyed by request key. `"decline"` and `"cancel"` are
+accepted as-is.
+
+```python
+await app.ainvoke(Command(resume={"email": "alice@example.com", "age": 28}), config)
+```
+
+### Why this needs 2026-07-28
+
+On a handshake-era connection, elicitation is a request the server sends *during*
+the tool call and then blocks on. Suspending the graph would tear down the
+connection it is waiting on, and there would be nothing to resume against — so
+that combination is refused with an explanation rather than silently breaking.
+
+At 2026-07-28 the call *completes* and returns the questions along with an
+opaque `request_state` token. The connection can close, the graph can stay
+suspended for as long as a human takes, and the call is re-issued against a
+brand new session on resume.
+
+Each round is memoized as a LangGraph [task][langgraph.func.task], so resuming
+replays the first round from the checkpoint rather than re-asking the server. A
+tool that elicits once costs two round-trips, not three.
+
+> `request_state` is minted and sealed by the server and is subject to its TTL
+> and signing-key lifetime. A server using the default process-local key will
+> reject a token that outlives its own restart, however long the graph held it.
+
+Callback-based elicitation (`Callbacks(on_elicitation=...)`) remains the
+default and works on every revision.
+
 ## Tool error handling
 
 MCP distinguishes a tool *execution* error (`CallToolResult(isError=True)`, e.g. "project not found") from a protocol/transport failure. By default, an execution error is returned to the model as a `ToolMessage` with `status="error"`, so the agent can see what went wrong and self-correct instead of the run crashing:

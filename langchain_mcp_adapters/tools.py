@@ -5,7 +5,8 @@ tools, handle tool execution, and manage tool conversion between the two formats
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, TypedDict, get_args
+from dataclasses import replace
+from typing import Annotated, Any, Literal, TypedDict, get_args
 
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
@@ -49,6 +50,12 @@ from langchain_mcp_adapters.interceptors import (
     MCPToolCallRequest,
     MCPToolCallResult,
     ToolCallInterceptor,
+)
+from langchain_mcp_adapters.interrupts import (
+    _require_task,
+    declare_elicitation_only,
+    drive_input_required_via_interrupts,
+    in_langgraph_runtime,
 )
 from langchain_mcp_adapters.sessions import (
     Connection,
@@ -167,6 +174,20 @@ def _handle_mcp_tool_error(
             return error.tool_content
         return [create_text_block(text=str(error))]
     raise error
+
+
+ElicitationMode = Literal["callback", "interrupt"]
+"""How input the server asks for mid-call gets answered.
+
+- `"callback"` (default): answered inline by `Callbacks.on_elicitation` (and
+  the sampling / roots callbacks). Works on every protocol revision.
+- `"interrupt"`: raised as a LangGraph
+  [interrupt][langgraph.types.interrupt] so a human can answer, with the graph
+  suspended in between. Requires a 2026-07-28 connection, where a `tools/call`
+  completes before the answer is needed and the server hands back a resumable
+  `request_state`; on a handshake-era connection the server would be left
+  blocked on a connection the interrupt tears down.
+"""
 
 
 class MCPToolArtifact(TypedDict):
@@ -361,6 +382,88 @@ async def _call_tool(
     return await resolve_input_required(session, await attempt(None, None), attempt)
 
 
+async def _call_tool_via_interrupts(
+    session: ClientSession | None,
+    connection: Connection | None,
+    tool_name: str,
+    tool_args: dict[str, Any] | None,
+    mcp_callbacks: _MCPCallbacks,
+    protocol: ProtocolMode | None,
+    server_name: str | None,
+) -> CallToolResult:
+    """Call a tool, surfacing anything the server asks for as a graph interrupt.
+
+    Unlike the callback path, each round runs in its own session. That is the
+    point: a 2026-07-28 `tools/call` completes before the questions are
+    answered, so the connection does not need to survive the pause and the
+    graph is free to suspend for as long as a human takes.
+
+    Each round is memoized as a LangGraph task, so resuming replays the first
+    round from the checkpoint instead of asking the server the same question
+    twice.
+    """
+
+    async def one_round(
+        input_responses: InputResponses | None,
+        request_state: str | None,
+    ) -> CallToolResult | InputRequiredResult:
+        if session is not None:
+            # A caller-owned session. It has to outlive the interrupt, which
+            # holds for an in-process resume but not across a restart.
+            return await session.call_tool(
+                tool_name,
+                tool_args,
+                progress_callback=mcp_callbacks.progress_callback,
+                input_responses=input_responses,
+                request_state=request_state,
+                allow_input_required=True,
+            )
+        if connection is None:  # pragma: no cover - guarded by the caller
+            msg = "Either session or connection must be provided"
+            raise ValueError(msg)
+        async with create_session(
+            connection, mcp_callbacks=mcp_callbacks
+        ) as round_session:
+            await negotiate_protocol(
+                round_session,
+                protocol=protocol
+                if protocol is not None
+                else resolve_protocol(connection),
+            )
+            return await round_session.call_tool(
+                tool_name,
+                tool_args,
+                progress_callback=mcp_callbacks.progress_callback,
+                input_responses=input_responses,
+                request_state=request_state,
+                allow_input_required=True,
+            )
+
+    task = _require_task()
+
+    @task
+    async def first_round() -> dict[str, Any]:
+        result = await one_round(None, None)
+        return {
+            "input_required": isinstance(result, InputRequiredResult),
+            "data": result.model_dump(by_alias=True, mode="json"),
+        }
+
+    raw = await first_round()
+    first: CallToolResult | InputRequiredResult = (
+        InputRequiredResult.model_validate(raw["data"])
+        if raw["input_required"]
+        else CallToolResult.model_validate(raw["data"])
+    )
+    return await drive_input_required_via_interrupts(
+        first,
+        one_round,
+        result_type=CallToolResult,
+        server_name=server_name,
+        tool_name=tool_name,
+    )
+
+
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     """List all available tools from an MCP session with pagination support.
 
@@ -411,6 +514,7 @@ def convert_mcp_tool_to_langchain_tool(
     tool_name_prefix: bool = False,
     handle_tool_errors: bool = True,
     protocol: ProtocolMode | None = None,
+    elicitation: ElicitationMode = "callback",
 ) -> BaseTool:
     """Convert an MCP tool to a LangChain tool.
 
@@ -439,6 +543,13 @@ def convert_mcp_tool_to_langchain_tool(
             omitted, that key is used, falling back to `"auto"`. Ignored when
             `session` is provided, since the caller owns that session. See
             [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+        elicitation: How to answer input the server asks for mid-call
+            (elicitation, sampling, roots). `"callback"` (default) answers
+            inline through `callbacks`. `"interrupt"` raises a LangGraph
+            [interrupt][langgraph.types.interrupt] instead, so a human can
+            answer; this needs a 2026-07-28 connection and a running graph with
+            a checkpointer. See
+            [`ElicitationMode`][langchain_mcp_adapters.tools.ElicitationMode].
 
     Returns:
         a LangChain tool
@@ -470,6 +581,13 @@ def convert_mcp_tool_to_langchain_tool(
             if callbacks is not None
             else _MCPCallbacks()
         )
+        if elicitation == "interrupt" and mcp_callbacks.elicitation_callback is None:
+            # Servers refuse to elicit from a client that never advertised the
+            # capability, and this mode has no user callback to infer it from.
+            # See `declare_elicitation_only`.
+            mcp_callbacks = replace(
+                mcp_callbacks, elicitation_callback=declare_elicitation_only
+            )
 
         # Create the innermost handler that actually executes the tool call
         async def execute_tool(request: MCPToolCallRequest) -> MCPToolCallResult:
@@ -508,6 +626,25 @@ def convert_mcp_tool_to_langchain_tool(
                     effective_connection = updated_connection
 
             captured_exception = None
+
+            if elicitation == "interrupt" and in_langgraph_runtime():
+                # Every round runs in its own session, so the interrupt does
+                # not have to hold a connection open. Errors are deliberately
+                # not captured and re-raised here: nothing is mid-`async with`,
+                # and a GraphInterrupt must reach the runtime unaltered.
+                #
+                # Outside a graph there is nothing to interrupt, so fall
+                # through to the ordinary path. A call that needs no input
+                # still works; one that does is declined with an explanation.
+                return await _call_tool_via_interrupts(
+                    session,
+                    effective_connection,
+                    tool_name,
+                    tool_args,
+                    mcp_callbacks,
+                    protocol,
+                    server_name,
+                )
 
             if session is None:
                 # If a session is not provided, we will create one on the fly
@@ -599,6 +736,7 @@ async def load_mcp_tools(
     tool_name_prefix: bool = False,
     handle_tool_errors: bool = True,
     protocol: ProtocolMode | None = None,
+    elicitation: ElicitationMode = "callback",
 ) -> list[BaseTool]:
     """Load all available MCP tools and convert them to LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
 
@@ -623,6 +761,13 @@ async def load_mcp_tools(
             omitted, that key is used, falling back to `"auto"`. Ignored when
             `session` is provided, since the caller owns that session. See
             [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
+        elicitation: How to answer input the server asks for mid-call
+            (elicitation, sampling, roots). `"callback"` (default) answers
+            inline through `callbacks`. `"interrupt"` raises a LangGraph
+            [interrupt][langgraph.types.interrupt] instead, so a human can
+            answer; this needs a 2026-07-28 connection and a running graph with
+            a checkpointer. See
+            [`ElicitationMode`][langchain_mcp_adapters.tools.ElicitationMode].
 
     Returns:
         List of LangChain [tools](https://docs.langchain.com/oss/python/langchain/tools).
@@ -670,6 +815,7 @@ async def load_mcp_tools(
             tool_name_prefix=tool_name_prefix,
             handle_tool_errors=handle_tool_errors,
             protocol=protocol,
+            elicitation=elicitation,
         )
         for tool in tools
     ]
