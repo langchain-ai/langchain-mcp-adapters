@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import httpx2
 from mcp import ClientSession, StdioServerParameters
+from mcp.client._probe import negotiate_auto
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
@@ -55,6 +56,36 @@ DEFAULT_SSE_READ_TIMEOUT = 60 * 5
 
 DEFAULT_STREAMABLE_HTTP_TIMEOUT = timedelta(seconds=30)
 DEFAULT_STREAMABLE_HTTP_SSE_READ_TIMEOUT = timedelta(seconds=60 * 5)
+
+ProtocolMode = Literal["auto", "legacy"]
+"""How to negotiate the MCP protocol revision.
+
+`"auto"` (default) probes `server/discover` and falls back to the `initialize`
+handshake. `"legacy"` forces the handshake; note that `initialize` can only
+reach 2025-11-25, so `"legacy"` never negotiates 2026-07-28.
+"""
+
+
+async def negotiate_protocol(
+    session: ClientSession, protocol: ProtocolMode = "auto"
+) -> None:
+    """Negotiate a protocol revision on a new session.
+
+    Replaces a bare `session.initialize()`, which can only ever reach a
+    handshake-era revision.
+
+    Raises:
+        ValueError: `protocol` is not `"auto"` or `"legacy"`.
+    """
+    if protocol == "legacy":
+        await session.initialize()
+    elif protocol == "auto":
+        # The SDK owns this policy (probe, then fall back on anything that is
+        # not positive evidence of a modern peer).
+        await negotiate_auto(session)
+    else:
+        msg = f"Unsupported protocol {protocol!r}. Must be 'auto' or 'legacy'."
+        raise ValueError(msg)
 
 
 class McpHttpClientFactory(Protocol):
@@ -124,6 +155,8 @@ class StdioConnection(TypedDict):
 
     session_kwargs: NotRequired[dict[str, Any] | None]
     """Additional keyword arguments to pass to the ClientSession."""
+    protocol: NotRequired[ProtocolMode]
+    """Protocol revision to negotiate; see `ProtocolMode`. Defaults to `"auto"`."""
 
 
 class SSEConnection(TypedDict):
@@ -159,6 +192,8 @@ class SSEConnection(TypedDict):
 
     auth: NotRequired[httpx2.Auth]
     """Optional authentication for the HTTP client."""
+    protocol: NotRequired[ProtocolMode]
+    """Protocol revision to negotiate; see `ProtocolMode`. Defaults to `"auto"`."""
 
 
 class StreamableHttpConnection(TypedDict):
@@ -190,6 +225,8 @@ class StreamableHttpConnection(TypedDict):
 
     auth: NotRequired[httpx2.Auth]
     """Optional authentication for the HTTP client."""
+    protocol: NotRequired[ProtocolMode]
+    """Protocol revision to negotiate; see `ProtocolMode`. Defaults to `"auto"`."""
 
 
 class WebsocketConnection(TypedDict):
@@ -409,14 +446,18 @@ async def create_session(
         raise ValueError(msg)
 
     transport = connection["transport"]
-    params = {k: v for k, v in connection.items() if k != "transport"}
+    # `protocol` is negotiation policy; it must not reach a transport kwarg.
+    params = {k: v for k, v in connection.items() if k not in ("transport", "protocol")}
 
     if mcp_callbacks is not None:
-        params["session_kwargs"] = params.get("session_kwargs", {})
+        params["session_kwargs"] = dict(params.get("session_kwargs") or {})
         if mcp_callbacks.logging_callback is not None:
             params["session_kwargs"]["logging_callback"] = (
                 mcp_callbacks.logging_callback
             )
+            # SEP-2577: 2026-07-28 servers only emit log messages for requests
+            # that opt in, so a callback alone goes silent there.
+            params["session_kwargs"].setdefault("log_level", "debug")
         if mcp_callbacks.elicitation_callback is not None:
             params["session_kwargs"]["elicitation_callback"] = (
                 mcp_callbacks.elicitation_callback

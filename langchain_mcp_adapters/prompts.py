@@ -8,7 +8,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 from mcp import ClientSession
-from mcp.types import PromptMessage
+from mcp.client import ClientRequestContext
+from mcp.client._input_required import run_input_required_driver
+from mcp.types import InputRequiredResult, PromptMessage
 
 
 def convert_mcp_prompt_message_to_langchain_message(
@@ -52,8 +54,36 @@ async def load_mcp_prompt(
         A list of LangChain [messages](https://docs.langchain.com/oss/python/langchain/messages)
             converted from the MCP prompt.
     """
-    response = await session.get_prompt(name, arguments)
+    response = await _resolve(
+        session,
+        lambda r, st: session.get_prompt(
+            name,
+            arguments,
+            input_responses=r,
+            request_state=st,
+            allow_input_required=True,
+        ),
+    )
     return [
         convert_mcp_prompt_message_to_langchain_message(message)
         for message in response.messages
     ]
+
+
+async def _resolve(session, attempt):
+    """Run an interactive request, answering any input the server asks for.
+
+    On 2026-07-28 a server may return an `InputRequiredResult` in place of the
+    real result; the SDK driver answers each question through the session's
+    callback table and retries.
+    """
+    first = await attempt(None, None)
+    if not isinstance(first, InputRequiredResult):
+        return first
+    return await run_input_required_driver(
+        first,
+        dispatch=lambda key, req: session.dispatch_input_request(
+            ClientRequestContext(session=session, request_id=key, meta=None), req
+        ),
+        retry=attempt,
+    )

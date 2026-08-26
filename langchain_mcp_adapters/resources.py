@@ -8,7 +8,14 @@ import base64
 
 from langchain_core.documents.base import Blob
 from mcp import ClientSession
-from mcp.types import BlobResourceContents, ResourceContents, TextResourceContents
+from mcp.client import ClientRequestContext
+from mcp.client._input_required import run_input_required_driver
+from mcp.types import (
+    BlobResourceContents,
+    InputRequiredResult,
+    ResourceContents,
+    TextResourceContents,
+)
 
 
 def convert_mcp_resource_to_langchain_blob(
@@ -47,7 +54,15 @@ async def get_mcp_resource(session: ClientSession, uri: str) -> list[Blob]:
     Returns:
         A list of LangChain [Blob][langchain_core.documents.base.Blob] objects.
     """  # noqa: E501
-    contents_result = await session.read_resource(uri)
+    contents_result = await _resolve(
+        session,
+        lambda r, st: session.read_resource(
+            uri,
+            input_responses=r,
+            request_state=st,
+            allow_input_required=True,
+        ),
+    )
     if not contents_result.contents or len(contents_result.contents) == 0:
         return []
 
@@ -101,3 +116,22 @@ async def load_mcp_resources(
         raise RuntimeError(msg) from e
 
     return blobs
+
+
+async def _resolve(session, attempt):
+    """Run an interactive request, answering any input the server asks for.
+
+    On 2026-07-28 a server may return an `InputRequiredResult` in place of the
+    real result; the SDK driver answers each question through the session's
+    callback table and retries.
+    """
+    first = await attempt(None, None)
+    if not isinstance(first, InputRequiredResult):
+        return first
+    return await run_input_required_driver(
+        first,
+        dispatch=lambda key, req: session.dispatch_input_request(
+            ClientRequestContext(session=session, request_id=key, meta=None), req
+        ),
+        retry=attempt,
+    )

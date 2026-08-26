@@ -1,7 +1,21 @@
-"""Tests for MCP elicitation callback support."""
+"""Tests for MCP elicitation callback support.
 
+Two server-side styles behave differently across the protocol boundary:
+
+- `ctx.elicit()` in a tool body sends a server-to-client request mid-call.
+  2026-07-28 removed those, so such a server can only elicit on a handshake-era
+  connection; those tests pin `protocol="legacy"`.
+- A resolver returning `Elicit(...)` works on both eras — the SDK batches it
+  into an `InputRequiredResult` at 2026-07-28 — so the same server and the same
+  `Callbacks` cover both.
+"""
+
+from typing import Annotated
+
+import pytest
 from mcp.client import ClientRequestContext
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.resolve import Elicit, Resolve
 from mcp.types import ElicitRequestParams, ElicitResult
 from pydantic import BaseModel
 
@@ -72,6 +86,9 @@ async def test_elicitation_callback_accept(socket_enabled) -> None:
                 "test": {
                     "url": "http://localhost:8184/mcp",
                     "transport": "http",
+                    # `ctx.elicit()` needs a server-to-client back-channel,
+                    # which 2026-07-28 removed.
+                    "protocol": "legacy",
                 }
             },
             callbacks=Callbacks(on_elicitation=on_elicitation),
@@ -118,6 +135,9 @@ async def test_elicitation_callback_decline(socket_enabled) -> None:
                 "test": {
                     "url": "http://localhost:8184/mcp",
                     "transport": "http",
+                    # `ctx.elicit()` needs a server-to-client back-channel,
+                    # which 2026-07-28 removed.
+                    "protocol": "legacy",
                 }
             },
             callbacks=Callbacks(on_elicitation=on_elicitation),
@@ -149,6 +169,9 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
                 "test": {
                     "url": "http://localhost:8184/mcp",
                     "transport": "http",
+                    # `ctx.elicit()` needs a server-to-client back-channel,
+                    # which 2026-07-28 removed.
+                    "protocol": "legacy",
                 }
             },
             callbacks=Callbacks(on_elicitation=on_elicitation),
@@ -162,3 +185,68 @@ async def test_elicitation_callback_cancel(socket_enabled) -> None:
         assert "cancelled" in str(result.content).lower()
         # Verify code before ctx.elicit only ran once
         assert "pre_elicit_calls=1" in str(result.content)
+
+
+# --- resolver-based elicitation, which spans both eras -----------------------
+
+
+class _UserDetails(BaseModel):
+    email: str
+    age: int
+
+
+def _ask_details(name: str) -> Elicit[_UserDetails]:
+    return Elicit(f"Please provide details for {name}'s profile:", _UserDetails)
+
+
+def _create_resolver_elicitation_server():
+    server = MCPServer()
+
+    @server.tool()
+    async def create_profile(
+        name: str,
+        details: Annotated[_UserDetails, Resolve(_ask_details)],
+    ) -> str:
+        """Create a user profile, eliciting the details from the client."""
+        return f"Created profile for {name}: email={details.email}, age={details.age}"
+
+    return server
+
+
+@pytest.mark.parametrize("protocol", ["auto", "legacy"])
+async def test_resolver_elicitation_spans_both_eras(socket_enabled, protocol) -> None:
+    """The same callback answers elicitation on either side of the boundary."""
+    seen: list[ElicitRequestParams] = []
+
+    async def on_elicitation(
+        mcp_context: ClientRequestContext,
+        params: ElicitRequestParams,
+        context: CallbackContext,
+    ) -> ElicitResult:
+        seen.append(params)
+        return ElicitResult(
+            action="accept", content={"email": "alice@example.com", "age": 28}
+        )
+
+    with run_streamable_http(_create_resolver_elicitation_server, 8185):
+        client = MultiServerMCPClient(
+            {
+                "test": {
+                    "url": "http://localhost:8185/mcp",
+                    "transport": "http",
+                    "protocol": protocol,
+                }
+            },
+            callbacks=Callbacks(on_elicitation=on_elicitation),
+        )
+        tools = await client.get_tools()
+        result = await tools[0].ainvoke(
+            {"args": {"name": "Alice"}, "id": "1", "type": "tool_call"}
+        )
+        negotiated = (await client.get_server_info())["test"].protocol_version
+
+    assert len(seen) == 1
+    assert "Alice" in seen[0].message
+    assert "alice@example.com" in str(result.content)
+    # The "auto" run must really have been on 2026-07-28, not a silent fallback.
+    assert negotiated == ("2026-07-28" if protocol == "auto" else "2025-11-25")

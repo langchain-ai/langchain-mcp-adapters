@@ -24,14 +24,19 @@ from langchain_core.tools import (
 )
 from langchain_core.tools.base import get_all_basemodel_annotations
 from mcp import ClientSession
+from mcp.client import ClientRequestContext
+from mcp.client._input_required import run_input_required_driver
 from mcp.server.mcpserver.tools import Tool as FastMCPTool
 from mcp.server.mcpserver.utilities.func_metadata import ArgModelBase, FuncMetadata
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
+    CallToolResult,
     ContentBlock,
     EmbeddedResource,
     ImageContent,
+    InputRequiredResult,
+    InputResponses,
     PaginatedRequestParams,
     ResourceLink,
     TextContent,
@@ -46,7 +51,11 @@ from langchain_mcp_adapters.interceptors import (
     MCPToolCallResult,
     ToolCallInterceptor,
 )
-from langchain_mcp_adapters.sessions import Connection, create_session
+from langchain_mcp_adapters.sessions import (
+    Connection,
+    create_session,
+    negotiate_protocol,
+)
 
 try:
     # langgraph installed
@@ -318,6 +327,45 @@ def _build_interceptor_chain(
     return handler
 
 
+async def _call_tool(
+    session: ClientSession,
+    tool_name: str,
+    tool_args: dict[str, Any] | None,
+    mcp_callbacks: _MCPCallbacks,
+) -> CallToolResult:
+    """Call a tool, answering any input the server asks for on the way.
+
+    On 2026-07-28 a server needing elicitation, sampling, or roots returns an
+    `InputRequiredResult` instead of opening a server-to-client request. The
+    SDK driver answers each embedded question through the session's own
+    callback table, so `Callbacks` behave the same on either protocol era.
+    """
+
+    async def attempt(
+        responses: InputResponses | None, state: str | None
+    ) -> CallToolResult | InputRequiredResult:
+        return await session.call_tool(
+            tool_name,
+            tool_args,
+            progress_callback=mcp_callbacks.progress_callback,
+            input_responses=responses,
+            # Opaque server-minted state; echoed back verbatim, never parsed.
+            request_state=state,
+            allow_input_required=True,
+        )
+
+    first = await attempt(None, None)
+    if not isinstance(first, InputRequiredResult):
+        return first
+    return await run_input_required_driver(
+        first,
+        dispatch=lambda key, req: session.dispatch_input_request(
+            ClientRequestContext(session=session, request_id=key, meta=None), req
+        ),
+        retry=attempt,
+    )
+
+
 async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
     """List all available tools from an MCP session with pagination support.
 
@@ -469,12 +517,12 @@ def convert_mcp_tool_to_langchain_tool(
                 async with create_session(
                     effective_connection, mcp_callbacks=mcp_callbacks
                 ) as tool_session:
-                    await tool_session.initialize()
+                    await negotiate_protocol(
+                        tool_session, effective_connection.get("protocol", "auto")
+                    )
                     try:
-                        call_tool_result = await tool_session.call_tool(
-                            tool_name,
-                            tool_args,
-                            progress_callback=mcp_callbacks.progress_callback,
+                        call_tool_result = await _call_tool(
+                            tool_session, tool_name, tool_args, mcp_callbacks
                         )
                     except Exception as e:  # noqa: BLE001
                         # Capture exception to re-raise outside context manager
@@ -489,10 +537,8 @@ def convert_mcp_tool_to_langchain_tool(
                 if captured_exception is not None:
                     raise captured_exception
             else:
-                call_tool_result = await session.call_tool(
-                    tool_name,
-                    tool_args,
-                    progress_callback=mcp_callbacks.progress_callback,
+                call_tool_result = await _call_tool(
+                    session, tool_name, tool_args, mcp_callbacks
                 )
 
             return call_tool_result
@@ -593,7 +639,7 @@ async def load_mcp_tools(
         async with create_session(
             connection, mcp_callbacks=mcp_callbacks
         ) as tool_session:
-            await tool_session.initialize()
+            await negotiate_protocol(tool_session, connection.get("protocol", "auto"))
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)

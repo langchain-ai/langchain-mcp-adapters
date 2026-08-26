@@ -5,11 +5,44 @@ from the MCP initialize handshake, including server instructions,
 capabilities, and implementation details.
 """
 
+from dataclasses import dataclass
+
 from mcp import ClientSession
-from mcp.types import InitializeResult
+from mcp.types import Implementation, ServerCapabilities
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCallbacks
-from langchain_mcp_adapters.sessions import Connection, create_session
+from langchain_mcp_adapters.sessions import (
+    Connection,
+    create_session,
+    negotiate_protocol,
+)
+
+
+@dataclass(frozen=True)
+class MCPServerInfo:
+    """What a server reported when the connection was established.
+
+    Normalizes the two shapes this can arrive in: `InitializeResult` on a
+    handshake-era connection, and `DiscoverResult` on 2026-07-28, which has no
+    `initialize` step and stamps its identity in `_meta` instead.
+    """
+
+    protocol_version: str
+    capabilities: ServerCapabilities
+    server_info: Implementation | None
+    """`None` only on 2026-07-28, where identifying itself is optional."""
+    instructions: str | None
+    """Server-controlled text; treat as untrusted before prompting with it."""
+
+
+def _read(session: ClientSession) -> MCPServerInfo:
+    return MCPServerInfo(
+        protocol_version=session.protocol_version,
+        capabilities=session.server_capabilities,
+        server_info=session.server_info,
+        instructions=session.instructions,
+    )
+
 
 ALREADY_INITIALIZED_ERROR = (
     "The provided ClientSession has already been initialized. "
@@ -28,7 +61,7 @@ async def load_mcp_server_info(
     connection: Connection | None = None,
     callbacks: Callbacks | None = None,
     server_name: str | None = None,
-) -> InitializeResult:
+) -> MCPServerInfo:
     """Load server info from the MCP initialize handshake.
 
     Returns the full `InitializeResult` from the MCP protocol, which includes
@@ -82,7 +115,8 @@ async def load_mcp_server_info(
     if session is not None:
         if session.server_capabilities is not None:
             raise ValueError(ALREADY_INITIALIZED_ERROR)
-        return await session.initialize()
+        await negotiate_protocol(session, "legacy")
+        return _read(session)
 
     if connection is None:
         msg = "Either a session or a connection config must be provided"
@@ -94,11 +128,14 @@ async def load_mcp_server_info(
         else _MCPCallbacks()
     )
 
-    result: InitializeResult | None = None
+    result: MCPServerInfo | None = None
     captured_exception: BaseException | None = None
     async with create_session(connection, mcp_callbacks=mcp_callbacks) as new_session:
         try:
-            result = await new_session.initialize()
+            await negotiate_protocol(
+                new_session, (connection or {}).get("protocol", "auto")
+            )
+            result = _read(new_session)
         except Exception as e:  # noqa: BLE001
             # Capture the exception to re-raise outside the context manager, which
             # may otherwise suppress it. Mirrors the work-around in `tools.py` for

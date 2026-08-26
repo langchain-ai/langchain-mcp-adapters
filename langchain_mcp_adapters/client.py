@@ -15,21 +15,22 @@ from langchain_core.documents.base import Blob
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from mcp import ClientSession
-from mcp.types import InitializeResult
 
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.interceptors import ToolCallInterceptor
 from langchain_mcp_adapters.prompts import load_mcp_prompt
 from langchain_mcp_adapters.resources import load_mcp_resources
-from langchain_mcp_adapters.server_info import load_mcp_server_info
+from langchain_mcp_adapters.server_info import MCPServerInfo, load_mcp_server_info
 from langchain_mcp_adapters.sessions import (
     Connection,
     McpHttpClientFactory,
+    ProtocolMode,
     SSEConnection,
     StdioConnection,
     StreamableHttpConnection,
     WebsocketConnection,
     create_session,
+    negotiate_protocol,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
 
@@ -60,6 +61,7 @@ class MultiServerMCPClient:
         tool_interceptors: list[ToolCallInterceptor] | None = None,
         tool_name_prefix: bool = False,
         handle_tool_errors: bool = True,
+        protocol: ProtocolMode = "auto",
     ) -> None:
         """Initialize a `MultiServerMCPClient` with MCP servers connections.
 
@@ -81,6 +83,9 @@ class MultiServerMCPClient:
                 content-conversion errors (e.g. unsupported audio content) always
                 raise regardless of this setting; only MCP execution errors
                 (`isError=True`) are governed by it.
+            protocol: Protocol revision to negotiate, for any server that does
+                not set `protocol` in its own connection config. See
+                [`ProtocolMode`][langchain_mcp_adapters.sessions.ProtocolMode].
 
         !!! example "Basic usage (starting a new session on each tool call)"
 
@@ -124,6 +129,7 @@ class MultiServerMCPClient:
         self.tool_interceptors = tool_interceptors or []
         self.tool_name_prefix = tool_name_prefix
         self.handle_tool_errors = handle_tool_errors
+        self.protocol = protocol
 
     @asynccontextmanager
     async def session(
@@ -160,7 +166,10 @@ class MultiServerMCPClient:
             self.connections[server_name], mcp_callbacks=mcp_callbacks
         ) as session:
             if auto_initialize:
-                await session.initialize()
+                await negotiate_protocol(
+                    session,
+                    self.connections[server_name].get("protocol", self.protocol),
+                )
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:
@@ -219,11 +228,11 @@ class MultiServerMCPClient:
         self,
         *,
         server_name: str | None = None,
-    ) -> dict[str, InitializeResult]:
+    ) -> dict[str, MCPServerInfo]:
         """Get server info from MCP server(s).
 
-        Returns the `InitializeResult` for each server, which includes
-        server instructions, capabilities, and implementation details.
+        Returns an `MCPServerInfo` for each server, normalizing the
+        handshake-era and 2026-07-28 shapes into one.
 
         Args:
             server_name: Optional name of the server to get info from.
@@ -237,8 +246,8 @@ class MultiServerMCPClient:
             subprocess each time).
 
         Returns:
-            A dict mapping server names to their `InitializeResult`. Empty if no
-                connections are configured.
+            A dict mapping server names to their negotiation result. Empty if
+                no connections are configured.
 
         Raises:
             ValueError: If `server_name` is provided but not found in the
@@ -279,7 +288,7 @@ class MultiServerMCPClient:
         # error below name every server that failed rather than only the first.
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        server_info: dict[str, InitializeResult] = {}
+        server_info: dict[str, MCPServerInfo] = {}
         errors: dict[str, BaseException] = {}
         for name, result in zip(names, results, strict=True):
             if isinstance(result, BaseException):
