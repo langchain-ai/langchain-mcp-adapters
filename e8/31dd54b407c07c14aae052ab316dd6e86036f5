@@ -1,0 +1,51 @@
+tests/servers/protocol_server.py
+  s_05e0d7ade73316::t_d97de49a62d090 1-25
+tests/test_protocol.py
+  s_05e0d7ade73316::t_47bc7ffadcde99 1-149
+tests/test_resources.py
+  s_05e0d7ade73316::t_42bd6d4d570e6f 122-124,181-183
+README.md
+  s_05e0d7ade73316::t_b6071a5b37a7a0 62,74-76,172,175,178,180-181,241-285
+  s_05e0d7ade73316::t_28e4ac59fdabbd 286
+tests/test_elicitation.py
+  s_05e0d7ade73316::t_42bd6d4d570e6f 89-91,138-140,172-174
+  s_05e0d7ade73316::t_51f9f70dba90e6 1,3-15,18,188-252
+langchain_mcp_adapters/sessions.py
+  s_05e0d7ade73316::t_5e121d8ce15fcd 18,60-89,158-159,195-196,228-229,449-450,453,458-460
+langchain_mcp_adapters/prompts.py
+  s_05e0d7ade73316::t_fff30fdf018e63 11-12,57-66,71-89
+  s_05e0d7ade73316::t_9e100cbcbb603a 13
+langchain_mcp_adapters/resources.py
+  s_05e0d7ade73316::t_9e100cbcbb603a 13-18
+  s_05e0d7ade73316::t_fff30fdf018e63 11-12,57-65,119-137
+tests/test_tools.py
+  s_05e0d7ade73316::t_42bd6d4d570e6f 444-449,487
+langchain_mcp_adapters/server_info.py
+  s_05e0d7ade73316::t_2a0080f288a62d 8-9,11,19-45,64,118-119,131,138
+  s_05e0d7ade73316::t_fff30fdf018e63 14-18,135-137
+tests/test_server_info.py
+  s_05e0d7ade73316::t_2a0080f288a62d 19,70,90,105,119-128
+langchain_mcp_adapters/tools.py
+  s_05e0d7ade73316::t_9e100cbcbb603a 28,34
+  s_05e0d7ade73316::t_8616267db4daba 27,38-39,54-58,330-368,520-522,524-525,540-541,642
+langchain_mcp_adapters/client.py
+  s_05e0d7ade73316::t_9e100cbcbb603a 27
+  s_05e0d7ade73316::t_fff30fdf018e63 33,64,86-88,132,169-172,249-250
+  s_05e0d7ade73316::t_2a0080f288a62d 23,231,234-235,291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "e831dd54b407c07c14aae052ab316dd6e86036f5",
+  "prompts": {},
+  "sessions": {
+    "s_05e0d7ade73316": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3772416-32fe-429b-99c6-598d2ba8cd32",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Sydney Runkle <sydneymarierunkle@gmail.com>"
+    }
+  }
+}
