@@ -30,7 +30,6 @@ from langchain_mcp_adapters.sessions import (
     StreamableHttpConnection,
     WebsocketConnection,
     create_session,
-    negotiate_protocol,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
 
@@ -163,13 +162,14 @@ class MultiServerMCPClient:
         )
 
         async with create_session(
-            self.connections[server_name], mcp_callbacks=mcp_callbacks
+            self.connections[server_name],
+            mcp_callbacks=mcp_callbacks,
+            protocol=(
+                self.connections[server_name].get("protocol", self.protocol)
+                if auto_initialize
+                else None
+            ),
         ) as session:
-            if auto_initialize:
-                await negotiate_protocol(
-                    session,
-                    self.connections[server_name].get("protocol", self.protocol),
-                )
             yield session
 
     async def get_tools(self, *, server_name: str | None = None) -> list[BaseTool]:

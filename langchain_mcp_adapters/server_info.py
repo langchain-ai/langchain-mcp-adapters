@@ -14,7 +14,6 @@ from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks, _MCPCal
 from langchain_mcp_adapters.sessions import (
     Connection,
     create_session,
-    negotiate_protocol,
 )
 
 
@@ -115,7 +114,9 @@ async def load_mcp_server_info(
     if session is not None:
         if session.server_capabilities is not None:
             raise ValueError(ALREADY_INITIALIZED_ERROR)
-        await negotiate_protocol(session, "legacy")
+        # A caller-supplied session: run the handshake directly rather than
+        # routing through `Client`, which owns its own session's lifecycle.
+        await session.initialize()
         return _read(session)
 
     if connection is None:
@@ -130,11 +131,12 @@ async def load_mcp_server_info(
 
     result: MCPServerInfo | None = None
     captured_exception: BaseException | None = None
-    async with create_session(connection, mcp_callbacks=mcp_callbacks) as new_session:
+    async with create_session(
+        connection,
+        mcp_callbacks=mcp_callbacks,
+        protocol=(connection or {}).get("protocol", "auto"),
+    ) as new_session:
         try:
-            await negotiate_protocol(
-                new_session, (connection or {}).get("protocol", "auto")
-            )
             result = _read(new_session)
         except Exception as e:  # noqa: BLE001
             # Capture the exception to re-raise outside the context manager, which

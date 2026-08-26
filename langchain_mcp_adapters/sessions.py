@@ -9,12 +9,12 @@ from __future__ import annotations
 import logging
 import os
 import re
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 import httpx2
-from mcp import ClientSession, StdioServerParameters
+from mcp import Client, ClientSession, StdioServerParameters
 from mcp.client._probe import negotiate_auto
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
@@ -86,6 +86,89 @@ async def negotiate_protocol(
     else:
         msg = f"Unsupported protocol {protocol!r}. Must be 'auto' or 'legacy'."
         raise ValueError(msg)
+
+
+_CLIENT_SESSION_FIELDS = frozenset(
+    {
+        "read_timeout_seconds",
+        "sampling_callback",
+        "sampling_capabilities",
+        "elicitation_callback",
+        "list_roots_callback",
+        "logging_callback",
+        "log_level",
+        "message_handler",
+        "client_info",
+    }
+)
+"""`ClientSession` kwargs that `mcp.Client` accepts under the same name.
+
+`session_kwargs` is public API that unpacks straight into `ClientSession`. Anything
+outside this set (`result_claims`, `notification_bindings`, `dispatcher`, and
+`extensions`, whose type differs on `Client`) has no `Client` equivalent, so those
+callers keep the raw-session path rather than getting an error.
+"""
+
+
+def _split_session_kwargs(
+    session_kwargs: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Partition `session_kwargs` into what `mcp.Client` accepts and what it doesn't.
+
+    Args:
+        session_kwargs: User-supplied `ClientSession` kwargs, if any.
+
+    Returns:
+        A `(accepted, unsupported)` pair.
+    """
+    remaining = dict(session_kwargs or {})
+    accepted = {
+        key: remaining.pop(key)
+        for key in list(remaining)
+        if key in _CLIENT_SESSION_FIELDS
+    }
+    return accepted, remaining
+
+
+@asynccontextmanager
+async def _session_from_transport(
+    transport: AbstractAsyncContextManager[Any],
+    *,
+    protocol: ProtocolMode | None,
+    session_kwargs: dict[str, Any] | None,
+) -> AsyncIterator[ClientSession]:
+    """Yield a `ClientSession` over `transport`, negotiating `protocol` if given.
+
+    Prefers the SDK's `Client`, which owns handshake policy for every protocol era,
+    so we don't reimplement it against a private helper.
+
+    Args:
+        transport: An async context manager yielding `(read, write)` streams — the
+            shape every `mcp.client` transport already returns.
+        protocol: Revision to negotiate. `None` yields an *un-negotiated* session,
+            which `get_server_info` and `MultiServerMCPClient.session(
+            auto_initialize=False)` both depend on.
+        session_kwargs: Additional keyword arguments for the underlying session.
+
+    Yields:
+        A `ClientSession`, negotiated unless `protocol` is `None`.
+    """
+    client_kwargs, unsupported = _split_session_kwargs(session_kwargs)
+
+    if protocol is None or unsupported:
+        # `Client` always negotiates on entry and takes a fixed field set, so it
+        # can serve neither an un-negotiated session nor exotic session kwargs.
+        async with (
+            transport as (read, write),
+            ClientSession(read, write, **(session_kwargs or {})) as session,
+        ):
+            if protocol is not None:
+                await negotiate_protocol(session, protocol)
+            yield session
+        return
+
+    async with Client(transport, mode=protocol, **client_kwargs) as client:
+        yield client.session
 
 
 class McpHttpClientFactory(Protocol):
@@ -273,6 +356,7 @@ async def _create_stdio_session(
         "strict", "ignore", "replace"
     ] = DEFAULT_ENCODING_ERROR_HANDLER,
     session_kwargs: dict[str, Any] | None = None,
+    protocol: ProtocolMode | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using stdio.
 
@@ -293,9 +377,11 @@ async def _create_stdio_session(
         encoding: Character encoding.
         encoding_error_handler: How to handle encoding errors.
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
+        protocol: Protocol revision to negotiate. `None` yields an un-negotiated
+            session.
 
     Yields:
-        An initialized ClientSession.
+        A ClientSession, negotiated unless `protocol` is `None`.
     """
     resolved_env = (
         {k: _expand_env_vars(v) for k, v in env.items()} if env is not None else None
@@ -316,10 +402,11 @@ async def _create_stdio_session(
     )
 
     # Create and store the connection
-    async with (
-        stdio_client(server_params) as (read, write),
-        ClientSession(read, write, **(session_kwargs or {})) as session,
-    ):
+    async with _session_from_transport(
+        stdio_client(server_params),
+        protocol=protocol,
+        session_kwargs=session_kwargs,
+    ) as session:
         yield session
 
 
@@ -333,6 +420,7 @@ async def _create_sse_session(
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
     auth: httpx2.Auth | None = None,
+    protocol: ProtocolMode | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using SSE.
 
@@ -344,22 +432,22 @@ async def _create_sse_session(
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
         httpx_client_factory: Custom factory for httpx2.AsyncClient (optional).
         auth: Authentication for the HTTP client.
+        protocol: Protocol revision to negotiate. `None` yields an un-negotiated
+            session.
 
     Yields:
-        An initialized ClientSession.
+        A ClientSession, negotiated unless `protocol` is `None`.
     """
     # Create and store the connection
     kwargs = {}
     if httpx_client_factory is not None:
         kwargs["httpx_client_factory"] = httpx_client_factory
 
-    async with (
-        sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs) as (
-            read,
-            write,
-        ),
-        ClientSession(read, write, **(session_kwargs or {})) as session,
-    ):
+    async with _session_from_transport(
+        sse_client(url, headers, timeout, sse_read_timeout, auth=auth, **kwargs),
+        protocol=protocol,
+        session_kwargs=session_kwargs,
+    ) as session:
         yield session
 
 
@@ -374,6 +462,7 @@ async def _create_streamable_http_session(
     session_kwargs: dict[str, Any] | None = None,
     httpx_client_factory: McpHttpClientFactory | None = None,
     auth: httpx2.Auth | None = None,
+    protocol: ProtocolMode | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server using Streamable HTTP.
 
@@ -387,9 +476,11 @@ async def _create_streamable_http_session(
         session_kwargs: Additional keyword arguments to pass to the ClientSession.
         httpx_client_factory: Custom factory for httpx2.AsyncClient (optional).
         auth: Authentication for the HTTP client.
+        protocol: Protocol revision to negotiate. `None` yields an un-negotiated
+            session.
 
     Yields:
-        An initialized ClientSession.
+        A ClientSession, negotiated unless `protocol` is `None`.
     """
     # Create and store the connection
     client_factory = httpx_client_factory or create_mcp_http_client
@@ -409,32 +500,41 @@ async def _create_streamable_http_session(
 
     async with (
         client,
-        streamable_http_client(
-            url,
-            http_client=client,
-            terminate_on_close=terminate_on_close,
-        ) as (read, write),
-        ClientSession(read, write, **(session_kwargs or {})) as session,
+        _session_from_transport(
+            streamable_http_client(
+                url,
+                http_client=client,
+                terminate_on_close=terminate_on_close,
+            ),
+            protocol=protocol,
+            session_kwargs=session_kwargs,
+        ) as session,
     ):
         yield session
 
 
 @asynccontextmanager
 async def create_session(
-    connection: Connection, *, mcp_callbacks: _MCPCallbacks | None = None
+    connection: Connection,
+    *,
+    mcp_callbacks: _MCPCallbacks | None = None,
+    protocol: ProtocolMode | None = None,
 ) -> AsyncIterator[ClientSession]:
     """Create a new session to an MCP server.
 
     Args:
         connection: Connection config to use to connect to the server
         mcp_callbacks: mcp sdk compatible callbacks to use for the ClientSession
+        protocol: Protocol revision to negotiate. `None` (the default) yields an
+            un-negotiated session, preserving this function's historical behavior
+            for callers that run the handshake themselves.
 
     Raises:
         ValueError: If transport is not recognized
         ValueError: If required parameters for the specified transport are missing
 
     Yields:
-        A ClientSession
+        A ClientSession, negotiated unless `protocol` is `None`
     """
     if "transport" not in connection:
         msg = (
@@ -448,6 +548,7 @@ async def create_session(
     transport = connection["transport"]
     # `protocol` is negotiation policy; it must not reach a transport kwarg.
     params = {k: v for k, v in connection.items() if k not in ("transport", "protocol")}
+    params["protocol"] = protocol
 
     if mcp_callbacks is not None:
         params["session_kwargs"] = dict(params.get("session_kwargs") or {})

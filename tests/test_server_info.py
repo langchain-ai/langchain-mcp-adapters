@@ -191,8 +191,9 @@ async def test_load_mcp_server_info_passes_server_name_to_callbacks(
     captured = {}
 
     @contextlib.asynccontextmanager
-    async def fake_create_session(connection, *, mcp_callbacks=None):
+    async def fake_create_session(connection, *, mcp_callbacks=None, protocol=None):
         captured["mcp_callbacks"] = mcp_callbacks
+        captured["protocol"] = protocol
         session = AsyncMock()
         session.initialize.return_value = _mock_initialize_result()
         yield session
@@ -208,6 +209,10 @@ async def test_load_mcp_server_info_passes_server_name_to_callbacks(
         callbacks=Callbacks(on_logging_message=logging_callback),
         server_name="my_server",
     )
+
+    # `load_mcp_server_info` delegates the handshake to `create_session` rather
+    # than negotiating itself, so the connection's policy has to reach it.
+    assert captured["protocol"] == "auto"
 
     mcp_callbacks = captured["mcp_callbacks"]
     assert mcp_callbacks.logging_callback is not None

@@ -54,7 +54,6 @@ from langchain_mcp_adapters.interceptors import (
 from langchain_mcp_adapters.sessions import (
     Connection,
     create_session,
-    negotiate_protocol,
 )
 
 try:
@@ -515,11 +514,10 @@ def convert_mcp_tool_to_langchain_tool(
                     raise ValueError(msg)
 
                 async with create_session(
-                    effective_connection, mcp_callbacks=mcp_callbacks
+                    effective_connection,
+                    mcp_callbacks=mcp_callbacks,
+                    protocol=effective_connection.get("protocol", "auto"),
                 ) as tool_session:
-                    await negotiate_protocol(
-                        tool_session, effective_connection.get("protocol", "auto")
-                    )
                     try:
                         call_tool_result = await _call_tool(
                             tool_session, tool_name, tool_args, mcp_callbacks
@@ -637,9 +635,10 @@ async def load_mcp_tools(
             msg = "Either session or connection must be provided"
             raise ValueError(msg)
         async with create_session(
-            connection, mcp_callbacks=mcp_callbacks
+            connection,
+            mcp_callbacks=mcp_callbacks,
+            protocol=connection.get("protocol", "auto"),
         ) as tool_session:
-            await negotiate_protocol(tool_session, connection.get("protocol", "auto"))
             tools = await _list_all_tools(tool_session)
     else:
         tools = await _list_all_tools(session)
