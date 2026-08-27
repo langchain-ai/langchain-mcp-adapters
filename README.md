@@ -127,7 +127,7 @@ client = MultiServerMCPClient(
         "weather": {
             # Make sure you start your weather server on port 8000
             "url": "http://localhost:8000/mcp",
-            "transport": "http",
+            "transport": "streamable_http",
         }
     }
 )
@@ -193,7 +193,7 @@ from langchain.agents import create_agent
 client = MultiServerMCPClient(
     {
         "math": {
-            "transport": "http",
+            "transport": "streamable_http",
             "url": "http://localhost:3000/mcp"
         },
     }
@@ -201,6 +201,43 @@ client = MultiServerMCPClient(
 tools = await client.get_tools()
 agent = create_agent("openai:gpt-4.1", tools)
 math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
+```
+
+### Multi-server (streamable_http + stdio) example
+
+Below is a concise example showing how to combine remote streamable HTTP MCP servers with local stdio servers using `MultiServerMCPClient`.
+
+Note: construct the client and call `get_tools()` (do not use `async with MultiServerMCPClient(...)`). Include runtime `headers` for authenticated endpoints when needed.
+
+```python
+import os
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain.agents import create_agent
+
+client = MultiServerMCPClient(
+    {
+        "apibase": {
+            "url": "https://apibase.pro/mcp",
+            "transport": "streamable_http",
+            "headers": {"Authorization": f"Bearer {os.environ['APIBASE_KEY']}"},
+        },
+        "math": {
+            "command": "python",
+            "args": ["./examples/math_server.py"],
+            "transport": "stdio",
+        },
+        "weather": {
+            "url": "http://localhost:8000/mcp",
+            "transport": "streamable_http",
+        },
+    }
+)
+tools = await client.get_tools()
+agent = create_agent("openai:gpt-4.1", tools)
+
+math_response = await agent.ainvoke({"messages": "what's (3 + 5) x 12?"})
+weather_response = await agent.ainvoke({"messages": "what is the weather in nyc?"})
+print(math_response, weather_response)
 ```
 
 ## Passing runtime headers
@@ -219,7 +256,7 @@ from langchain.agents import create_agent
 client = MultiServerMCPClient(
     {
         "weather": {
-            "transport": "http",
+            "transport": "streamable_http",
             "url": "http://localhost:8000/mcp",
             "headers": {
                 "Authorization": "Bearer YOUR_TOKEN",
@@ -275,9 +312,9 @@ client = MultiServerMCPClient(
             "transport": "stdio",
         },
         "weather": {
-            # make sure you start your weather server on port 8000
+            # Make sure you start your weather server on port 8000
             "url": "http://localhost:8000/mcp",
-            "transport": "http",
+            "transport": "streamable_http",
         }
     }
 )
@@ -320,7 +357,7 @@ async def make_graph():
             "weather": {
                 # make sure you start your weather server on port 8000
                 "url": "http://localhost:8000/mcp",
-                "transport": "http",
+                "transport": "streamable_http",
             },
             # ATTENTION: MCP's stdio transport was designed primarily to support applications running on a user's machine.
             # Before using stdio in a web server context, evaluate whether there's a more appropriate solution.
