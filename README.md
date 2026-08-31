@@ -256,6 +256,16 @@ tools = await load_mcp_tools(session, handle_tool_errors=False)
 >
 > Transport/session failures and content-conversion errors (e.g. unsupported audio content) always raise regardless of this setting; only MCP execution errors (`isError=True`) are governed by it.
 
+### LangChain `@tool` vs MCP `handle_tool_errors`
+
+`handle_tool_errors` is a **MCP adapter** setting on `MultiServerMCPClient` / `load_mcp_tools`. It is **not** a valid keyword for LangChain's `@tool` decorator — passing `@tool(handle_tool_error=...)` raises `TypeError: tool() got an unexpected keyword argument 'handle_tool_error'`.
+
+| Goal | Where to configure |
+|------|-------------------|
+| MCP tool execution errors become `ToolMessage(status="error")` for the agent | `MultiServerMCPClient(..., handle_tool_errors=True)` (default) |
+| MCP execution errors raise `ToolException` | `handle_tool_errors=False` |
+| Custom error text for a **plain LangChain** tool you wrote | Use `@tool` with a wrapper that catches exceptions, or LangGraph `ToolNode` error handling — not MCP adapter flags |
+
 ## Using with LangGraph StateGraph
 
 ```python
