@@ -4,6 +4,7 @@ This module provides functionality to convert MCP tools into LangChain-compatibl
 tools, handle tool execution, and manage tool conversion between the two formats.
 """
 
+import contextvars
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, TypedDict, get_args
 
@@ -67,6 +68,32 @@ else:
 MAX_ITERATIONS = 1000
 
 
+class MCPToolArtifact(TypedDict):
+    """Artifact returned from MCP tool calls.
+
+    This TypedDict wraps the structured content from MCP tool calls,
+    allowing for future extension if MCP adds more fields to tool results.
+
+    Attributes:
+        structured_content: The structured content returned by the MCP tool,
+            corresponding to the structuredContent field in CallToolResult.
+    """
+
+    structured_content: dict[str, Any]
+
+
+_mcp_error_artifact: contextvars.ContextVar[MCPToolArtifact | None] = (
+    contextvars.ContextVar("_mcp_error_artifact", default=None)
+)
+"""Artifact carried out of an MCP error result.
+
+Set by `_handle_mcp_tool_error` and read back in `_MCPStructuredTool.arun`,
+which is the only way to attach an artifact to the error `ToolMessage` that
+langchain-core builds (`BaseTool.arun` leaves `artifact=None` on its error
+branch). A `ContextVar` keeps concurrent tool calls isolated.
+"""
+
+
 def _summarize_tool_error(tool_content: list[ToolMessageContentBlock]) -> str:
     """Build a human-readable error message from converted error content blocks.
 
@@ -108,15 +135,25 @@ class _MCPToolExecutionError(ToolException):
     treat `tool_content` as read-only afterward — mutating it would leave the
     message out of sync with the content.
 
+    Also carries the `MCPToolArtifact` built from `structuredContent`, if the
+    result had any, so the structured payload survives the error path the same
+    way it does on success. It is exposed as `.artifact` on the raised exception
+    when `handle_tool_errors=False`.
+
     Deliberately narrow: only `isError=True` results use this type.
     Transport/session failures and content-conversion errors are *not*
     `ToolException` subclasses, so they bypass `handle_tool_error` and
     propagate (see `_handle_mcp_tool_error`).
     """
 
-    def __init__(self, tool_content: list[ToolMessageContentBlock]) -> None:
+    def __init__(
+        self,
+        tool_content: list[ToolMessageContentBlock],
+        artifact: MCPToolArtifact | None = None,
+    ) -> None:
         super().__init__(_summarize_tool_error(tool_content))
         self.tool_content = tool_content
+        self.artifact = artifact
 
 
 def _handle_mcp_tool_error(
@@ -130,6 +167,10 @@ def _handle_mcp_tool_error(
     failures (`NotImplementedError`, `ValueError`) and transport/session
     failures are not `ToolException` subclasses and propagate without ever
     reaching here.
+
+    Side effect: stores the error's artifact in `_mcp_error_artifact` so
+    `_MCPStructuredTool.arun` can attach it to the `ToolMessage` the framework
+    builds, which is otherwise fixed at `artifact=None` on the error branch.
 
     Args:
         error: The `ToolException` raised during tool execution.
@@ -152,24 +193,11 @@ def _handle_mcp_tool_error(
             rather than be swallowed.
     """
     if isinstance(error, _MCPToolExecutionError):
+        _mcp_error_artifact.set(error.artifact)
         if error.tool_content:
             return error.tool_content
         return [create_text_block(text=str(error))]
     raise error
-
-
-class MCPToolArtifact(TypedDict):
-    """Artifact returned from MCP tool calls.
-
-    This TypedDict wraps the structured content from MCP tool calls,
-    allowing for future extension if MCP adds more fields to tool results.
-
-    Attributes:
-        structured_content: The structured content returned by the MCP tool,
-            corresponding to the structuredContent field in CallToolResult.
-    """
-
-    structured_content: dict[str, Any]
 
 
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
@@ -270,15 +298,17 @@ def _convert_call_tool_result(
         for content in call_tool_result.content
     ]
 
-    if call_tool_result.isError:
-        raise _MCPToolExecutionError(tool_content)
-
-    # Extract structured content and wrap in MCPToolArtifact
+    # Extract structured content and wrap in MCPToolArtifact. Built before the
+    # `isError` branch so error results keep it too: `structuredContent` is a
+    # field of `CallToolResult` in the MCP spec and is not gated on `isError`.
     artifact: MCPToolArtifact | None = None
     if call_tool_result.structuredContent is not None:
         artifact = MCPToolArtifact(
             structured_content=call_tool_result.structuredContent
         )
+
+    if call_tool_result.isError:
+        raise _MCPToolExecutionError(tool_content, artifact)
 
     return tool_content, artifact
 
@@ -352,6 +382,51 @@ async def _list_all_tools(session: ClientSession) -> list[MCPTool]:
 
         current_cursor = list_tools_page_result.nextCursor
     return all_tools
+
+
+class _MCPStructuredTool(StructuredTool):
+    """`StructuredTool` that reattaches the artifact from an MCP error result.
+
+    `BaseTool.arun` only assigns `artifact` from the `(content, artifact)` tuple
+    on its success branch; the `except ToolException` branch calls
+    `handle_tool_error` for content only and builds
+    `ToolMessage(status="error", artifact=None)`. There is no hook to attach an
+    artifact from the callback, and returning a fully-built `ToolMessage` from it
+    is not viable because the framework does not overwrite `tool_call_id` on a
+    message it did not build.
+
+    So the framework is left to build the error `ToolMessage` exactly as before
+    (preserving `tool_call_id`, `status`, content and tracing) and the artifact
+    is carried out of `_handle_mcp_tool_error` through `_mcp_error_artifact` and
+    set here afterwards.
+
+    MCP tools are async-only (`convert_mcp_tool_to_langchain_tool` passes a
+    `coroutine` and no `func`), so only `arun` needs overriding.
+    """
+
+    async def arun(self, *args: Any, **kwargs: Any) -> Any:
+        """Run the tool, restoring the artifact on an error `ToolMessage`.
+
+        Args:
+            *args: Positional arguments forwarded to `StructuredTool.arun`.
+            **kwargs: Keyword arguments forwarded to `StructuredTool.arun`.
+
+        Returns:
+            The framework's tool output, with `artifact` populated from the MCP
+                result when the output is a `ToolMessage` with `status="error"`.
+        """
+        token = _mcp_error_artifact.set(None)
+        try:
+            output = await super().arun(*args, **kwargs)
+            if (
+                isinstance(output, ToolMessage)
+                and output.status == "error"
+                and output.artifact is None
+            ):
+                output.artifact = _mcp_error_artifact.get()
+        finally:
+            _mcp_error_artifact.reset(token)
+        return output
 
 
 def convert_mcp_tool_to_langchain_tool(
@@ -525,7 +600,7 @@ def convert_mcp_tool_to_langchain_tool(
     # current content-block recognition and is locked by
     # `test_mcp_tool_error_preserves_non_text_content`.
     error_handler = _handle_mcp_tool_error if handle_tool_errors else False
-    return StructuredTool(
+    return _MCPStructuredTool(
         name=lc_tool_name,
         description=tool.description or "",
         args_schema=tool.inputSchema,

@@ -1,3 +1,4 @@
+import asyncio
 import typing
 from collections.abc import Callable, Sequence
 from typing import Annotated, Any
@@ -129,6 +130,35 @@ def test_convert_with_error():
         _convert_call_tool_result(result)
 
     assert str(exc_info.value) == "error message"
+
+
+def test_convert_with_error_and_structured_content():
+    """An isError result carries the artifact on the raised exception."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="error message")],
+        structuredContent={"code": "RATE_LIMITED", "retry_after": 30},
+        isError=True,
+    )
+
+    with pytest.raises(ToolException) as exc_info:
+        _convert_call_tool_result(result)
+
+    assert str(exc_info.value) == "error message"
+    assert exc_info.value.artifact == MCPToolArtifact(
+        structured_content={"code": "RATE_LIMITED", "retry_after": 30}
+    )
+
+
+def test_convert_with_error_without_structured_content():
+    """An isError result with no structuredContent carries no artifact."""
+    result = CallToolResult(
+        content=[TextContent(type="text", text="error message")], isError=True
+    )
+
+    with pytest.raises(ToolException) as exc_info:
+        _convert_call_tool_result(result)
+
+    assert exc_info.value.artifact is None
 
 
 def test_convert_with_structured_content():
@@ -612,6 +642,165 @@ async def test_mcp_tool_success_returns_artifact_through_ainvoke():
     assert isinstance(result, ToolMessage)
     assert result.status == "success"
     assert result.artifact == {"structured_content": {"result": "ok"}}
+
+
+async def test_mcp_tool_error_returns_artifact_through_ainvoke():
+    """Structured content reaches ToolMessage.artifact on the error path too.
+
+    `structuredContent` is a field of `CallToolResult` and is not gated on
+    `isError`, so a structured error payload (error code, `retry_after`,
+    field-level validation output) must survive the same way it does on success.
+    """
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[],
+        structuredContent={"code": "RATE_LIMITED", "retry_after": 30},
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(_TOOL_CALL)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.tool_call_id == "1"
+    assert result.artifact == {
+        "structured_content": {"code": "RATE_LIMITED", "retry_after": 30}
+    }
+    # Content falls back to the placeholder, but the payload is no longer lost.
+    assert result.content_blocks == [
+        {"type": "text", "text": _EMPTY_ERROR_MESSAGE, "id": IsLangChainID}
+    ]
+
+
+async def test_mcp_tool_error_returns_artifact_alongside_text_content():
+    """An error with both text and structured content keeps both."""
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="rate limited")],
+        structuredContent={"code": "RATE_LIMITED", "retry_after": 30},
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(_TOOL_CALL)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.content_blocks == [
+        {"type": "text", "text": "rate limited", "id": IsLangChainID}
+    ]
+    assert result.artifact == {
+        "structured_content": {"code": "RATE_LIMITED", "retry_after": 30}
+    }
+
+
+async def test_mcp_tool_error_without_structured_content_has_no_artifact():
+    """A plain error still yields artifact=None (no placeholder artifact)."""
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="project not found")],
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    result = await lc_tool.ainvoke(_TOOL_CALL)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.artifact is None
+
+
+async def test_mcp_tool_structured_content_parity_success_and_error():
+    """The same structured payload survives both the success and error paths."""
+    payload = {"code": "RATE_LIMITED", "retry_after": 30}
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+    results = {}
+
+    for is_error in (False, True):
+        session = AsyncMock()
+        session.call_tool.return_value = CallToolResult(
+            content=[TextContent(type="text", text="text")],
+            structuredContent=payload,
+            isError=is_error,
+        )
+        lc_tool = convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+        results[is_error] = await lc_tool.ainvoke(_TOOL_CALL)
+
+    assert results[False].status == "success"
+    assert results[True].status == "error"
+    assert results[False].artifact == results[True].artifact
+    assert results[True].artifact == {"structured_content": payload}
+
+
+async def test_mcp_tool_error_artifact_is_isolated_across_concurrent_calls():
+    """Concurrent failing calls do not read each other's artifact.
+
+    The artifact is carried out of the error handler through a `ContextVar`
+    precisely so parallel tool calls stay isolated; a module-level variable would
+    let one call's payload land on another call's `ToolMessage`.
+    """
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    def make_tool(code: str, delay: float) -> BaseTool:
+        async def call_tool(*args: Any, **kwargs: Any) -> CallToolResult:
+            await asyncio.sleep(delay)
+            return CallToolResult(
+                content=[TextContent(type="text", text=code)],
+                structuredContent={"code": code},
+                isError=True,
+            )
+
+        session = AsyncMock()
+        session.call_tool.side_effect = call_tool
+        return convert_mcp_tool_to_langchain_tool(session, mcp_tool)
+
+    slow, fast = make_tool("SLOW", 0.05), make_tool("FAST", 0.0)
+
+    slow_result, fast_result = await asyncio.gather(
+        slow.ainvoke(_TOOL_CALL), fast.ainvoke(_TOOL_CALL)
+    )
+
+    assert slow_result.artifact == {"structured_content": {"code": "SLOW"}}
+    assert fast_result.artifact == {"structured_content": {"code": "FAST"}}
+
+
+async def test_mcp_tool_error_exposes_artifact_with_opt_out_flag():
+    """handle_tool_errors=False raises, and the exception carries the artifact."""
+    session = AsyncMock()
+    session.call_tool.return_value = CallToolResult(
+        content=[TextContent(type="text", text="rate limited")],
+        structuredContent={"code": "RATE_LIMITED"},
+        isError=True,
+    )
+    mcp_tool = MCPTool(
+        name="lookup", description="lookup", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    lc_tool = convert_mcp_tool_to_langchain_tool(
+        session, mcp_tool, handle_tool_errors=False
+    )
+
+    with pytest.raises(ToolException, match="rate limited") as exc_info:
+        await lc_tool.ainvoke(_TOOL_CALL)
+
+    assert exc_info.value.artifact == {"structured_content": {"code": "RATE_LIMITED"}}
 
 
 async def test_mcp_tool_error_raises_with_opt_out_flag():
