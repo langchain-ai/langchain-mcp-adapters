@@ -1,5 +1,14 @@
 # LangChain MCP Adapters
 
+> [!IMPORTANT]
+> ## This repository is no longer actively maintained
+>
+> MCP support has moved into LangChain under the [`langchain.mcp`](https://github.com/langchain-ai/langchain/tree/master/libs/langchain_v1/langchain/mcp) namespace. Please migrate to `langchain[mcp]` for ongoing development, fixes, and support.
+>
+> - [Read the announcement](https://www.langchain.com/blog/mcp-in-langchain-stateless-protocol-elicitation-and-more)
+> - [Follow the migration guide](https://docs.langchain.com/oss/python/migrate/langchain-mcp-adapters)
+> - [View the new source code](https://github.com/langchain-ai/langchain/tree/master/libs/langchain_v1/langchain/mcp)
+
 This library provides a lightweight wrapper that makes [Anthropic Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) tools compatible with [LangChain](https://github.com/langchain-ai/langchain) and [LangGraph](https://github.com/langchain-ai/langgraph).
 
 ![MCP](static/img/mcp.png)
