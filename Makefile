@@ -10,8 +10,10 @@ all: help
 # Define a variable for the test file path.
 TEST_FILE ?= tests/
 
+# --allow-hosts is required on Windows: ProactorEventLoop uses an AF_INET
+# socketpair() to 127.0.0.1, which --allow-unix-socket does not permit.
 test:
-	uv run pytest --disable-socket --allow-unix-socket $(TEST_FILE) --timeout 10
+	uv run pytest --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1 $(TEST_FILE) --timeout 10
 
 test_watch:
 	uv run ptw . -- $(TEST_FILE)
