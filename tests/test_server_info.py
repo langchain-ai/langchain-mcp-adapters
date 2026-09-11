@@ -17,7 +17,7 @@ from langchain_mcp_adapters import server_info as server_info_module
 from langchain_mcp_adapters.callbacks import CallbackContext, Callbacks
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.server_info import load_mcp_server_info
-from tests.utils import run_streamable_http
+from tests.utils import PYTHON_EXECUTABLE, run_streamable_http
 
 # A port nothing listens on, used to exercise unreachable-server handling.
 CLOSED_PORT = 8189
@@ -83,7 +83,7 @@ async def test_load_mcp_server_info_over_stdio() -> None:
     result = await load_mcp_server_info(
         None,
         connection={
-            "command": "python3",
+            "command": PYTHON_EXECUTABLE,
             "args": [math_server_path],
             "transport": "stdio",
         },

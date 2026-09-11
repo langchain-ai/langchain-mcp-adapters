@@ -13,7 +13,7 @@ from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import _create_stdio_session
 from langchain_mcp_adapters.tools import load_mcp_tools
-from tests.utils import IsLangChainID
+from tests.utils import PYTHON_EXECUTABLE, IsLangChainID
 
 
 @pytest.fixture
@@ -131,12 +131,12 @@ async def test_multi_server_mcp_client(
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [math_server_path],
                 "transport": "stdio",
             },
             "weather": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [weather_server_path],
                 "transport": "stdio",
             },
@@ -213,7 +213,7 @@ async def test_multi_server_connect_methods(
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [math_server_path],
                 "transport": "stdio",
             },
@@ -256,7 +256,7 @@ async def test_get_prompt():
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [math_server_path],
                 "transport": "stdio",
             }
@@ -285,12 +285,12 @@ async def test_get_resources_from_all_servers():
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [math_server_path],
                 "transport": "stdio",
             },
             "weather": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [weather_server_path],
                 "transport": "stdio",
             },
@@ -328,12 +328,12 @@ async def test_get_resources_from_specific_server():
     client = MultiServerMCPClient(
         {
             "math": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [math_server_path],
                 "transport": "stdio",
             },
             "weather": {
-                "command": "python3",
+                "command": PYTHON_EXECUTABLE,
                 "args": [weather_server_path],
                 "transport": "stdio",
             },

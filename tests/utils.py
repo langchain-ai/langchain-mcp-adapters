@@ -1,6 +1,7 @@
 import contextlib
 import multiprocessing
 import socket
+import sys
 import time
 from collections.abc import Generator
 
@@ -14,6 +15,10 @@ from tests.servers.time_server import mcp as time_mcp
 
 # Helper for matching auto-generated LangChain content block IDs
 IsLangChainID = IsStr(regex=r"lc_.*")
+
+# Windows often has `python` but not `python3` on PATH. Spawn stdio MCP
+# servers with the interpreter that is running the tests.
+PYTHON_EXECUTABLE = sys.executable
 
 
 def make_server_app() -> Starlette:

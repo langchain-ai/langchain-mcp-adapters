@@ -43,7 +43,9 @@ minversion = "8.0"
 # -q: Enable quiet mode for less cluttered output
 # -v: Enable verbose output to display detailed test names and statuses
 # --durations=5: Show the 10 slowest tests after the run (useful for performance tuning)
-addopts = "-ra -q -v --durations=5"
+# --allow-hosts keeps Windows asyncio's AF_INET self-pipe working when
+# --disable-socket --allow-unix-socket is passed (see Makefile).
+addopts = "-ra -q -v --durations=5 --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
