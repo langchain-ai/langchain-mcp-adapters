@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import Generator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,11 +34,15 @@ def mock_stdio_session() -> Generator[dict, None, None]:
     mock_session.__aenter__ = AsyncMock(return_value=MagicMock())
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
+    def fake_client_session(*_args: object, **_kwargs: object):
+        captured["session_kwargs"] = _kwargs
+        return mock_session
+
     with (
         patch("langchain_mcp_adapters.sessions.stdio_client", fake_stdio_client),
         patch(
             "langchain_mcp_adapters.sessions.ClientSession",
-            return_value=mock_session,
+            side_effect=fake_client_session,
         ),
     ):
         yield captured
@@ -115,6 +120,40 @@ async def test_stdio_session_warns_on_undefined_env_var(
         mock_stdio_session["server_params"].env["SECRET"]
         == "${TOTALLY_UNDEFINED_VAR_XYZ}"  # noqa: S105
     )
+
+
+async def test_stdio_session_defaults_read_timeout(mock_stdio_session):
+    """Test that a default read_timeout_seconds prevents infinite hangs."""
+    async with _create_stdio_session(command="npx", args=[]):
+        pass
+
+    assert mock_stdio_session["session_kwargs"]["read_timeout_seconds"] == timedelta(
+        seconds=60
+    )
+
+
+async def test_stdio_session_respects_user_read_timeout(mock_stdio_session):
+    """Test that a caller-supplied read_timeout_seconds is never overridden."""
+    custom_timeout = timedelta(seconds=5)
+
+    async with _create_stdio_session(
+        command="npx", args=[], session_kwargs={"read_timeout_seconds": custom_timeout}
+    ):
+        pass
+
+    assert (
+        mock_stdio_session["session_kwargs"]["read_timeout_seconds"] == custom_timeout
+    )
+
+
+async def test_stdio_session_allows_explicit_none_read_timeout(mock_stdio_session):
+    """Test that an explicit None opt-out is preserved."""
+    async with _create_stdio_session(
+        command="npx", args=[], session_kwargs={"read_timeout_seconds": None}
+    ):
+        pass
+
+    assert mock_stdio_session["session_kwargs"]["read_timeout_seconds"] is None
 
 
 async def test_multi_server_mcp_client(
