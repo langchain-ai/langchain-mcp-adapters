@@ -117,4 +117,3 @@ check_untyped_defs = true
     "C901", # Function is too complex
 
 ]
-
