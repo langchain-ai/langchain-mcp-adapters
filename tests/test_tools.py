@@ -1,5 +1,7 @@
+import asyncio
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -645,6 +647,90 @@ async def test_transport_failure_still_raises():
 
     with pytest.raises(httpx.ConnectError):
         await lc_tool.ainvoke(_TOOL_CALL)
+
+
+@asynccontextmanager
+async def _swallowing_create_session(
+    call_tool_impl: Callable[..., Any],
+) -> AsyncIterator[AsyncMock]:
+    """Simulate MCP SDK create_session that suppresses exceptions on exit."""
+    mock_session = AsyncMock()
+    mock_session.initialize = AsyncMock()
+    mock_session.call_tool = call_tool_impl
+    with suppress(BaseException):
+        yield mock_session
+
+
+async def test_call_tool_cancelled_error_not_unbound_local_error():
+    """Regression for #314: CancelledError must not cause UnboundLocalError."""
+    connection = {
+        "url": "http://localhost:8000/mcp",
+        "transport": "streamable_http",
+    }
+    mcp_tool = MCPTool(
+        name="hello", description="hello", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    async def raise_cancelled(*_args: object, **_kwargs: object) -> None:
+        raise asyncio.CancelledError
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session",
+        lambda *args, **kwargs: _swallowing_create_session(raise_cancelled),
+    ):
+        lc_tool = convert_mcp_tool_to_langchain_tool(
+            None, mcp_tool, connection=connection
+        )
+        with pytest.raises(asyncio.CancelledError):
+            await lc_tool.ainvoke(_TOOL_CALL)
+
+
+async def test_call_tool_swallowed_exception_is_reraised():
+    """Exceptions suppressed by the MCP SDK context manager are re-raised."""
+    connection = {
+        "url": "http://localhost:8000/mcp",
+        "transport": "streamable_http",
+    }
+    mcp_tool = MCPTool(
+        name="hello", description="hello", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    async def raise_connect_error(*_args: object, **_kwargs: object) -> None:
+        raise httpx.ConnectError("connection closed")
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session",
+        lambda *args, **kwargs: _swallowing_create_session(raise_connect_error),
+    ):
+        lc_tool = convert_mcp_tool_to_langchain_tool(
+            None, mcp_tool, connection=connection
+        )
+        with pytest.raises(httpx.ConnectError, match="connection closed"):
+            await lc_tool.ainvoke(_TOOL_CALL)
+
+
+async def test_call_tool_missing_result_raises_runtime_error():
+    """If MCP SDK returns no result, surface a clear RuntimeError."""
+    connection = {
+        "url": "http://localhost:8000/mcp",
+        "transport": "streamable_http",
+    }
+    mcp_tool = MCPTool(
+        name="hello", description="hello", inputSchema=_TOOL_INPUT_SCHEMA
+    )
+
+    async def return_none(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    with patch(
+        "langchain_mcp_adapters.tools.create_session",
+        lambda *args, **kwargs: _swallowing_create_session(return_none),
+    ):
+        lc_tool = convert_mcp_tool_to_langchain_tool(
+            None, mcp_tool, connection=connection
+        )
+        with pytest.raises(RuntimeError, match="no result returned"):
+            await lc_tool.ainvoke(_TOOL_CALL)
 
 
 async def test_adapter_bug_still_raises():
