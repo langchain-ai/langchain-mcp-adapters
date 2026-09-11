@@ -182,7 +182,10 @@ def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
             ResourceLink, or EmbeddedResource).
 
     Returns:
-        LangChain content block dict.
+        LangChain content block dict. For `ResourceLink`, the `name`, `title`,
+            `description`, and `size` fields (when present) are preserved under
+            the block's `extras` key. For `EmbeddedResource`, the resource `uri`
+            is preserved the same way.
 
     Raises:
         NotImplementedError: If AudioContent is passed.
@@ -204,18 +207,35 @@ def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
     if isinstance(content, ResourceLink):
         mime_type = content.mimeType or None
         if mime_type and mime_type.startswith("image/"):
-            return create_image_block(url=str(content.uri), mime_type=mime_type)
-        return create_file_block(url=str(content.uri), mime_type=mime_type)
+            return create_image_block(
+                url=str(content.uri),
+                mime_type=mime_type,
+                name=content.name,
+                title=content.title,
+                description=content.description,
+                size=content.size,
+            )
+        return create_file_block(
+            url=str(content.uri),
+            mime_type=mime_type,
+            name=content.name,
+            title=content.title,
+            description=content.description,
+            size=content.size,
+        )
 
     if isinstance(content, EmbeddedResource):
         resource = content.resource
+        uri = str(resource.uri)
         if isinstance(resource, TextResourceContents):
-            return create_text_block(text=resource.text)
+            return create_text_block(text=resource.text, uri=uri)
         if isinstance(resource, BlobResourceContents):
             mime_type = resource.mimeType or None
             if mime_type and mime_type.startswith("image/"):
-                return create_image_block(base64=resource.blob, mime_type=mime_type)
-            return create_file_block(base64=resource.blob, mime_type=mime_type)
+                return create_image_block(
+                    base64=resource.blob, mime_type=mime_type, uri=uri
+                )
+            return create_file_block(base64=resource.blob, mime_type=mime_type, uri=uri)
         msg = f"Unknown embedded resource type: {type(resource).__name__}"
         raise ValueError(msg)
 
