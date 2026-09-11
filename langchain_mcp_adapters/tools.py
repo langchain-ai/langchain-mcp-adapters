@@ -66,6 +66,67 @@ else:
 
 MAX_ITERATIONS = 1000
 
+_LANGCHAIN_RESERVED_TOOL_ARG_NAMES = frozenset({"config", "run_manager", "callbacks"})
+_RESERVED_ARG_RENAME_SUFFIX = "__mcp_arg"
+
+
+def _adapt_mcp_input_schema(
+    input_schema: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Rename MCP args that collide with LangChain tool invocation kwargs.
+
+    Returns:
+        A tuple of the adapted JSON schema and a mapping from LangChain-visible
+        argument names back to the original MCP argument names.
+    """
+    if input_schema.get("type") != "object":
+        return input_schema, {}
+
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return input_schema, {}
+
+    renamed_properties: dict[str, Any] = {}
+    langchain_to_mcp: dict[str, str] = {}
+    renamed_any = False
+
+    for mcp_name, property_schema in properties.items():
+        if mcp_name in _LANGCHAIN_RESERVED_TOOL_ARG_NAMES:
+            langchain_name = f"{mcp_name}{_RESERVED_ARG_RENAME_SUFFIX}"
+            renamed_any = True
+        else:
+            langchain_name = mcp_name
+        renamed_properties[langchain_name] = property_schema
+        langchain_to_mcp[langchain_name] = mcp_name
+
+    if not renamed_any:
+        return input_schema, {}
+
+    adapted_schema = dict(input_schema)
+    adapted_schema["properties"] = renamed_properties
+
+    required = input_schema.get("required")
+    if isinstance(required, list):
+        adapted_schema["required"] = [
+            (
+                f"{name}{_RESERVED_ARG_RENAME_SUFFIX}"
+                if name in _LANGCHAIN_RESERVED_TOOL_ARG_NAMES
+                else name
+            )
+            for name in required
+        ]
+
+    return adapted_schema, langchain_to_mcp
+
+
+def _map_langchain_tool_args_to_mcp(
+    arguments: dict[str, Any], langchain_to_mcp: dict[str, str]
+) -> dict[str, Any]:
+    """Map LangChain tool kwargs back to the original MCP argument names."""
+    if not langchain_to_mcp:
+        return arguments
+    return {langchain_to_mcp[key]: value for key, value in arguments.items()}
+
 
 def _summarize_tool_error(tool_content: list[ToolMessageContentBlock]) -> str:
     """Build a human-readable error message from converted error content blocks.
@@ -396,6 +457,8 @@ def convert_mcp_tool_to_langchain_tool(
         msg = "Either a session or a connection config must be provided"
         raise ValueError(msg)
 
+    adapted_input_schema, langchain_to_mcp = _adapt_mcp_input_schema(tool.inputSchema)
+
     async def call_tool(
         runtime: Annotated[object | None, InjectedToolArg()] = None,
         **arguments: dict[str, Any],
@@ -498,7 +561,7 @@ def convert_mcp_tool_to_langchain_tool(
         handler = _build_interceptor_chain(execute_tool, tool_interceptors)
         request = MCPToolCallRequest(
             name=tool.name,
-            args=arguments,
+            args=_map_langchain_tool_args_to_mcp(arguments, langchain_to_mcp),
             server_name=server_name or "unknown",
             headers=None,
             runtime=runtime,
@@ -528,7 +591,7 @@ def convert_mcp_tool_to_langchain_tool(
     return StructuredTool(
         name=lc_tool_name,
         description=tool.description or "",
-        args_schema=tool.inputSchema,
+        args_schema=adapted_input_schema,
         coroutine=call_tool,
         response_format="content_and_artifact",
         metadata=metadata,
