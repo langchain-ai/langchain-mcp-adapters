@@ -6,6 +6,7 @@ from them.
 """
 
 import asyncio
+import warnings
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import TracebackType
@@ -195,9 +196,14 @@ class MultiServerMCPClient:
                 handle_tool_errors=self.handle_tool_errors,
             )
 
+        # Snapshot the (name, connection) pairs once, before awaiting, so the
+        # names used to pair results and attribute collisions stay aligned with
+        # the gathered tool lists even if ``self.connections`` is mutated during
+        # the await (the constructor stores the caller's dict by reference).
+        connection_items = list(self.connections.items())
         all_tools: list[BaseTool] = []
         load_mcp_tool_tasks = []
-        for name, connection in self.connections.items():
+        for name, connection in connection_items:
             load_mcp_tool_task = asyncio.create_task(
                 load_mcp_tools(
                     None,
@@ -211,7 +217,27 @@ class MultiServerMCPClient:
             )
             load_mcp_tool_tasks.append(load_mcp_tool_task)
         tools_list = await asyncio.gather(*load_mcp_tool_tasks)
-        for tools in tools_list:
+        # Surface cross-server tool-name collisions instead of merging silently.
+        # When ``tool_name_prefix`` is False, two servers can expose the same tool
+        # name; downstream tool resolution is keyed by name (the last one wins),
+        # so a later server can shadow an earlier server's tool with no signal to
+        # the caller. Warn so the collision is at least visible.
+        first_seen: dict[str, str] = {}
+        for (server, _connection), tools in zip(
+            connection_items, tools_list, strict=True
+        ):
+            for tool in tools:
+                owner = first_seen.setdefault(tool.name, server)
+                if owner != server:
+                    warnings.warn(
+                        f"Tool name collision: '{tool.name}' is exposed by both "
+                        f"server '{owner}' and server '{server}'. Tool calls are "
+                        f"resolved by name (the last one wins), so one tool will "
+                        f"silently shadow the other. Pass tool_name_prefix=True to "
+                        f"MultiServerMCPClient to namespace tools by server, or give "
+                        f"the tools distinct names.",
+                        stacklevel=2,
+                    )
             all_tools.extend(tools)
         return all_tools
 
