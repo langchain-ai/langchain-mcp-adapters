@@ -172,6 +172,20 @@ class MCPToolArtifact(TypedDict):
     structured_content: dict[str, Any]
 
 
+class MCPStructuredTool(StructuredTool):
+    """StructuredTool variant that preserves MCP args named like LangChain internals."""
+
+    def _run(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+        msg = "StructuredTool does not support sync invocation."
+        raise NotImplementedError(msg)
+
+    async def _arun(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+        if self.coroutine:
+            return await self.coroutine(*args, **kwargs)
+
+        return await super()._arun(*args, **kwargs)
+
+
 def _convert_mcp_content_to_lc_block(  # noqa: PLR0911
     content: ContentBlock,
 ) -> ToolMessageContentBlock:
@@ -525,7 +539,7 @@ def convert_mcp_tool_to_langchain_tool(
     # current content-block recognition and is locked by
     # `test_mcp_tool_error_preserves_non_text_content`.
     error_handler = _handle_mcp_tool_error if handle_tool_errors else False
-    return StructuredTool(
+    return MCPStructuredTool(
         name=lc_tool_name,
         description=tool.description or "",
         args_schema=tool.inputSchema,
