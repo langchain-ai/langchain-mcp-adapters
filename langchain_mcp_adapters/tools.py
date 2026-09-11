@@ -5,7 +5,7 @@ tools, handle tool execution, and manage tool conversion between the two formats
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, TypedDict, get_args
+from typing import Annotated, Any, TypedDict, cast, get_args
 
 from langchain_core.messages import ToolMessage
 from langchain_core.messages.content import (
@@ -65,6 +65,15 @@ else:
     ConvertedToolResult = list[ToolMessageContentBlock] | ToolMessage
 
 MAX_ITERATIONS = 1000
+
+
+def _strip_content_block_id(
+    block: ToolMessageContentBlock,
+) -> ToolMessageContentBlock:
+    """Remove LangChain's generated block id before returning MCP tool output."""
+    block_without_id = dict(block)
+    block_without_id.pop("id", None)
+    return cast("ToolMessageContentBlock", block_without_id)
 
 
 def _summarize_tool_error(tool_content: list[ToolMessageContentBlock]) -> str:
@@ -154,7 +163,7 @@ def _handle_mcp_tool_error(
     if isinstance(error, _MCPToolExecutionError):
         if error.tool_content:
             return error.tool_content
-        return [create_text_block(text=str(error))]
+        return [_strip_content_block_id(create_text_block(text=str(error)))]
     raise error
 
 
@@ -266,7 +275,7 @@ def _convert_call_tool_result(
 
     # Convert all MCP content blocks to LangChain content blocks
     tool_content: list[ToolMessageContentBlock] = [
-        _convert_mcp_content_to_lc_block(content)
+        _strip_content_block_id(_convert_mcp_content_to_lc_block(content))
         for content in call_tool_result.content
     ]
 
