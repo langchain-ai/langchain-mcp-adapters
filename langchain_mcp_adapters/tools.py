@@ -582,6 +582,7 @@ async def load_mcp_tools(
         else _MCPCallbacks()
     )
 
+    tools = []
     if session is None:
         # If a session is not provided, we will create one on the fly
         if connection is None:
